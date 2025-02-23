@@ -62,3 +62,31 @@ window.onload = function() {
     loadCSV('products.csv'); // Ensure the CSV file is in the same folder as your HTML
 };
 
+// Search function (can be adapted as needed)
+function searchProduct() {
+  let query = document.getElementById('searchInput').value.toLowerCase();
+  let products = document.querySelectorAll('.product');
+  products.forEach(function(product) {
+    let productName = product.querySelector('.product-title').textContent.toLowerCase();
+    if (productName.includes(query)) {
+      product.style.display = '';
+    } else {
+      product.style.display = 'none';
+    }
+  });
+}
+
+// Toggle product descriptions with a single click
+document.addEventListener('DOMContentLoaded', function() {
+  const productTitles = document.querySelectorAll('.product-title');
+  productTitles.forEach(function(title) {
+    title.addEventListener('click', function() {
+      const description = title.nextElementSibling;
+      if (description.style.display === '' || description.style.display === 'none') {
+        description.style.display = 'block';
+      } else {
+        description.style.display = 'none';
+      }
+    });
+  });
+});

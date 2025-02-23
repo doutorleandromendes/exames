@@ -55,3 +55,22 @@ h1 {
         width: 90%; /* Adjust width for smaller screens */
     }
 }
+
+#searchInput {
+  width: 100%;
+  padding: 10px;
+  margin: 20px 0;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
+}
+.product {
+  margin-bottom: 15px;
+}
+.product-title {
+  font-weight: bold;
+  cursor: pointer;  /* Make the title look clickable */
+}
+.product-description {
+  display: none; /* Hide all descriptions by default */
+}

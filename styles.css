@@ -44,6 +44,9 @@ h1 {
     margin-top: 10px;
 }
 
+.product-description.visible{
+    display: block;
+}
 .product-price {
     font-weight: bold;
     color: green;

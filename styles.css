@@ -1,0 +1,57 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background-color: #f4f4f4;
+    color:#333
+}
+
+h1 {
+    font-size: 28px;
+    text-align: center;
+    color: #333;
+    margin-bottom: 20px;
+}
+
+#product-list {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.product {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ddd;
+    background-color: #fafafa;
+    border-radius: 8px;
+    width: 500px; /* Set to twice the width of a 6.5" phone screen */
+    max-width: 100%; /* Ensure it does not go beyond screen size */
+    border-radius: 8px;
+    transition: background-color 0.3s ease;
+}
+.product:hover{
+    background-color: f7f7f7;
+}
+.product-title {
+    font-weight: bold;
+    cursor: pointer;
+    color: #000000;
+}
+
+.product-description {
+    display: none;
+    margin-top: 10px;
+}
+
+.product-price {
+    font-weight: bold;
+    color: green;
+}
+
+@media screen and (max-width: 768px) {
+    /* Make sure everything looks good on smaller screens */
+    .product {
+        width: 90%; /* Adjust width for smaller screens */
+    }
+}

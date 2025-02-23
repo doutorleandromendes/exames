@@ -28,7 +28,6 @@ h1 {
     width: 500px; /* Set to twice the width of a 6.5" phone screen */
     max-width: 100%; /* Ensure it does not go beyond screen size */
     border-radius: 8px;
-    transition: background-color 0.3s ease;
 }
 .product:hover{
     background-color: f7f7f7;

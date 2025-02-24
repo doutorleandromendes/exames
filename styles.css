@@ -51,6 +51,13 @@ h1 {
     color: green;
 }
 
+.instruction-text {
+  font-size: 16px;
+  color: #444;
+  text-align: center;
+  margin-top: 10px;  /* Small space below the title */
+  font-style: italic;  /* Optional, to differentiate the text */
+}
 @media screen and (max-width: 768px) {
     /* Make sure everything looks good on smaller screens */
     .product {

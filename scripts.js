@@ -52,21 +52,6 @@ function displayProducts(products) {
             productDescription.style.display = productDescription.style.display === 'none' ? 'block' : 'none';
         });
 
-      // Toggle product descriptions with a single click
-document.addEventListener('DOMContentLoaded', function() {
-  const productTitles = document.querySelectorAll('.product-title');
-  productTitles.forEach(function(title) {
-    title.addEventListener('click', function() {
-      const description = title.nextElementSibling;
-      if (description.style.display === '' || description.style.display === 'none') {
-        description.style.display = 'block';
-      } else {
-        description.style.display = 'none';
-      }
-    });
-  });
-});
-
         // Append product element to the list
         productListContainer.appendChild(productElement);
     });

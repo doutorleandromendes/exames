@@ -44,7 +44,7 @@ function displayProducts(products) {
         const productDescription = document.createElement('div');
         productDescription.classList.add('product-description');
         productDescription.innerHTML = `${product.description} <br>
-            <strong>Preço = ${product.price},00 (${product.pixPrice},00 via Pix)</strong>`;
+            <strong>Valor = ${product.price},00 (${product.pixPrice},00 via Pix)</strong>`;
         productElement.appendChild(productDescription);
 
         // Initially hide the description

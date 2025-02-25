@@ -47,10 +47,20 @@ function displayProducts(products) {
             <strong>Preço = ${product.price},00 (${product.pixPrice},00 via Pix)</strong>`;
         productElement.appendChild(productDescription);
 
-        // Make the description togglable
-        productTitle.addEventListener('click', () => {
-            productDescription.style.display = productDescription.style.display === 'none' ? 'block' : 'none';
-        });
+      // Toggle product descriptions with a single click
+document.addEventListener('DOMContentLoaded', function() {
+  const productTitles = document.querySelectorAll('.product-title');
+  productTitles.forEach(function(title) {
+    title.addEventListener('click', function() {
+      const description = title.nextElementSibling;
+      if (description.style.display === '' || description.style.display === 'none') {
+        description.style.display = 'block';
+      } else {
+        description.style.display = 'none';
+      }
+    });
+  });
+});
 
         // Append product element to the list
         productListContainer.appendChild(productElement);
@@ -76,17 +86,4 @@ function searchProduct() {
   });
 }
 
-// Toggle product descriptions with a single click
-document.addEventListener('DOMContentLoaded', function() {
-  const productTitles = document.querySelectorAll('.product-title');
-  productTitles.forEach(function(title) {
-    title.addEventListener('click', function() {
-      const description = title.nextElementSibling;
-      if (description.style.display === '' || description.style.display === 'none') {
-        description.style.display = 'block';
-      } else {
-        description.style.display = 'none';
-      }
-    });
-  });
-});
+

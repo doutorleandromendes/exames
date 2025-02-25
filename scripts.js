@@ -47,9 +47,14 @@ function displayProducts(products) {
             <strong>Preço = ${product.price},00 (${product.pixPrice},00 via Pix)</strong>`;
         productElement.appendChild(productDescription);
 
-         // Make the description togglable
+        // Initially hide the description
+        productDescription.style.display = 'none';
+
+        // Make the description togglable
         productTitle.addEventListener('click', () => {
-            productDescription.style.display = productDescription.style.display === 'none' ? 'block' : 'none';
+            // Toggle the display of the description when the title is clicked
+            const currentDisplay = productDescription.style.display;
+            productDescription.style.display = currentDisplay === 'none' || currentDisplay === '' ? 'block' : 'none';
         });
 
         // Append product element to the list
@@ -75,5 +80,3 @@ function searchProduct() {
     }
   });
 }
-
-

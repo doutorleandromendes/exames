@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Orçamento de Exames - Debug</title>
+</head>
+<body>
+  <h1>Depuração de Exames CSV</h1>
+  <div id="exames"></div>
+
+  <script>
+    const URL_CSV = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
+
+    function csvToArray(str, delimiter = ";") {
+      const rows = str.split(/\r?\n/).filter(r => r.trim() !== "");
+      const headers = rows.shift().split(delimiter);
+      console.log("Cabeçalhos:", headers);
+      const dados = rows.map((row, rowIndex) => {
+        const values = row.split(delimiter);
+        console.log(`Linha ${rowIndex + 1}:`, values);
+        if (values.length < headers.length) return null;
+        const obj = {};
+        headers.forEach((header, i) => {
+          obj[header.trim()] = (values[i] || "").trim();
+        });
+        return obj;
+      }).filter(row => row && row["Product Name"] && row["Price"] && row["Pix Price"]);
+      console.log("Exames parseados:", dados);
+      return dados;
+    }
+
+    async function carregarExames() {
+      const response = await fetch(URL_CSV);
+      const data = await response.text();
+      console.log("Conteúdo bruto do CSV:", data);
+      const exames = csvToArray(data);
+      const container = document.getElementById("exames");
+      exames.forEach(exame => {
+        const div = document.createElement("div");
+        div.textContent = `${exame["Product Name"]} - R$ ${exame["Price"]} / Pix R$ ${exame["Pix Price"]}`;
+        container.appendChild(div);
+      });
+    }
+
+    carregarExames();
+  </script>
+</body>
+</html>

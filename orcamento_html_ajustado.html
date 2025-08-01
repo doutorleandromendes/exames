@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Orçamento de Exames - Clínica</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    h2 { margin-top: 30px; }
+    label { display: block; margin-top: 10px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    .hidden { display: none; }
+    .print-area { margin-top: 30px; border-top: 1px solid #000; padding-top: 20px; }
+    .btn { margin-top: 20px; padding: 10px 20px; cursor: pointer; background: #007BFF; color: white; border: none; border-radius: 4px; }
+    .btn:hover { background: #0056b3; }
+    @media print { .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>Orçamento de Exames</h1>
+
+  <label>Nome do paciente: <input type="text" id="nome"></label>
+  <label>Data: <input type="date" id="data" value=""></label>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const today = new Date().toISOString().split("T")[0];
+      document.getElementById("data").value = today;
+    });
+  </script>
+
+  <h2>Selecione os exames:</h2>
+  <input type="text" id="filtro" placeholder="Buscar exame..." style="width: 100%; padding: 8px; margin-bottom: 10px;">
+  <div id="exames" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"></div>
+
+  <label style="margin-top: 20px; display: block;">Desconto (%): <input type="number" id="desconto" min="0" max="100" value="0" style="width: 80px;"></label>
+
+  <button class="btn no-print" onclick="gerarOrcamento()">Gerar Orçamento</button>
+  <button class="btn no-print" onclick="window.print()">Imprimir</button>
+
+  <div id="resultado" class="print-area hidden">
+    <h2>Orçamento</h2>
+    <p><strong>Nome do paciente:</strong> <span id="outNome"></span></p>
+    <p><strong>Data:</strong> <span id="outData"></span></p>
+
+    <table>
+      <thead>
+        <tr><th>Exame</th><th>Preço (Crédito/Débito)</th><th>Preço (Pix/Dinheiro)</th></tr>
+      </thead>
+      <tbody id="tabelaExames"></tbody>
+      <tfoot>
+        <tr><th>Total</th><th id="total"></th><th id="totalPix"></th></tr>
+      </tfoot>
+    </table>
+
+    <p id="descontoInfo" style="font-weight: bold; color: green;"></p>
+
+    <p style="margin-top: 30px;">
+      Declaro que fui informado(a) sobre os exames listados acima, seus preços e finalidade diagnóstica.<br>
+      Autorizo sua realização conforme descrito.
+    </p>
+
+    <p style="margin-top: 50px;">Assinatura do paciente: ____________________________</p>
+
+    <div style="margin-top: 20px; text-align: right;">
+      <p style="margin-bottom: 5px; font-weight: bold;">Pagamento via Pix:</p>
+      <img src="qrcode_pix.png" alt="QR Code Pix" style="width: 150px; height: 150px;">
+    </div>
+  </div>
+
+  <script>
+    const URL_CSV = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
+
+    function csvToArray(str, delimiter = ";") {
+      const rows = str.split(/\r?\n/).filter(r => r.trim() !== "");
+      const headers = rows.shift().split(delimiter);
+      return rows.map(row => {
+        const values = row.split(delimiter);
+        if (values.length < headers.length) return null;
+        const obj = {};
+        headers.forEach((header, i) => {
+          obj[header.trim()] = (values[i] || "").trim();
+        });
+        return obj;
+      }).filter(row => row && row["Product Name"] && row["Price"] && row["Pix Price"]);
+    }
+
+    async function carregarExames() {
+      const response = await fetch(URL_CSV);
+      const data = await response.text();
+      
+    let linhas = data.trim().split("\n");
+    if (!linhas[0].toLowerCase().includes("product name")) {
+      linhas.unshift("Product Name;Price;Pix Price;Description");
+      data = linhas.join("\n");
+    }
+    const exames = csvToArray(data);
+    
+      const container = document.getElementById("exames");
+      exames.forEach(exame => {
+        const label = document.createElement("label");
+        label.title = exame["Description"] || "";
+        label.innerHTML = `<input type="checkbox" value="${exame["Product Name"]}" data-preco="${exame["Price"]}" data-pix="${exame["Pix Price"]}"> ${exame["Product Name"]} (R$ ${exame["Price"]} / Pix R$ ${exame["Pix Price"]})`;
+        container.appendChild(label);
+        label.classList.add("exame-item");
+      });
+    }
+
+    carregarExames();
+
+    document.getElementById('filtro').addEventListener('input', function () {
+      const termo = this.value.toLowerCase();
+      document.querySelectorAll('.exame-item').forEach(item => {
+        const texto = item.textContent.toLowerCase();
+        item.style.display = texto.includes(termo) ? '' : 'none';
+      });
+    });
+
+    function gerarOrcamento() {
+      const nome = document.getElementById('nome').value;
+      const data = document.getElementById('data').value;
+      const checkboxes = document.querySelectorAll('#exames input[type=checkbox]:checked');
+      const tabela = document.getElementById('tabelaExames');
+      const totalSpan = document.getElementById('total');
+      const totalPixSpan = document.getElementById('totalPix');
+
+      document.getElementById('outNome').textContent = nome;
+      document.getElementById('outData').textContent = data;
+
+      tabela.innerHTML = '';
+      let total = 0;
+      let totalPix = 0;
+      const desconto = parseFloat(document.getElementById('desconto').value) || 0;
+
+      checkboxes.forEach(cb => {
+        const preco = parseFloat(cb.dataset.preco);
+        const pix = parseFloat(cb.dataset.pix);
+        total += preco;
+        totalPix += pix;
+
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${cb.value}</td><td>R$ ${preco.toFixed(2)}</td><td>R$ ${pix.toFixed(2)}</td>`;
+        tabela.appendChild(row);
+      });
+
+      totalSpan.textContent = `R$ ${total.toFixed(2)}`;
+      totalPixSpan.textContent = `R$ ${totalPix.toFixed(2)}`;
+      const totalComDesconto = total * (1 - desconto / 100);
+      const totalPixComDesconto = totalPix * (1 - desconto / 100);
+      document.getElementById('descontoInfo').textContent = desconto > 0 ? `Total com desconto de ${desconto}%: R$ ${totalComDesconto.toFixed(2)} (Crédito/Débito), R$ ${totalPixComDesconto.toFixed(2)} (Pix/Dinheiro)` : '';
+      document.getElementById('resultado').classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Gerador de Laudos</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('laudo_fundo.png') no-repeat center top;
+      background-size: cover;
+      padding: 250px 60px 60px 60px;
+    }
+    label {
+      display: block;
+      margin-bottom: 10px;
+    }
+    select, input[type="text"], input[type="date"], textarea {
+      width: 100%;
+      padding: 6px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .laudo {
+      page-break-after: always;
+      margin-top: 60px;
+    }
+    .assinatura {
+      margin-top: 40px;
+      width: 200px;
+    }
+    .laudos-container {
+      display: none;
+    }
+    @media print {
+      body {
+        background: url('laudo_fundo.png') no-repeat center top;
+        background-size: cover;
+        padding: 250px 60px 60px 60px;
+      }
+      .formulario, button {
+        display: none;
+      }
+      .laudos-container {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="formulario">
+    <h2>Gerador de Laudos</h2>
+    <label for="paciente">Selecionar Paciente:</label>
+    <select id="paciente"></select>
+
+    <label for="data">Data do Teste:</label>
+    <input type="date" id="data">
+
+    <label for="exame">Nome do Exame:</label>
+    <select id="exame"></select>
+
+    <label for="amostra">Amostra:</label>
+    <select id="amostra">
+      <option>Sangue Total</option>
+      <option>Plasma</option>
+      <option>Soro</option>
+      <option>Urina</option>
+      <option>Secreção</option>
+      <option>Swab</option>
+      <option>Linfa</option>
+    </select>
+
+    <label for="metodo">Método:</label>
+    <select id="metodo">
+      <option>Imunocromatografia de Fluxo Lateral</option>
+      <option>Imunofluorescência</option>
+      <option>Coloração de Gram</option>
+      <option>Coloração de Giemsa</option>
+      <option>Coloração de Leishamann</option>
+      <option>Coloração de Kinyoun Modificada</option>
+      <option>Coloração de Grocott-Gomori</option>
+      <option>Microscopia com KOH</option>
+    </select>
+
+    <label for="resultado">Resultado:</label>
+    <input type="text" id="resultado">
+
+    <label for="referencia">Valor de Referência:</label>
+    <input type="text" id="referencia">
+
+    <button onclick="gerarLaudo()">Gerar Laudo</button>
+    <button onclick="window.print()">Imprimir / Salvar como PDF</button>
+  </div>
+
+  <div class="laudos-container" id="laudos"></div>
+
+  <script>
+    const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
+    const examesURL = 'https://raw.githubusercontent.com/doutorleandromendes/exames/e5093f419372876b97493ae0c02f4598b0763be2/products.csv';
+
+    fetch(pacientesURL)
+      .then(res => res.text())
+      .then(data => {
+        const linhas = data.split('\n').slice(1);
+        const dropdown = document.getElementById('paciente');
+        linhas.forEach(linha => {
+          const cols = linha.split(',');
+          if (cols.length >= 3) {
+            const nomeCompleto = `${cols[1]} ${cols[2]}`;
+            const dn = cols[3] || '';
+            const opt = document.createElement('option');
+            opt.value = `${nomeCompleto}|${dn}`;
+            opt.textContent = nomeCompleto;
+            dropdown.appendChild(opt);
+          }
+        });
+      });
+
+    fetch(examesURL)
+      .then(res => res.text())
+      .then(data => {
+        const linhas = data.split('\n').slice(1);
+        const dropdown = document.getElementById('exame');
+        linhas.forEach(linha => {
+          const cols = linha.split(';');
+          if (cols[0]) {
+            const opt = document.createElement('option');
+            opt.value = cols[0];
+            opt.textContent = cols[0];
+            dropdown.appendChild(opt);
+          }
+        });
+      });
+
+    function gerarLaudo() {
+      const nomeCompleto = document.getElementById('paciente').value.split('|')[0];
+      const dataNascimento = document.getElementById('paciente').value.split('|')[1];
+      const dataTeste = document.getElementById('data').value;
+      const exame = document.getElementById('exame').value;
+      const amostra = document.getElementById('amostra').value;
+      const metodo = document.getElementById('metodo').value;
+      const resultado = document.getElementById('resultado').value;
+      const referencia = document.getElementById('referencia').value;
+      const hoje = new Date().toLocaleDateString('pt-BR');
+
+      const laudoHTML = `
+        <div class="laudo">
+          <h3 style="text-align:right; margin-bottom: 40px;">RESULTADO DE EXAME</h3>
+          <p><strong>Nome:</strong> ${nomeCompleto} &nbsp;&nbsp; <strong>DN:</strong> ${dataNascimento} &nbsp;&nbsp; <strong>Data do teste:</strong> ${dataTeste}</p>
+          <div style="background:#ccc;padding:5px 10px;font-weight:bold;font-style:italic;margin:20px 0;">${exame}</div>
+          <p><span style="color:gray;font-weight:bold;">Amostra:</span> <span style="color:gray;">${amostra}</span></p>
+          <p><span style="color:gray;font-weight:bold;">Método:</span> <span style="color:gray;">${metodo}</span></p>
+          <p style="background:#eee;padding:10px 20px;width:max-content;"><strong>Resultado:</strong> ${resultado}</p>
+          <p style="text-align:right;color:gray;"><strong>Valor de referência:</strong> ${referencia}</p>
+          <p style="font-size:12px;">Observações: os resultados devem ser interpretados de acordo com dados clínicos pertinentes</p>
+          <img src="assinatura.png" alt="Assinatura" class="assinatura">
+          <p><strong>Emitido em:</strong> ${hoje}</p>
+        </div>`;
+
+      document.getElementById('laudos').innerHTML += laudoHTML;
+    }
+  </script>
+</body>
+</html>

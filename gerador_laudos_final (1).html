@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gerador de Laudos</title>
+  <!-- Parser robusto para CSV -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    :root { --margem-top-a4: 240px; --margem-lado-a4: 80px; }
+    html, body { height: 100%; }
+    body {
+      font-family: Arial, sans-serif;
+      background: url('laudo_fundo.png') no-repeat center top;
+      background-size: cover; /* Fundo A4 único */
+      padding: var(--margem-top-a4) var(--margem-lado-a4) 60px var(--margem-lado-a4);
+      line-height: 1.6;
+    }
+    h2 { margin: 0 0 12px; }
+    label { display: block; margin-bottom: 6px; font-size: 14px; }
+    select, input[type="text"], input[type="date"] { width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px; }
+    button { padding: 10px 16px; background: #007BFF; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+    button + button { margin-left: 8px; }
+
+    .laudos-container { display: none; }
+    .laudo-title { text-align: right; font-size: 18px; margin: 0 6px 10px 0; }
+    .laudo { position: relative; margin-top: 16px; page-break-inside: avoid; }
+    .linha-info { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin-bottom: 8px; }
+    .linha-info p { margin: 0; font-size: 14px; }
+    .exame-box { font-weight: bold; font-style: italic; background: #e9e9e9; padding: 6px 10px; text-align: center; margin: 14px 0; border-radius: 3px; }
+    .linha-top { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 4px; }
+    .amostra, .ref { color: #666; font-size: 13px; margin: 0; }
+    .metodo { color: #666; font-size: 13px; margin: 2px 0 10px; }
+    .resultado-box { text-align: center; font-size: 16px; font-weight: bold; background: #f5f5f5; padding: 10px 20px; width: max-content; margin: 16px auto 8px; border-radius: 3px; }
+    .assinatura { margin-top: 34px; width: 200px; float: right; }
+
+    .status { font-size: 12px; color: #555; margin: 4px 0 10px; }
+    .status.ok { color: #0a7f2e; }
+    .status.err { color: #b00020; }
+    details.debug { margin: 8px 0 16px; }
+
+    @media print {
+      body { background: url('laudo_fundo.png') no-repeat center top; background-size: cover; padding: var(--margem-top-a4) var(--margem-lado-a4) 60px var(--margem-lado-a4); }
+      .formulario, .acoes, details.debug { display: none !important; }
+      .laudos-container { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <div class="formulario">
+    <h2>Gerador de Laudos</h2>
+
+    <label for="paciente">Selecionar Paciente:</label>
+    <select id="paciente"></select>
+    <div id="statusPac" class="status">Carregando pacientes…</div>
+
+    <label for="data">Data do Teste:</label>
+    <input type="date" id="data" />
+
+    <label for="exame">Nome do Exame:</label>
+    <select id="exame"></select>
+    <div id="statusExames" class="status">Carregando exames…</div>
+
+    <label for="amostra">Amostra:</label>
+    <select id="amostra">
+      <option>Sangue Total</option>
+      <option>Plasma</option>
+      <option>Soro</option>
+      <option>Urina</option>
+      <option>Secreção</option>
+      <option>Swab</option>
+      <option>Linfa</option>
+    </select>
+
+    <label for="metodo">Método:</label>
+    <select id="metodo">
+      <option>Imunocromatografia de Fluxo Lateral</option>
+      <option>Imunofluorescência</option>
+      <option>Coloração de Gram</option>
+      <option>Coloração de Giemsa</option>
+      <option>Coloração de Leishman</option>
+      <option>Coloração de Kinyoun Modificada</option>
+      <option>Coloração de Grocott-Gomori</option>
+      <option>Microscopia com KOH</option>
+    </select>
+
+    <label>Resultado:</label>
+    <div id="resultado-container"></div>
+
+    <div class="acoes" style="margin-top: 8px;">
+      <button onclick="gerarLaudo()">Adicionar exame</button>
+      <button onclick="novoExameMesmoPaciente()" title="Mantém paciente e datas; limpa apenas Exame/Resultado">Novo exame (mesmo paciente)</button>
+      <button onclick="window.print()">Imprimir / Salvar PDF</button>
+    </div>
+
+    <details class="debug">
+      <summary>Diagnóstico / Debug</summary>
+      <div id="diag"></div>
+    </details>
+  </div>
+
+  <div class="laudos-container" id="laudos"></div>
+
+  <script>
+    // URLs de dados
+    const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
+    const EXAMES_URLS = [
+      'https://raw.githubusercontent.com/doutorleandromendes/exames/e5093f419372876b97493ae0c02f4598b0763be2/products.csv', // commit fixo
+      'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv' // branch main (fallback)
+    ];
+
+    // Data default (hoje)
+    document.addEventListener('DOMContentLoaded', () => {
+      const hoje = new Date();
+      const dataFormatada = hoje.toISOString().split('T')[0];
+      document.getElementById('data').value = dataFormatada;
+    });
+
+    // ===== Helpers =====
+    function fetchWithTimeout(url, ms = 12000) {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), ms);
+      return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(id));
+    }
+    function setStatus(id, msg, ok=false, err=false) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.toggle('ok', ok);
+      el.classList.toggle('err', err);
+    }
+
+    // ===== Carregar Pacientes (robusto via PapaParse) =====
+    (async function loadPacientes(){
+      try {
+        const res = await fetchWithTimeout(pacientesURL);
+        const csv = await res.text();
+        const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+        const rows = parsed.data || [];
+        const pacientes = rows.map(r => {
+          // pega as duas primeiras colunas reais (nome e sobrenome), independente do cabeçalho
+          const keys = Object.keys(r);
+          const nome = (r[keys[0]]||'').trim();
+          const sobrenome = (r[keys[1]]||'').trim();
+          const dn = (r[keys[2]]||'').trim();
+          if (!nome && !sobrenome) return null;
+          return { nome: `${nome} ${sobrenome}`.trim(), dn };
+        }).filter(Boolean);
+        pacientes.sort((a,b)=> a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity:'base' }));
+        const sel = document.getElementById('paciente');
+        pacientes.forEach(p => {
+          const o = document.createElement('option');
+          o.value = `${p.nome}|${p.dn}`;
+          o.textContent = p.nome;
+          sel.appendChild(o);
+        });
+        setStatus('statusPac', `Pacientes carregados: ${pacientes.length}`, true, false);
+        selfTest.pacientesOk = pacientes.length > 0;
+      } catch (e) {
+        console.error(e);
+        setStatus('statusPac', 'Erro ao carregar pacientes', false, true);
+        selfTest.pacientesOk = false;
+      } finally { runSelfTest(); }
+    })();
+
+    // ===== Carregar Exames com fallback de URL e tolerância a delimitadores =====
+    (async function loadExames(){
+      let ultimoErro = null;
+      for (const url of EXAMES_URLS) {
+        try {
+          const res = await fetchWithTimeout(url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const text = await res.text();
+          const linhas = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+          // Detecta se há cabeçalho
+          let start = 0;
+          const head = linhas[0] || '';
+          if (/product\s*name/i.test(head) || /nome\s*do\s*exame/i.test(head)) start = 1;
+          const exames = [];
+          for (let i = start; i < linhas.length; i++) {
+            const linha = linhas[i].trim();
+            const cols = linha.includes(';') ? linha.split(';') : linha.split(',');
+            let nome = (cols[0] || '').replace(/^\uFEFF/, '').replace(/^["']+|["']+$/g,'').trim();
+            if (nome && nome.toLowerCase() !== 'nome') exames.push(nome);
+          }
+          exames.sort((a,b)=> a.localeCompare(b, 'pt-BR', { sensitivity:'base' }));
+          const sel = document.getElementById('exame');
+          exames.forEach(n => { const o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o); });
+          document.getElementById('exame').addEventListener('change', atualizarCampoResultado);
+          atualizarCampoResultado();
+          setStatus('statusExames', `Exames carregados: ${exames.length} (fonte: ${new URL(url).pathname.split('/').slice(-2).join('/')})`, true, false);
+          selfTest.examesOk = exames.length > 0;
+          runSelfTest();
+          return; // sucesso, sai
+        } catch (e) {
+          console.warn('Falha ao carregar exames de', url, e);
+          ultimoErro = e;
+        }
+      }
+      // se chegou aqui, todas as URLs falharam
+      setStatus('statusExames', 'Erro ao carregar a lista de exames (tente recarregar).', false, true);
+      selfTest.examesOk = false;
+      runSelfTest();
+      // Degradação elegante: permite entrada manual do exame se dropdown ficou vazio
+      const sel = document.getElementById('exame');
+      if (!sel.options.length) {
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = '— digite o exame abaixo —'; sel.appendChild(opt);
+      }
+      // cria campo manual se necessário
+      if (!document.getElementById('exameManual')) {
+        const manual = document.createElement('input');
+        manual.type = 'text'; manual.id = 'exameManual'; manual.placeholder = 'Nome do exame (manual)';
+        manual.style.marginTop = '6px';
+        sel.insertAdjacentElement('afterend', manual);
+        sel.addEventListener('change', ()=>{
+          if (sel.value) manual.value = sel.value;
+          atualizarCampoResultado();
+        });
+      }
+    })();
+
+    // ===== Campo Resultado dinâmico =====
+    function atualizarCampoResultado(){
+      const sel = document.getElementById('exame');
+      const exameSelecionado = ((sel && sel.value) || document.getElementById('exameManual')?.value || '').toLowerCase();
+      const container = document.getElementById('resultado-container');
+      container.innerHTML = '';
+      if (exameSelecionado.includes('dosagem')){
+        const input = document.createElement('input');
+        input.type = 'text'; input.id = 'resultado'; input.style.fontWeight='bold'; input.style.textAlign='center';
+        container.appendChild(input);
+      } else {
+        const select = document.createElement('select');
+        select.id='resultado'; select.style.fontWeight='bold'; select.style.textAlign='center';
+        ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; select.appendChild(o); });
+        container.appendChild(select);
+      }
+    }
+
+    // ===== Utilidades =====
+    function formatarDataBR(dataISO){ if(!dataISO) return '____/____/____'; const [a,m,d] = dataISO.split('-'); return `${d}/${m}/${a}`; }
+    function garantirTituloUnico(){
+      const cont = document.getElementById('laudos');
+      if (!document.getElementById('tituloPagina')) {
+        const h = document.createElement('h3'); h.id = 'tituloPagina'; h.className = 'laudo-title'; h.textContent = 'RESULTADO DE EXAME'; cont.prepend(h);
+      }
+    }
+
+    // ===== Geração de laudo =====
+    function gerarLaudo(){
+      garantirTituloUnico();
+      const [nomeCompleto, dnISO=''] = (document.getElementById('paciente').value || '').split('|');
+      const dataNascimento = dnISO ? formatarDataBR(dnISO) : '____/____/____';
+      const dataTeste = formatarDataBR(document.getElementById('data').value);
+      const sel = document.getElementById('exame');
+      const exame = (sel && sel.value) || document.getElementById('exameManual')?.value || '';
+      const amostra = document.getElementById('amostra').value;
+      const metodo = document.getElementById('metodo').value;
+      const resultado = document.getElementById('resultado').value;
+      const hoje = new Date().toLocaleDateString('pt-BR');
+
+      const laudoHTML = `
+        <div class="laudo">
+          <div class="linha-info">
+            <p><strong>Nome:</strong> ${nomeCompleto || ''}</p>
+            <p><strong>Data de Nascimento:</strong> ${dataNascimento}</p>
+            <p><strong>Data do Teste:</strong> ${dataTeste}</p>
+            <p><strong>Emitido em:</strong> ${hoje}</p>
+          </div>
+          <div class="exame-box">${exame}</div>
+          <div class="linha-top">
+            <p class="amostra"><strong>Amostra:</strong> ${amostra}</p>
+            <p class="ref"><strong>Valor de referência:</strong> NÃO REAGENTE</p>
+          </div>
+          <p class="metodo"><strong>Método:</strong> ${metodo}</p>
+          <div class="resultado-box"><strong>Resultado:</strong> ${resultado}</div>
+          <img src="assinatura.png" alt="Assinatura" class="assinatura" />
+        </div>`;
+
+      const cont = document.getElementById('laudos');
+      cont.innerHTML += laudoHTML;
+      cont.style.display = 'block';
+    }
+
+    function novoExameMesmoPaciente(){
+      const exameSel = document.getElementById('exame');
+      if (exameSel.options.length > 0) exameSel.selectedIndex = 0;
+      atualizarCampoResultado();
+      const campo = document.getElementById('resultado');
+      if (campo) campo.focus();
+    }
+
+    // ===== "Testes" automatizados simples (self-test) =====
+    const selfTest = { pacientesOk: false, examesOk: false };
+    function runSelfTest(){
+      const msgs = [];
+      msgs.push(selfTest.pacientesOk ? '✔ Pacientes carregados' : '✖ Falha ao carregar pacientes');
+      msgs.push(selfTest.examesOk ? '✔ Exames carregados' : '✖ Falha ao carregar exames');
+      document.getElementById('diag').innerHTML = msgs.map(m=>`<div>${m}</div>`).join('');
+    }
+  </script>
+</body>
+</html>

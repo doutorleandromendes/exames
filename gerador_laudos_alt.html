@@ -1,0 +1,222 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Gerador de Laudos</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: url('laudo_fundo.png') no-repeat center top;
+      background-size: cover;
+      padding: 240px 80px 60px 80px;
+    }
+    label {
+      display: block;
+      margin-bottom: 10px;
+    }
+    select, input[type="text"], input[type="date"], textarea {
+      width: 100%;
+      padding: 6px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .laudo {
+      page-break-after: always;
+      margin-top: 60px;
+    }
+    .assinatura {
+      margin-top: 20px;
+      width: 200px;
+      float: right;
+    }
+    .laudos-container {
+      display: none;
+    }
+    @media print {
+      body {
+        background: url('laudo_fundo.png') no-repeat center top;
+        background-size: cover;
+        padding: 240px 80px 60px 80px;
+      }
+      .formulario, button {
+        display: none;
+      }
+      .laudos-container {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="formulario">
+    <h2>Gerador de Laudos</h2>
+    <label for="paciente">Selecionar Paciente:</label>
+    <select id="paciente"></select>
+
+    <label for="data">Data do Teste:</label>
+    <input type="date" id="data">
+
+    <label for="exame">Nome do Exame:</label>
+    <select id="exame"></select>
+
+    <label for="amostra">Amostra:</label>
+    <select id="amostra">
+      <option>Sangue Total</option>
+      <option>Plasma</option>
+      <option>Soro</option>
+      <option>Urina</option>
+      <option>Secreção</option>
+      <option>Swab</option>
+      <option>Linfa</option>
+    </select>
+
+    <label for="metodo">Método:</label>
+    <select id="metodo">
+      <option>Imunocromatografia de Fluxo Lateral</option>
+      <option>Imunofluorescência</option>
+      <option>Coloração de Gram</option>
+      <option>Coloração de Giemsa</option>
+      <option>Coloração de Leishman</option>
+      <option>Coloração de Kinyoun Modificada</option>
+      <option>Coloração de Grocott-Gomori</option>
+      <option>Microscopia com KOH</option>
+    </select>
+
+    <label for="resultado">Resultado:</label>
+    <div id="resultado-container"></div>
+
+    <button onclick="gerarLaudo()">Gerar Laudo</button>
+    <button onclick="window.print()">Imprimir / Salvar como PDF</button>
+  </div>
+
+  <div class="laudos-container" id="laudos"></div>
+
+  <script>
+    const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
+    const examesURL = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/products.csv';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const hoje = new Date();
+      const dataFormatada = hoje.toISOString().split('T')[0];
+      document.getElementById('data').value = dataFormatada;
+    });
+
+    fetch(pacientesURL)
+      .then(res => res.text())
+      .then(data => {
+        const linhas = data.split('
+').slice(1);
+        const pacientes = linhas.map(linha => {
+          const cols = linha.split(',');
+          if (cols.length >= 3) {
+            return {
+              nome: `${cols[0].trim()} ${cols[1].trim()}`,
+              dn: cols[2]?.trim() || ''
+            };
+          }
+        }).filter(Boolean);
+        pacientes.sort((a, b) => a.nome.localeCompare(b.nome));
+        const dropdown = document.getElementById('paciente');
+        pacientes.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = `${p.nome}|${p.dn}`;
+          opt.textContent = p.nome;
+          dropdown.appendChild(opt);
+        });
+      });
+
+    fetch(examesURL)
+      .then(res => res.text())
+      .then(data => {
+        const linhas = data.split('
+').slice(1);
+        const dropdown = document.getElementById('exame');
+        const exames = [];
+        linhas.forEach(linha => {
+          const cols = linha.split(';');
+          if (cols[0]?.trim()) exames.push(cols[0].trim());
+        });
+        exames.sort((a, b) => a.localeCompare(b));
+        exames.forEach(nome => {
+          const opt = document.createElement('option');
+          opt.value = nome;
+          opt.textContent = nome;
+          dropdown.appendChild(opt);
+        });
+
+        dropdown.addEventListener('change', atualizarCampoResultado);
+        atualizarCampoResultado();
+      });
+
+    function atualizarCampoResultado() {
+      const exameSelecionado = document.getElementById('exame').value.toLowerCase();
+      const container = document.getElementById('resultado-container');
+      container.innerHTML = '';
+      if (exameSelecionado.includes('dosagem')) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'resultado';
+        input.style.fontWeight = 'bold';
+        input.style.textAlign = 'center';
+        container.appendChild(input);
+      } else {
+        const select = document.createElement('select');
+        select.id = 'resultado';
+        select.style.fontWeight = 'bold';
+        select.style.textAlign = 'center';
+        ['NÃO REAGENTE', 'REAGENTE', 'INDETERMINADO'].forEach(opcao => {
+          const opt = document.createElement('option');
+          opt.value = opcao;
+          opt.textContent = opcao;
+          select.appendChild(opt);
+        });
+        container.appendChild(select);
+      }
+    }
+
+    function formatarDataBR(dataISO) {
+      const [ano, mes, dia] = dataISO.split('-');
+      return `${dia}/${mes}/${ano}`;
+    }
+
+    function gerarLaudo() {
+      const pacienteData = document.getElementById('paciente').value.split('|');
+      const nomeCompleto = pacienteData[0] || '';
+      const dataNascimento = formatarDataBR(pacienteData[1] || '');
+      const dataTeste = formatarDataBR(document.getElementById('data').value);
+      const exame = document.getElementById('exame').value;
+      const amostra = document.getElementById('amostra').value;
+      const metodo = document.getElementById('metodo').value;
+      const resultado = document.getElementById('resultado').value;
+      const hoje = new Date().toLocaleDateString('pt-BR');
+
+      const laudoHTML = `
+        <div class="laudo">
+          <h3 style="text-align:right; font-size:18px; margin-bottom: 20px;">RESULTADO DE EXAME</h3>
+          <p style="font-size:14px;"><strong>Nome:</strong> ${nomeCompleto} &nbsp;&nbsp; <strong>Data de Nascimento:</strong> ${dataNascimento} &nbsp;&nbsp; <strong>Data do teste:</strong> ${dataTeste} &nbsp;&nbsp; <strong>Emitido em:</strong> ${hoje}</p>
+          <div style="background:#ccc;padding:5px 10px;font-weight:bold;font-style:italic;margin:20px 0; font-size:16px; text-align:center;">${exame}</div>
+          <div style="display: flex; justify-content: space-between;">
+            <p style="color:gray;font-size:13px;"><strong>Amostra:</strong> ${amostra}</p>
+            <p style="color:gray;font-size:13px;text-align:right;"><strong>Valor de referência:</strong> NÃO REAGENTE</p>
+          </div>
+          <p style="color:gray;font-size:13px;"><strong>Método:</strong> ${metodo}</p>
+          <p style="background:#eee;padding:10px 20px;width:max-content;font-size:16px;margin:auto;text-align:center;font-weight:bold;"><strong>Resultado:</strong> ${resultado}</p>
+          <p style="font-size:12px; margin-top:20px;">Observações: os resultados devem ser interpretados de acordo com dados clínicos pertinentes</p>
+          <img src="assinatura.png" alt="Assinatura" class="assinatura">
+        </div>`;
+
+      document.getElementById('laudos').innerHTML += laudoHTML;
+      document.getElementById('laudos').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

@@ -16,7 +16,6 @@
       --wm-opacity:.08;
       --wm-width:62vw;
     }
-
     html, body { height: 100%; }
     body {
       font-family: system-ui, -apple-system, Segoe UI, Inter, Arial, sans-serif;
@@ -26,7 +25,6 @@
       padding: var(--pad-top) var(--pad-x) 60px var(--pad-x);
       background: #fff;
     }
-
     h2 { margin: 0 0 12px; }
     label { display: block; margin-bottom: 6px; font-size: 14px; }
     select, input[type="text"], input[type="date"] { width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px; }
@@ -63,7 +61,7 @@
       font-size: 11px;
       font-weight: bold;
       text-align: center;
-      margin-top: 48px; /* espaço antes da assinatura digital */
+      margin-top: 48px;
       margin-bottom: 8px;
     }
 
@@ -81,7 +79,7 @@
       body { background:#fff; font-size: 70%; }
       .formulario, .acoes, details.debug { display: none !important; }
       .laudos-container { display: block; }
-      .assinatura-digital{ margin-top: 3.2em; } /* ~3 linhas, mesmo com redução */
+      .assinatura-digital{ margin-top: 3.2em; }
       .lm-footer{ background:#111 !important; color:#fff !important; }
     }
   </style>
@@ -140,30 +138,27 @@
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
     const examesURL     = 'https://cdn.jsdelivr.net/gh/doutorleandromendes/exames@main/products.csv';
 
-    /* ====== FREE-TEXT EXAMS (com unidade e valor de referência específicos) ====== */
+    // Mapa de valores de referência/unidade (para “dosagem” conhecidas)
     const FREE_TEXT_EXAMS_DISPLAY = {
-      'Dosagem sérica de Procalcitonina':           { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
-      'Cistatina C – Dosagem sérica':               { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
-      'Proteína C Reativa – Dosagem sérica':        { ref: 'Inferior a 0,1 mg/L',   unit: ' mg/L' }
+      'dosagem serica de procalcitonina': { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
+      'cistatina c - dosagem serica':     { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
+      'proteina c reativa - dosagem serica': { ref: 'Inferior a 0,1 mg/L', unit: ' mg/L' },
     };
 
-    function normalizeName(s){
+    function normalize(s){
       return (s||'')
         .toString()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // remove acentos
-        .replace(/[–—−]/g,'-')                             // todos traços -> hífen
-        .replace(/\s+/g,' ')                                // colapsa espaços
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // tira acentos
+        .replace(/[–—−]/g,'-')                           // todos traços -> hífen
+        .replace(/\s+/g,' ')
         .trim()
         .toLowerCase();
     }
-    const FREE_TEXT_MAP = (() => {
-      const m = new Map();
-      Object.keys(FREE_TEXT_EXAMS_DISPLAY).forEach(k => m.set(normalizeName(k), k));
-      return m;
-    })();
-    function getFreeTextConfig(nomeExame){
-      const key = FREE_TEXT_MAP.get(normalizeName(nomeExame));
-      return key ? FREE_TEXT_EXAMS_DISPLAY[key] : null;
+
+    function isDosagem(nome){ return normalize(nome).includes('dosagem'); }
+    function cfgDosagem(nome){
+      const key = normalize(nome);
+      return FREE_TEXT_EXAMS_DISPLAY[key] || null;
     }
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -174,11 +169,9 @@
     function toBRDate(str){
       if (!str) return '';
       const s = String(str).trim();
-      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;            // DD/MM/AAAA
-      if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) return s.replace(/-/g,'/'); // DD-MM-AAAA -> DD/MM/AAAA
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {                          // AAAA-MM-DD -> DD/MM/AAAA
-        const [y,m,d] = s.split('-'); return `${d}/${m}/${y}`;
-      }
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+      if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) return s.replace(/-/g,'/');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y,m,d]=s.split('-'); return `${d}/${m}/${y}`; }
       const d = new Date(s);
       if (!isNaN(d)) {
         const dd = String(d.getDate()).padStart(2,'0');
@@ -189,7 +182,7 @@
       return s;
     }
 
-    /* ====== Carrega pacientes (Google Sheets CSV) ====== */
+    // Pacientes
     fetch(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -214,15 +207,11 @@
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    /* ====== Carrega exames (CSV ; — usa sempre a 1ª coluna) ====== */
+    // Exames (primeira coluna do CSV ; )
     fetch(examesURL)
       .then(r=>r.text())
       .then(csv=>{
-        const parsed = Papa.parse(csv, {
-          header: true,
-          delimiter: ';',
-          skipEmptyLines: true
-        });
+        const parsed = Papa.parse(csv, { header: true, delimiter: ';', skipEmptyLines: true });
         const firstKey = (parsed.meta && parsed.meta.fields && parsed.meta.fields[0]) || 'Product Name';
         const exames = (parsed.data || [])
           .map(r => (r[firstKey] || '').toString().trim())
@@ -244,14 +233,13 @@
       })
       .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    /* ====== Campo de Resultado (dropdown ↔ texto livre) ====== */
+    // Campo Resultado
     function atualizarCampoResultado(){
       const nomeExame = (document.getElementById('exame').value || '').trim();
-      const cfg = getFreeTextConfig(nomeExame);
       const container = document.getElementById('resultado-container');
       container.innerHTML = '';
 
-      if (cfg) {
+      if (isDosagem(nomeExame)) {
         const input = document.createElement('input');
         input.type = 'text';
         input.inputMode = 'decimal';
@@ -277,7 +265,7 @@
       }
     }
 
-    /* ====== Estrutura fixa de saída ====== */
+    // Estrutura fixa de saída
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -308,7 +296,7 @@
       cont.style.display='block';
     }
 
-    /* ====== Geração dos blocos ====== */
+    // Geração
     function gerarLaudo(){
       garantirEstrutura();
       const [nomeCompleto, dn] = (document.getElementById('paciente').value||'').split('|');
@@ -319,7 +307,6 @@
       let resultadoBruto = document.getElementById('resultado').value || '';
       const hoje = new Date().toLocaleDateString('pt-BR');
 
-      // Preenche identificação uma vez
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
@@ -330,19 +317,24 @@
         header.dataset.filled = '1';
       }
 
-      // Valor de referência + resultado (free-text x default)
+      // Valor de referência & unidade
       let valorRef = 'NÃO REAGENTE';
-      const cfg = getFreeTextConfig(exame);
-      if (cfg) {
-        valorRef = cfg.ref;
-        let num = resultadoBruto.trim().replace(',', '.');
-        const n = parseFloat(num);
-        if (!isNaN(n)) {
-          const casas = num.includes('.') ? 2 : 0;
-          const str = n.toFixed(casas).replace('.', ',');
-          resultadoBruto = str + cfg.unit;
-        } else if (resultadoBruto && !resultadoBruto.includes(cfg.unit.trim())) {
-          resultadoBruto = resultadoBruto + cfg.unit;
+      if (isDosagem(exame)) {
+        const cfg = cfgDosagem(exame);
+        if (cfg) {
+          valorRef = cfg.ref;
+          let num = resultadoBruto.trim().replace(',', '.');
+          const n = parseFloat(num);
+          if (!isNaN(n)) {
+            const casas = num.includes('.') ? 2 : 0;
+            const str = n.toFixed(casas).replace('.', ',');
+            resultadoBruto = str + cfg.unit;
+          } else if (resultadoBruto && !resultadoBruto.includes((cfg.unit||'').trim())) {
+            resultadoBruto = resultadoBruto + cfg.unit;
+          }
+        } else {
+          // exame com "dosagem" mas sem cfg conhecido: mantém livre, sem unidade automática
+          valorRef = '—';
         }
       }
 

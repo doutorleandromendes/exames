@@ -105,12 +105,34 @@
     .status.err { color: #b00020; }
 
     @media print {
-      body { background:#fff; font-size: 50%; } /* 30% menor */
-      .formulario, .acoes, details.debug { display: none !important; }
-      .laudos-container { display: block; }
-      .assinatura-digital{ margin-top: 3.2em; } /* mantém ~3 linhas com redução */
-      .lm-footer{ background:#111 !important; color:#fff !important; }
-    }
+  /* não mexe em header/footer/watermark */
+  .lm-header,
+  .lm-footer,
+  .lm-watermark {
+    font-size: 100% !important;
+    transform: none !important;
+  }
+
+  /* esconde UI */
+  .formulario, .acoes, details.debug { display: none !important; }
+
+  /* reduz SOMENTE o miolo do laudo em ~30% */
+  .laudos-container { display: block; }
+  .header-info,
+  .exames-list,
+  .assinatura-digital {
+    font-size: 70% !important;      /* <- redução aqui */
+  }
+
+  /* garante que títulos/campos internos sigam a redução */
+  .exame-box,
+  .resultado-box,
+  .amostra,
+  .ref,
+  .metodo {
+    font-size: inherit !important;   /* herda os 70% do contêiner */
+  }
+}
   </style>
 </head>
 <body>

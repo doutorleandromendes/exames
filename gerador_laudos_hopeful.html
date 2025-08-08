@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>Gerador de Laudos — Consultório Dr. Leandro Mendes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Parser CSV -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <style>
     :root{
@@ -17,6 +19,7 @@
       --wm-width:62vw;
     }
     html, body { height: 100%; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       font-family: system-ui, -apple-system, Segoe UI, Inter, Arial, sans-serif;
       line-height: 1.6;
@@ -24,10 +27,13 @@
       margin: 0;
       padding: var(--pad-top) var(--pad-x) 60px var(--pad-x);
       background: #fff;
+      font-size: 14px; /* base estável */
     }
     h2 { margin: 0 0 12px; }
     label { display: block; margin-bottom: 6px; font-size: 14px; }
-    select, input[type="text"], input[type="date"] { width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px; }
+    select, input[type="text"], input[type="date"] {
+      width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px;
+    }
     button { padding: 10px 16px; background: #007BFF; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     button + button { margin-left: 8px; }
 
@@ -57,7 +63,7 @@
       font-style: italic;
       background: #e9e9e9;
       padding: 6px 10px;
-      text-align: left;   /* <- alterado */
+      text-align: left;
       margin: 14px 0;
       border-radius: 3px;
       font-size: 16px;    /* igual ao resultado */
@@ -104,90 +110,70 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
+    /* Campos de paciente manual */
+    .paciente-manual { display:none; gap: 10px; }
+    .paciente-manual .col { flex:1; }
+
     @media print {
-  /* página configurada pra A4 com margem discreta */
-  @page { size: A4; margin: 12mm; }
+      /* Página A4 e margem discreta */
+      @page { size: A4; margin: 12mm; }
 
-  /* não mexe em header/footer/watermark */
-  .lm-header,
-  .lm-footer,
-  .lm-watermark {
-    font-size: 100% !important;
-    transform: none !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
+      /* esconde UI */
+      .formulario, .acoes, details.debug { display: none !important; }
 
-  /* esconde a UI */
-  .formulario,
-  .acoes,
-  details.debug {
-    display: none !important;
-  }
+      /* mostra saída */
+      .laudos-container { display: block; }
 
-  /* mostra apenas a saída */
-  .laudos-container {
-    display: block;
-  }
+      /* manter tamanhos iguais ao da tela */
+      body { font-size: 14px !important; line-height: 1.6 !important; }
+      .lm-header__clinic { font-size: 12px !important; }
+      .lm-header__title  { font-size: 20px !important; }
+      .header-info,
+      .header-info p,
+      .header-info strong,
+      .header-info span { font-size: 14px !important; }
+      .exame-box       { font-size: 16px !important; }
+      .resultado-box   { font-size: 16px !important; }
+      .amostra, .ref, .metodo { font-size: 13px !important; }
+      .assinatura-digital { font-size: 11px !important; }
+      .lm-footer { font-size: 11px !important; }
 
-  /* mantém fontes como na tela (sem 70%) */
-  .header-info,
-  .exames-list,
-  .assinatura-digital,
-  .exame-box,
-  .resultado-box,
-  .amostra,
-  .ref,
-  .metodo {
-    font-size: inherit !important;
-  }
+      /* evita quebras feias e página extra */
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+        height: auto !important;
+        overflow: visible !important;
+      }
+      .laudos-container { page-break-after: auto; break-inside: avoid; }
+      .laudo { page-break-inside: avoid; break-inside: avoid; margin-bottom: 12px; }
+      .laudos-container > .laudo:last-of-type { page-break-after: auto; break-after: auto; }
+      .lm-footer { page-break-inside: avoid; break-inside: avoid; margin-top: 8mm !important; }
 
-  /* evita quebras feias e página extra */
-  html, body {
-    margin: 0 !important;
-    padding: 0 !important;          /* zera padding global pra não “empurrar” conteúdo */
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  /* o container já tem margem interna suficiente; evita overflow no fim */
-  .laudos-container {
-    page-break-after: auto;
-    break-inside: avoid;
-  }
-
-  .laudo {
-    page-break-inside: avoid;       /* não quebrar no meio de um exame */
-    break-inside: avoid;
-    margin-bottom: 12px;            /* um respiro entre blocos */
-  }
-
-  /* evita que o último bloco force nova página */
-  .laudos-container > .laudo:last-of-type {
-    page-break-after: auto;
-    break-after: auto;
-  }
-
-  /* rodapé não quebra no meio e não empurra uma página sozinha */
-  .lm-footer {
-    page-break-inside: avoid;
-    break-inside: avoid;
-    margin-top: 8mm;
-  }
-
-  /* se você tinha um padding grande no body na versão de tela, neutraliza aqui */
-  body { padding: 0 var(--pad-x) 0 var(--pad-x) !important; }
-}
-
+      /* neutraliza padding da versão de tela */
+      body { padding: 0 var(--pad-x) 0 var(--pad-x) !important; }
+    }
   </style>
 </head>
 <body>
   <div class="formulario">
     <h2>Gerador de Laudos</h2>
 
+    <!-- Seleção/entrada de paciente -->
     <label for="paciente">Selecionar Paciente:</label>
     <select id="paciente"></select>
     <div id="statusPac" class="status">Carregando pacientes…</div>
+
+    <div class="paciente-manual" id="pacienteManual">
+      <div class="col">
+        <label for="pacienteNomeManual">Nome completo (manual):</label>
+        <input type="text" id="pacienteNomeManual" placeholder="Digite o nome completo" />
+      </div>
+      <div class="col">
+        <label for="pacienteDNManual">Data de Nascimento (DD/MM/AAAA):</label>
+        <input type="text" id="pacienteDNManual" placeholder="DD/MM/AAAA" />
+      </div>
+    </div>
 
     <label for="data">Data do Teste:</label>
     <input type="date" id="data" />
@@ -229,48 +215,48 @@
     </div>
   </div>
 
+  <!-- Saída -->
   <div class="laudos-container" id="laudos"></div>
 
   <script>
-    // URLs dos CSVs (exames em RAW para reduzir cache)
+    // URLs dos CSVs
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
-    const examesURL     = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv';
+    const examesURL    = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv';
 
-    // Busca sem cache (furando cache do browser/CDN)
+    // Busca sem cache
     function fetchNoCache(url, opts = {}) {
       const sep = url.includes('?') ? '&' : '?';
       const busted = `${url}${sep}_ts=${Date.now()}`;
       return fetch(busted, { cache: 'no-store', mode: 'cors', credentials: 'omit', ...opts });
     }
 
-    // Mapa de valores de referência/unidade (para “dosagem” conhecidas)
+    // Mapa de referência/unidade para “dosagem”
     const FREE_TEXT_EXAMS_DISPLAY = {
-      'dosagem serica de procalcitonina': { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
-      'cistatina c - dosagem serica':     { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
-      'proteina c reativa - dosagem serica': { ref: 'Inferior a 0,1 mg/L', unit: ' mg/L' },
+      'dosagem serica de procalcitonina':        { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
+      'cistatina c - dosagem serica':            { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
+      'proteina c reativa - dosagem serica':     { ref: 'Inferior a 0,1 mg/L',   unit: ' mg/L' },
     };
 
     function normalize(s){
       return (s||'')
         .toString()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g,'') // tira acentos
-        .replace(/[–—−]/g,'-')                           // todos traços -> hífen
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'') /* tira acentos */
+        .replace(/[–—−]/g,'-')                           /* unifica traços */
         .replace(/\s+/g,' ')
         .trim()
         .toLowerCase();
     }
-
     function isDosagem(nome){ return normalize(nome).includes('dosagem'); }
     function cfgDosagem(nome){
       const key = normalize(nome);
       return FREE_TEXT_EXAMS_DISPLAY[key] || null;
     }
 
+    // Datas
     document.addEventListener('DOMContentLoaded', () => {
       const hoje = new Date();
       document.getElementById('data').value = hoje.toISOString().split('T')[0];
     });
-
     function toBRDate(str){
       if (!str) return '';
       const s = String(str).trim();
@@ -287,7 +273,7 @@
       return s;
     }
 
-    // Carrega pacientes (Google Sheets)
+    // Pacientes (CSV) + opção manual
     fetchNoCache(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -300,20 +286,40 @@
             dn: toBRDate(r[keys[2]]||'')
           };
         }).filter(p=>p.nome);
+
         pacientes.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'}));
+
         const sel = document.getElementById('paciente');
         sel.innerHTML = '';
+
+        // opção manual no topo
+        const optManual = document.createElement('option');
+        optManual.value = 'manual';
+        optManual.textContent = '— Inserir manualmente —';
+        sel.appendChild(optManual);
+
         pacientes.forEach(p=>{
           const opt=document.createElement('option');
           opt.value=`${p.nome}|${p.dn}`;
           opt.textContent=p.nome;
           sel.appendChild(opt);
         });
+
         document.getElementById('statusPac').textContent = `Pacientes carregados: ${pacientes.length}`;
+
+        // toggle manual
+        sel.addEventListener('change', () => {
+          const manualWrap = document.getElementById('pacienteManual');
+          if (sel.value === 'manual') {
+            manualWrap.style.display = 'flex';
+          } else {
+            manualWrap.style.display = 'none';
+          }
+        });
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    // Carrega exames (CSV ; primeira coluna) — RAW + no-cache
+    // Exames (CSV ; primeira coluna) — RAW + no-cache
     fetchNoCache(examesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -333,7 +339,7 @@
           sel.appendChild(opt);
         });
 
-        // ao mudar o exame: troca campo de resultado e seta método default se for "dosagem"
+        // on change
         sel.addEventListener('change', () => {
           atualizarCampoResultado();
           setMetodoDefaultParaExame();
@@ -391,7 +397,7 @@
       }
     }
 
-    // Estrutura fixa de saída
+    // Estrutura fixa de saída (header+watermark+footer uma vez)
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -414,7 +420,7 @@
             <div class="lm-footer__content">
               Consultório Dr. Leandro Mendes – Euroville Tower Corporate<br>
               Praça Maastrich, 200, sala 603, Bragança Paulista-SP<br>
-              <a href="mailto:doutorleandromendes@gmail.com">doutorleandromendes@gmail.com</a> | 
+              <a href="mailto:doutorleandromendes@gmail.com">doutorleandromendes@gmail.com</a> |
               <a href="tel:+5511996112338">(11) 99611-2338</a>
             </div>
           </footer>`;
@@ -422,10 +428,21 @@
       cont.style.display='block';
     }
 
-    // Geração
+    // Geração de laudo
     function gerarLaudo(){
       garantirEstrutura();
-      const [nomeCompleto, dn] = (document.getElementById('paciente').value||'').split('|');
+
+      const pacienteSel = document.getElementById('paciente').value;
+      let nomeCompleto = '', dn = '';
+      if (pacienteSel === 'manual') {
+        nomeCompleto = (document.getElementById('pacienteNomeManual').value || '').trim();
+        dn = toBRDate((document.getElementById('pacienteDNManual').value || '').trim());
+      } else {
+        const parts = (pacienteSel||'').split('|');
+        nomeCompleto = parts[0] || '';
+        dn = parts[1] || '';
+      }
+
       const dataTeste = toBRDate(document.getElementById('data').value);
       const exame = (document.getElementById('exame').value || '').trim();
       const amostra = document.getElementById('amostra').value;
@@ -433,6 +450,7 @@
       let resultadoBruto = document.getElementById('resultado').value || '';
       const hoje = new Date().toLocaleDateString('pt-BR');
 
+      // identificação, uma vez
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
@@ -459,7 +477,7 @@
             resultadoBruto = resultadoBruto + cfg.unit;
           }
         } else {
-          valorRef = '—'; // exame com “dosagem” sem cfg conhecida
+          valorRef = '—';
         }
       }
 

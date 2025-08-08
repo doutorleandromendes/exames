@@ -138,14 +138,33 @@
 
   <script>
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
-    const examesURL = 'https://cdn.jsdelivr.net/gh/doutorleandromendes/exames@main/products.csv';
+    const examesURL     = 'https://cdn.jsdelivr.net/gh/doutorleandromendes/exames@main/products.csv';
 
-    // Exames com resultado em texto livre + valor de referência e unidade automáticos
-    const FREE_TEXT_EXAMS = {
-      'Dosagem sérica de Procalcitonina': { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
-      'Cistatina C – Dosagem sérica':     { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
-      'Proteína C Reativa – Dosagem sérica': { ref: 'Inferior a 0,1 mg/L', unit: ' mg/L' }
+    /* ====== FREE-TEXT EXAMS (com unidade e valor de referência específicos) ====== */
+    const FREE_TEXT_EXAMS_DISPLAY = {
+      'Dosagem sérica de Procalcitonina':           { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
+      'Cistatina C – Dosagem sérica':               { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
+      'Proteína C Reativa – Dosagem sérica':        { ref: 'Inferior a 0,1 mg/L',   unit: ' mg/L' }
     };
+
+    function normalizeName(s){
+      return (s||'')
+        .toString()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // remove acentos
+        .replace(/[–—−]/g,'-')                             // todos traços -> hífen
+        .replace(/\s+/g,' ')                                // colapsa espaços
+        .trim()
+        .toLowerCase();
+    }
+    const FREE_TEXT_MAP = (() => {
+      const m = new Map();
+      Object.keys(FREE_TEXT_EXAMS_DISPLAY).forEach(k => m.set(normalizeName(k), k));
+      return m;
+    })();
+    function getFreeTextConfig(nomeExame){
+      const key = FREE_TEXT_MAP.get(normalizeName(nomeExame));
+      return key ? FREE_TEXT_EXAMS_DISPLAY[key] : null;
+    }
 
     document.addEventListener('DOMContentLoaded', () => {
       const hoje = new Date();
@@ -170,12 +189,12 @@
       return s;
     }
 
-    // Carrega pacientes
+    /* ====== Carrega pacientes (Google Sheets CSV) ====== */
     fetch(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
         const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
-        const rows = parsed.data;
+        const rows = parsed.data || [];
         const pacientes = rows.map(r => {
           const keys = Object.keys(r);
           return {
@@ -192,55 +211,47 @@
           sel.appendChild(opt);
         });
         document.getElementById('statusPac').textContent = `Pacientes carregados: ${pacientes.length}`;
-      });
+      })
+      .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    // Carrega exames
-  fetch(examesURL)
-  .then(r => r.text())
-  .then(csv => {
-    const parsed = Papa.parse(csv, {
-      header: true,
-      delimiter: ';',
-      skipEmptyLines: true
-    });
+    /* ====== Carrega exames (CSV ; — usa sempre a 1ª coluna) ====== */
+    fetch(examesURL)
+      .then(r=>r.text())
+      .then(csv=>{
+        const parsed = Papa.parse(csv, {
+          header: true,
+          delimiter: ';',
+          skipEmptyLines: true
+        });
+        const firstKey = (parsed.meta && parsed.meta.fields && parsed.meta.fields[0]) || 'Product Name';
+        const exames = (parsed.data || [])
+          .map(r => (r[firstKey] || '').toString().trim())
+          .filter(Boolean)
+          .sort((a,b)=>a.localeCompare(b,'pt-BR',{sensitivity:'base'}));
 
-    const firstKey = parsed.meta.fields[0]; // sempre pega a primeira coluna
-    const exames = (parsed.data || [])
-      .map(r => (r[firstKey] || '').toString().trim())
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+        const sel = document.getElementById('exame');
+        sel.innerHTML = '';
+        exames.forEach(nome=>{
+          const opt=document.createElement('option');
+          opt.value=nome;
+          opt.textContent=nome;
+          sel.appendChild(opt);
+        });
 
-    const sel = document.getElementById('exame');
-    sel.innerHTML = '';
-    exames.forEach(nome => {
-      const opt = document.createElement('option');
-      opt.value = nome;
-      opt.textContent = nome;
-      sel.appendChild(opt);
-    });
+        sel.addEventListener('change', atualizarCampoResultado);
+        atualizarCampoResultado();
+        document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
+      })
+      .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    sel.removeEventListener('change', atualizarCampoResultado);
-    sel.addEventListener('change', atualizarCampoResultado);
-    atualizarCampoResultado();
-
-    document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
-  })
-  .catch(err => {
-    console.error(err);
-    document.getElementById('statusExames').textContent = 'Erro ao carregar exames';
-  });
-
-    function isFreeTextExam(nomeExame){
-      return Object.prototype.hasOwnProperty.call(FREE_TEXT_EXAMS, nomeExame);
-    }
-
+    /* ====== Campo de Resultado (dropdown ↔ texto livre) ====== */
     function atualizarCampoResultado(){
-      const nomeExame = document.getElementById('exame').value;
+      const nomeExame = (document.getElementById('exame').value || '').trim();
+      const cfg = getFreeTextConfig(nomeExame);
       const container = document.getElementById('resultado-container');
       container.innerHTML = '';
 
-      if (isFreeTextExam(nomeExame)) {
-        // Campo numérico (aceita vírgula/ponto). Mantemos input text para aceitar vírgula; validamos depois.
+      if (cfg) {
         const input = document.createElement('input');
         input.type = 'text';
         input.inputMode = 'decimal';
@@ -248,7 +259,6 @@
         input.id = 'resultado';
         input.style.fontWeight = 'bold';
         input.style.textAlign = 'center';
-        // Ajuda: bloqueia letras rapidamente (permite dígitos, vírgula, ponto)
         input.addEventListener('input', (e)=>{
           e.target.value = e.target.value.replace(/[^\d.,]/g,'');
         });
@@ -260,14 +270,14 @@
         select.style.textAlign = 'center';
         ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{
           const opt=document.createElement('option');
-          opt.value=v;
-          opt.textContent=v;
+          opt.value=v; opt.textContent=v;
           select.appendChild(opt);
         });
         container.appendChild(select);
       }
     }
 
+    /* ====== Estrutura fixa de saída ====== */
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -298,39 +308,16 @@
       cont.style.display='block';
     }
 
+    /* ====== Geração dos blocos ====== */
     function gerarLaudo(){
       garantirEstrutura();
       const [nomeCompleto, dn] = (document.getElementById('paciente').value||'').split('|');
       const dataTeste = toBRDate(document.getElementById('data').value);
-      const exame = document.getElementById('exame').value;
+      const exame = (document.getElementById('exame').value || '').trim();
       const amostra = document.getElementById('amostra').value;
       const metodo = document.getElementById('metodo').value;
       let resultadoBruto = document.getElementById('resultado').value || '';
       const hoje = new Date().toLocaleDateString('pt-BR');
-
-      // Valor de referência (default)
-      let valorRef = 'NÃO REAGENTE';
-
-      // Se exame é de texto livre, normaliza número e aplica unidade
-      if (isFreeTextExam(exame)) {
-        const cfg = FREE_TEXT_EXAMS[exame];
-        valorRef = cfg.ref;
-
-        // Normaliza: aceita vírgula/ponto; mantém como string com vírgula no final
-        let num = resultadoBruto.trim().replace(',', '.');
-        const n = parseFloat(num);
-        if (!isNaN(n)) {
-          // Converte para padrão BR com vírgula; mantém até 2 casas se houver decimais
-          const casas = (num.includes('.') ? 2 : 0);
-          const str = n.toFixed(casas).replace('.', ',');
-          resultadoBruto = str + cfg.unit;
-        } else {
-          // Se usuário digitou algo inesperado, apenas concatena unidade como fallback
-          if (resultadoBruto && !resultadoBruto.includes(cfg.unit.trim())) {
-            resultadoBruto = resultadoBruto + cfg.unit;
-          }
-        }
-      }
 
       // Preenche identificação uma vez
       const header = document.getElementById('headerInfo');
@@ -341,6 +328,22 @@
           <p><strong>Data do Teste:</strong> ${dataTeste||'____/____/____'}</p>
           <p><strong>Emitido em:</strong> ${hoje}</p>`;
         header.dataset.filled = '1';
+      }
+
+      // Valor de referência + resultado (free-text x default)
+      let valorRef = 'NÃO REAGENTE';
+      const cfg = getFreeTextConfig(exame);
+      if (cfg) {
+        valorRef = cfg.ref;
+        let num = resultadoBruto.trim().replace(',', '.');
+        const n = parseFloat(num);
+        if (!isNaN(n)) {
+          const casas = num.includes('.') ? 2 : 0;
+          const str = n.toFixed(casas).replace('.', ',');
+          resultadoBruto = str + cfg.unit;
+        } else if (resultadoBruto && !resultadoBruto.includes(cfg.unit.trim())) {
+          resultadoBruto = resultadoBruto + cfg.unit;
+        }
       }
 
       const bloco = document.createElement('div');
@@ -359,7 +362,8 @@
     function novoExameMesmoPaciente(){
       document.getElementById('exame').selectedIndex = 0;
       atualizarCampoResultado();
-      document.getElementById('resultado').focus();
+      const res = document.getElementById('resultado');
+      if (res) res.focus();
     }
   </script>
 </body>

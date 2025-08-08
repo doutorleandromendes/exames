@@ -3,20 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <title>Gerador de Laudos — Consultório Dr. Leandro Mendes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Parser CSV -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <style>
-    :root {
+    :root{
       --pad-x: 80px;
       --pad-top: 18px;
       --gap: 10px;
-      --txt-strong: #111;
-      --txt: #333;
-      --mute: #666;
-      --accent: #2b2b2b;
-      --wm-opacity: .08;
-      --wm-width: 62vw;
+      --txt-strong:#111;
+      --txt:#333;
+      --mute:#666;
+      --accent:#2b2b2b;
+      --wm-opacity:.08;
+      --wm-width:62vw;
     }
     html, body { height: 100%; }
+    html { -webkit-text-size-adjust: 100%; }
     body {
       font-family: system-ui, -apple-system, Segoe UI, Inter, Arial, sans-serif;
       line-height: 1.6;
@@ -24,14 +27,14 @@
       margin: 0;
       padding: var(--pad-top) var(--pad-x) 60px var(--pad-x);
       background: #fff;
+      font-size: 14px;
     }
     h2 { margin: 0 0 12px; }
     label { display: block; margin-bottom: 6px; font-size: 14px; }
     select, input[type="text"], input[type="date"] { width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px; }
     button { padding: 10px 16px; background: #007BFF; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     button + button { margin-left: 8px; }
-    .paciente-manual { display: none; gap: 10px; margin-bottom: 12px; }
-    .paciente-manual .col { flex: 1; }
+
     /* Header */
     .lm-header{ position: relative; padding: 18px 0 14px 0; }
     .lm-header__wrap{ display:flex; align-items:flex-end; justify-content:flex-end; gap: 16px; }
@@ -40,30 +43,108 @@
     .lm-header__title{ font: 600 20px/1.1 system-ui; color: var(--txt-strong); letter-spacing:.06em; text-transform: uppercase; }
     .lm-header__logo{ height: 44px; width:auto; object-fit: contain; opacity:.95; }
     .lm-header__rule{ height:2px; background: var(--accent); margin-top: 10px; opacity:.25; }
-    .lm-watermark{ position:absolute; right: clamp(0px, 4vw, 48px); top: 50%; transform: translateY(-50%); width: var(--wm-width); opacity: var(--wm-opacity); pointer-events:none; user-select:none; z-index: 0; }
+
+    /* watermark */
+    .lm-watermark{ position:absolute; right: clamp(0px, 4vw, 48px); top: 50%; transform: translateY(-50%); width: var(--wm-width); max-width: 700px; opacity: var(--wm-opacity); pointer-events:none; user-select:none; z-index: 0; }
+
+    /* UI paciente manual */
+    .paciente-manual { display:none; gap: 10px; margin-bottom: 12px; }
+    .paciente-manual .col { flex:1; }
+
+    /* Saída */
     .laudos-container { display: none; position: relative; z-index:1; }
     .header-info { display:flex; flex-wrap:wrap; gap:12px 18px; align-items:flex-end; margin: 14px 0 10px; }
     .header-info p { margin:0; font-size:14px; color: var(--txt); }
+
     .exames-list { margin-top: 8px; }
     .laudo { position: relative; margin-top: 16px; page-break-inside: avoid; }
-    .exame-box { font-weight: bold; font-style: italic; background: #e9e9e9; padding: 6px 10px; text-align: left; margin: 14px 0; border-radius: 3px; }
-    .linha-top { display: flex; justify-content: space-between; margin: 8px 0 4px; }
+
+    /* Nome do exame = igual ao resultado, alinhado à esquerda */
+    .exame-box {
+      font-weight: bold;
+      font-style: italic;
+      background: #e9e9e9;
+      padding: 6px 10px;
+      text-align: left;
+      margin: 14px 0;
+      border-radius: 3px;
+      font-size: 16px;
+    }
+    .linha-top { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 4px; }
     .amostra, .ref { color: #666; font-size: 13px; margin: 0; }
     .metodo { color: #666; font-size: 13px; margin: 2px 0 10px; }
-    .resultado-box { text-align: center; font-size: 16px; font-weight: bold; background: #f5f5f5; padding: 10px 20px; width: max-content; margin: 16px auto 8px; border-radius: 3px; }
-    .assinatura-digital { margin-top: 24px; text-align: center; font-size: 12px; font-weight: bold; }
-    .lm-footer{ background:#111; color:#f5f5f5; padding:12px; font: 400 11.5px/1.4 system-ui; text-align:center; margin-top: 12px; }
+
+    .resultado-box {
+      text-align: center;
+      font-size: 16px;
+      font-weight: bold;
+      background: #f5f5f5;
+      padding: 10px 20px;
+      width: max-content;
+      margin: 16px auto 8px;
+      border-radius: 3px;
+    }
+
+    /* Assinatura digital */
+    .assinatura-digital {
+      font-size: 11px;
+      font-weight: bold;
+      text-align: center;
+      margin-top: 48px; /* ~3 linhas antes do texto */
+      margin-bottom: 8px;
+    }
+
+    /* Footer */
+    .lm-footer{
+      background:#111;
+      color:#f5f5f5;
+      padding:10px 12px;   /* altura reduzida */
+      font: 400 11px/1.4 system-ui;
+      text-align:center;
+      margin-top: 10px;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
     .lm-footer__content{ max-width: 820px; margin: 0 auto; }
     .lm-footer a{ color:#f5f5f5; text-decoration:none; }
     .lm-footer a:hover{ text-decoration:underline; }
+
     .status { font-size: 12px; color: #555; margin: 4px 0 10px; }
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
+
     @media print {
+      /* página A4 com margem discreta */
+      @page { size: A4; margin: 12mm; }
+
+      /* esconde UI */
       .formulario, .acoes, details.debug { display: none !important; }
+
+      /* mostra saída */
       .laudos-container { display: block; }
-      .header-info, .exames-list, .assinatura-digital { font-size: 70% !important; }
-      .exame-box, .resultado-box, .amostra, .ref, .metodo { font-size: inherit !important; }
+
+      /* manter tamanhos iguais ao da tela */
+      body { font-size: 14px !important; line-height: 1.6 !important; }
+      .lm-header__clinic { font-size: 12px !important; }
+      .lm-header__title  { font-size: 20px !important; }
+      .header-info,
+      .header-info p,
+      .header-info strong,
+      .header-info span { font-size: 14px !important; }
+      .exame-box       { font-size: 16px !important; }
+      .resultado-box   { font-size: 16px !important; }
+      .amostra, .ref, .metodo { font-size: 13px !important; }
+      .assinatura-digital { font-size: 11px !important; }
+      .lm-footer { font-size: 11px !important; }
+
+      /* evita quebras feias e página extra */
+      html, body { margin: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
+      .laudos-container { page-break-after: auto; break-inside: avoid; }
+      .laudo { page-break-inside: avoid; break-inside: avoid; margin-bottom: 12px; }
+      .laudos-container > .laudo:last-of-type { page-break-after: auto; break-after: auto; }
+      .lm-footer { page-break-inside: avoid; break-inside: avoid; margin-top: 8mm !important; }
+
+      /* neutraliza padding da versão de tela para não "empurrar" conteúdo */
+      body { padding: 0 var(--pad-x) 0 var(--pad-x) !important; }
     }
   </style>
 </head>
@@ -71,6 +152,7 @@
   <div class="formulario">
     <h2>Gerador de Laudos</h2>
 
+    <!-- Seleção/entrada de paciente -->
     <label for="paciente">Selecionar Paciente:</label>
     <select id="paciente" onchange="togglePacienteManual()"></select>
     <div id="statusPac" class="status">Carregando pacientes…</div>
@@ -109,23 +191,37 @@
       <option>Imunocromatografia de Fluxo Lateral</option>
       <option>Imunofluorescência</option>
       <option>Coloração de Gram</option>
+      <option>Coloração de Giemsa</option>
+      <option>Coloração de Leishman</option>
+      <option>Coloração de Kinyoun Modificada</option>
+      <option>Coloração de Grocott-Gomori</option>
+      <option>Microscopia com KOH</option>
     </select>
 
     <label>Resultado:</label>
     <div id="resultado-container"></div>
 
-    <div class="acoes">
+    <div class="acoes" style="margin-top:8px;">
       <button onclick="gerarLaudo()">Adicionar exame</button>
       <button onclick="novoExameMesmoPaciente()">Novo exame (mesmo paciente)</button>
       <button onclick="window.print()">Imprimir / Salvar PDF</button>
     </div>
   </div>
 
+  <!-- Saída -->
   <div class="laudos-container" id="laudos"></div>
 
   <script>
+    // ==== URLs dos CSVs ====
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
-    const examesURL = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/products.csv';
+    const examesURL    = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv';
+
+    // ==== Utilidades ====
+    function fetchNoCache(url, opts = {}) {
+      const sep = url.includes('?') ? '&' : '?';
+      const busted = `${url}${sep}_ts=${Date.now()}`;
+      return fetch(busted, { cache: 'no-store', mode: 'cors', credentials: 'omit', ...opts });
+    }
 
     function togglePacienteManual(){
       const sel = document.getElementById('paciente');
@@ -133,88 +229,176 @@
       manualWrap.style.display = sel.value === 'manual' ? 'flex' : 'none';
     }
 
-    function formatarDataBR(dataISO){
-      if(!dataISO) return '____/____/____';
-      const [a,m,d] = dataISO.split('-');
-      return `${d}/${m}/${a}`;
+    function toBRDate(str){
+      if (!str) return '';
+      const s = String(str).trim();
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+      if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) return s.replace(/-/g,'/');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y,m,d]=s.split('-'); return `${d}/${m}/${y}`; }
+      const d = new Date(s);
+      if (!isNaN(d)) {
+        const dd = String(d.getDate()).padStart(2,'0');
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const yy = d.getFullYear();
+        return `${dd}/${mm}/${yy}`;
+      }
+      return s;
     }
 
+    function normalize(s){
+      return (s||'')
+        .toString()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/[–—−]/g,'-')
+        .replace(/\s+/g,' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    const FREE_TEXT_EXAMS_DISPLAY = {
+      'dosagem serica de procalcitonina':    { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
+      'cistatina c - dosagem serica':        { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
+      'proteina c reativa - dosagem serica': { ref: 'Inferior a 0,1 mg/L',   unit: ' mg/L' },
+    };
+    function isDosagem(nome){ return normalize(nome).includes('dosagem'); }
+    function cfgDosagem(nome){ return FREE_TEXT_EXAMS_DISPLAY[normalize(nome)] || null; }
+
+    // ==== Datas default ====
     document.addEventListener('DOMContentLoaded', () => {
-      const hoje = new Date().toISOString().split('T')[0];
-      document.getElementById('data').value = hoje;
+      document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
-    fetch(pacientesURL)
-      .then(r => r.text())
-      .then(csv => {
-        const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true }).data;
+    // ==== Carrega Pacientes (CSV) + opção manual ====
+    fetchNoCache(pacientesURL)
+      .then(r=>r.text())
+      .then(csv=>{
+        const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+        const rows = parsed.data || [];
+        const pacientes = rows.map(r => {
+          const keys = Object.keys(r);
+          return {
+            nome: `${r[keys[0]]||''} ${r[keys[1]]||''}`.trim(),
+            dn: toBRDate(r[keys[2]]||'')
+          };
+        }).filter(p=>p.nome);
+
+        pacientes.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'}));
+
         const sel = document.getElementById('paciente');
+        sel.innerHTML = '';
+
         const optManual = document.createElement('option');
         optManual.value = 'manual';
         optManual.textContent = '— Inserir manualmente —';
         sel.appendChild(optManual);
-        parsed.map(r => {
-          const keys = Object.keys(r);
-          const nome = (r[keys[0]]||'').trim();
-          const sobrenome = (r[keys[1]]||'').trim();
-          const dn = (r[keys[2]]||'').trim();
-          if (nome || sobrenome){
-            const o = document.createElement('option');
-            o.value = `${nome} ${sobrenome}|${dn}`;
-            o.textContent = `${nome} ${sobrenome}`;
-            sel.appendChild(o);
-          }
+
+        pacientes.forEach(p=>{
+          const opt=document.createElement('option');
+          opt.value=`${p.nome}|${p.dn}`;
+          opt.textContent=p.nome;
+          sel.appendChild(opt);
         });
+
+        document.getElementById('statusPac').textContent = `Pacientes carregados: ${pacientes.length}`;
+
+        // estado inicial
         togglePacienteManual();
-      });
+        sel.addEventListener('change', togglePacienteManual);
+      })
+      .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    fetch(examesURL)
-      .then(r => r.text())
-      .then(csv => {
-        const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true }).data;
-        const sel = document.getElementById('exame');
-        parsed.map(r => {
-          const nome = (r['Product Name'] || r[0] || '').trim();
-          if (nome) {
-            const o = document.createElement('option');
-            o.value = nome;
-            o.textContent = nome;
-            sel.appendChild(o);
+    // ==== Carrega Exames (CSV ; primeira coluna) ====
+    fetchNoCache(examesURL)
+      .then(r=>r.text())
+      .then(csv=>{
+        // tenta com ; e header
+        let parsed = Papa.parse(csv, { header: true, delimiter: ';', skipEmptyLines: true });
+        let exames = [];
+        if (parsed.meta && parsed.data && parsed.data.length) {
+          const firstKey = parsed.meta.fields?.[0] || 'Product Name';
+          exames = parsed.data.map(r => (r[firstKey]||'').toString().trim()).filter(Boolean);
+        }
+        // fallback
+        if (!exames.length) {
+          parsed = Papa.parse(csv, { header: false, delimiter: ';', skipEmptyLines: true });
+          const rows = parsed.data || [];
+          for (let i=1; i<rows.length; i++){
+            const nome = (rows[i][0]||'').toString().trim();
+            if (nome) exames.push(nome);
           }
-        });
-        document.getElementById('exame').addEventListener('change', atualizarCampoResultado);
-        atualizarCampoResultado();
-      });
+        }
+        exames = [...new Set(exames)].sort((a,b)=>a.localeCompare(b,'pt-BR',{sensitivity:'base'}));
 
+        const sel = document.getElementById('exame');
+        sel.innerHTML = '';
+        exames.forEach(nome=>{
+          const opt=document.createElement('option');
+          opt.value=nome;
+          opt.textContent=nome;
+          sel.appendChild(opt);
+        });
+
+        document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
+
+        sel.addEventListener('change', () => {
+          atualizarCampoResultado();
+          setMetodoDefaultParaExame();
+        });
+        atualizarCampoResultado();
+        setMetodoDefaultParaExame();
+      })
+      .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
+
+    // ==== Campo Resultado ====
     function atualizarCampoResultado(){
-      const sel = document.getElementById('exame');
-      const exameSelecionado = (sel.value || '').toLowerCase();
+      const nomeExame = (document.getElementById('exame').value || '').trim();
       const container = document.getElementById('resultado-container');
       container.innerHTML = '';
-      if (exameSelecionado.includes('dosagem')){
+
+      if (isDosagem(nomeExame)) {
         const input = document.createElement('input');
         input.type = 'text';
+        input.inputMode = 'decimal';
+        input.placeholder = 'Digite apenas o número';
         input.id = 'resultado';
         input.style.fontWeight = 'bold';
         input.style.textAlign = 'center';
-        document.getElementById('metodo').value = 'Imunofluorescência';
+        input.addEventListener('input', (e)=>{
+          // permite só dígitos, vírgula e ponto
+          e.target.value = e.target.value.replace(/[^\d.,]/g,'');
+        });
         container.appendChild(input);
       } else {
         const select = document.createElement('select');
         select.id = 'resultado';
-        ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v => {
-          const o = document.createElement('option');
-          o.value = v;
-          o.textContent = v;
+        select.style.fontWeight = 'bold';
+        select.style.textAlign = 'center';
+        ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{
+          const o=document.createElement('option');
+          o.value=v; o.textContent=v;
           select.appendChild(o);
         });
         container.appendChild(select);
       }
     }
 
-    function gerarLaudo(){
+    // Default método = Imunofluorescência quando for “dosagem”
+    function setMetodoDefaultParaExame(){
+      const nomeExame = (document.getElementById('exame').value || '').trim();
+      const metodoSel = document.getElementById('metodo');
+      if (isDosagem(nomeExame)) {
+        // tenta selecionar "Imunofluorescência" (mantém se já for outro por escolha manual)
+        if (metodoSel.value !== 'Imunofluorescência') {
+          const opt = Array.from(metodoSel.options).find(o => o.textContent.trim() === 'Imunofluorescência');
+          if (opt) metodoSel.value = opt.value;
+        }
+      }
+    }
+
+    // ==== Estrutura fixa (header + watermark + footer uma vez) ====
+    function garantirEstrutura(){
       const cont = document.getElementById('laudos');
-      if (!document.getElementById('lmHeader')){
+      if (!document.getElementById('lmHeader')) {
         cont.innerHTML = `
           <header class="lm-header" id="lmHeader">
             <div class="lm-header__wrap">
@@ -230,38 +414,70 @@
           <div class="header-info" id="headerInfo"></div>
           <div class="exames-list" id="examesList"></div>
           <div class="assinatura-digital">Assinado Digitalmente por: Leandro César Mendes - CRM 134.985SP</div>
-          <footer class="lm-footer">
+          <footer class="lm-footer" id="lmFooter">
             <div class="lm-footer__content">
               Consultório Dr. Leandro Mendes – Euroville Tower Corporate<br>
               Praça Maastrich, 200, sala 603, Bragança Paulista-SP<br>
-              <a href="mailto:doutorleandromendes@gmail.com">doutorleandromendes@gmail.com</a> | (11) 99611-2338
+              <a href="mailto:doutorleandromendes@gmail.com">doutorleandromendes@gmail.com</a> |
+              <a href="tel:+5511996112338">(11) 99611-2338</a>
             </div>
-          </footer>
-        `;
+          </footer>`;
       }
-      const [nomeCompleto, dnISO=''] = (document.getElementById('paciente').value || '').split('|');
-      const nomeFinal = document.getElementById('paciente').value === 'manual'
-        ? document.getElementById('pacienteNomeManual').value
-        : nomeCompleto;
-      const dnFinal = document.getElementById('paciente').value === 'manual'
-        ? document.getElementById('pacienteDNManual').value
-        : dnISO;
-      const dataNascimento = dnFinal.includes('-') ? formatarDataBR(dnFinal) : dnFinal;
-      const dataTeste = formatarDataBR(document.getElementById('data').value);
-      const exame = document.getElementById('exame').value;
+      cont.style.display='block';
+    }
+
+    // ==== Geração do laudo ====
+    function gerarLaudo(){
+      garantirEstrutura();
+
+      const pacienteSel = document.getElementById('paciente').value;
+      let nomeCompleto = '', dn = '';
+      if (pacienteSel === 'manual') {
+        nomeCompleto = (document.getElementById('pacienteNomeManual').value || '').trim();
+        dn = toBRDate((document.getElementById('pacienteDNManual').value || '').trim());
+      } else {
+        const parts = (pacienteSel||'').split('|');
+        nomeCompleto = parts[0] || '';
+        dn = parts[1] || '';
+      }
+
+      const dataTeste = toBRDate(document.getElementById('data').value);
+      const exame = (document.getElementById('exame').value || '').trim();
       const amostra = document.getElementById('amostra').value;
       const metodo = document.getElementById('metodo').value;
-      const resultado = document.getElementById('resultado').value;
+      let resultadoBruto = document.getElementById('resultado').value || '';
       const hoje = new Date().toLocaleDateString('pt-BR');
 
+      // identificação, uma vez
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
-          <p><strong>Nome:</strong> ${nomeFinal}</p>
-          <p><strong>Data de Nascimento:</strong> ${dataNascimento}</p>
-          <p><strong>Data do Teste:</strong> ${dataTeste}</p>
+          <p><strong>Nome:</strong> ${nomeCompleto||''}</p>
+          <p><strong>Data de Nascimento:</strong> ${dn||'____/____/____'}</p>
+          <p><strong>Data do Teste:</strong> ${dataTeste||'____/____/____'}</p>
           <p><strong>Emitido em:</strong> ${hoje}</p>`;
         header.dataset.filled = '1';
+      }
+
+      // Valor de referência & unidade automáticas p/ DOSAGENS
+      let valorRef = 'NÃO REAGENTE';
+      if (isDosagem(exame)) {
+        const cfg = cfgDosagem(exame);
+        if (cfg) {
+          valorRef = cfg.ref;
+          // se o usuário digitou só o número, formata e concatena a unidade
+          let num = resultadoBruto.trim().replace(',', '.');
+          const n = parseFloat(num);
+          if (!isNaN(n)) {
+            const casas = num.includes('.') ? 2 : 0;
+            const str = n.toFixed(casas).replace('.', ',');
+            resultadoBruto = str + cfg.unit;
+          } else if (resultadoBruto && !resultadoBruto.includes((cfg.unit||'').trim())) {
+            resultadoBruto = resultadoBruto + cfg.unit;
+          }
+        } else {
+          valorRef = '—';
+        }
       }
 
       const bloco = document.createElement('div');
@@ -270,18 +486,19 @@
         <div class="exame-box">${exame}</div>
         <div class="linha-top">
           <p class="amostra"><strong>Amostra:</strong> ${amostra}</p>
-          <p class="ref"><strong>Valor de referência:</strong> NÃO REAGENTE</p>
+          <p class="ref"><strong>Valor de referência:</strong> ${valorRef}</p>
         </div>
         <p class="metodo"><strong>Método:</strong> ${metodo}</p>
-        <div class="resultado-box"><strong>Resultado:</strong> ${resultado}</div>`;
+        <div class="resultado-box"><strong>Resultado:</strong> ${resultadoBruto}</div>`;
       document.getElementById('examesList').appendChild(bloco);
-      cont.style.display = 'block';
     }
 
     function novoExameMesmoPaciente(){
       document.getElementById('exame').selectedIndex = 0;
       atualizarCampoResultado();
-      document.getElementById('resultado').focus();
+      setMetodoDefaultParaExame();
+      const res = document.getElementById('resultado');
+      if (res) res.focus();
     }
   </script>
 </body>

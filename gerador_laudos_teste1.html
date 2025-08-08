@@ -195,25 +195,42 @@
       });
 
     // Carrega exames
-    fetch(examesURL)
-      .then(r=>r.text())
-      .then(csv=>{
-        const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
-        const exames = parsed.data
-          .map(r => r['Product Name'] || Object.values(r)[0])
-          .filter(Boolean)
-          .sort((a,b)=>a.localeCompare(b,'pt-BR',{sensitivity:'base'}));
-        const sel = document.getElementById('exame');
-        exames.forEach(n=>{
-          const opt=document.createElement('option');
-          opt.value=n;
-          opt.textContent=n;
-          sel.appendChild(opt);
-        });
-        sel.addEventListener('change', atualizarCampoResultado);
-        atualizarCampoResultado();
-        document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
+  fetch(examesURL)
+    .then(r => r.text())
+    .then(csv => {
+      const parsed = Papa.parse(csv, {
+        header: true,
+        delimiter: ';',           // <-- força ; como separador
+        skipEmptyLines: true,
+        transformHeader: h => (h || '').trim().replace(/^\uFEFF/, '') // tira BOM/espacos
       });
+
+      const exames = (parsed.data || [])
+        .map(r => (r['Product Name'] || '').toString().trim())
+        .filter(Boolean)
+        .sort((a,b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
+      const sel = document.getElementById('exame');
+      sel.innerHTML = ''; // limpa qualquer resto
+      exames.forEach(nome => {
+        const opt = document.createElement('option');
+        opt.value = nome;
+        opt.textContent = nome;
+        sel.appendChild(opt);
+      });
+
+      // reconfigura o campo de resultado conforme o exame
+      sel.removeEventListener('change', atualizarCampoResultado);
+      sel.addEventListener('change', atualizarCampoResultado);
+      atualizarCampoResultado();
+
+      document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
+    })
+    .catch(err => {
+      console.error(err);
+      document.getElementById('statusExames').textContent = 'Erro ao carregar exames';
+    });
+
 
     function isFreeTextExam(nomeExame){
       return Object.prototype.hasOwnProperty.call(FREE_TEXT_EXAMS, nomeExame);

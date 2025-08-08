@@ -105,12 +105,80 @@
     .status.err { color: #b00020; }
 
     @media print {
-      body { background:#fff; font-size: 50%; } /* 30% menor */
-      .formulario, .acoes, details.debug { display: none !important; }
-      .laudos-container { display: block; }
-      .assinatura-digital{ margin-top: 3.2em; } /* mantém ~3 linhas com redução */
-      .lm-footer{ background:#111 !important; color:#fff !important; }
-    }
+  /* página configurada pra A4 com margem discreta */
+  @page { size: A4; margin: 12mm; }
+
+  /* não mexe em header/footer/watermark */
+  .lm-header,
+  .lm-footer,
+  .lm-watermark {
+    font-size: 100% !important;
+    transform: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* esconde a UI */
+  .formulario,
+  .acoes,
+  details.debug {
+    display: none !important;
+  }
+
+  /* mostra apenas a saída */
+  .laudos-container {
+    display: block;
+  }
+
+  /* mantém fontes como na tela (sem 70%) */
+  .header-info,
+  .exames-list,
+  .assinatura-digital,
+  .exame-box,
+  .resultado-box,
+  .amostra,
+  .ref,
+  .metodo {
+    font-size: inherit !important;
+  }
+
+  /* evita quebras feias e página extra */
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;          /* zera padding global pra não “empurrar” conteúdo */
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* o container já tem margem interna suficiente; evita overflow no fim */
+  .laudos-container {
+    page-break-after: auto;
+    break-inside: avoid;
+  }
+
+  .laudo {
+    page-break-inside: avoid;       /* não quebrar no meio de um exame */
+    break-inside: avoid;
+    margin-bottom: 12px;            /* um respiro entre blocos */
+  }
+
+  /* evita que o último bloco force nova página */
+  .laudos-container > .laudo:last-of-type {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* rodapé não quebra no meio e não empurra uma página sozinha */
+  .lm-footer {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-top: 8mm;
+  }
+
+  /* se você tinha um padding grande no body na versão de tela, neutraliza aqui */
+  body { padding: 0 var(--pad-x) 0 var(--pad-x) !important; }
+}
+
   </style>
 </head>
 <body>

@@ -113,44 +113,36 @@
     .status.err { color: #b00020; }
 
     @media print {
-  /* Folha A4, zero margem do navegador */
-  @page {
-    size: A4 portrait;
-    margin: 0;
-  }
+  @page { size: A4 portrait; margin: 0; }
 
-  /* Nada de “zoom” automático do Safari/Chrome */
-  html {
-    -webkit-text-size-adjust: 100% !important;
-    text-size-adjust: 100% !important;
-  }
-
-  /* Esconde UI e mostra só a saída */
+  /* Esconde a UI, mostra a saída */
   .formulario, .acoes, details.debug { display: none !important; }
   .laudos-container { display: block !important; }
 
-  /* Full-bleed: conteúdo até as bordas laterais. 
-     Você controla o “respiro” lateral com estes paddings. */
+  /* NÃO fixe altura! Deixe crescer naturalmente */
   html, body {
+    /* width opcional: você pode manter se quiser 210mm exatos,
+       mas o que importa é NÃO ter height fixa */
     width: 210mm;
-    height: 297mm;
+    height: auto !important;
+    min-height: 0 !important;
     margin: 0 !important;
     padding: 0 !important;
     background: #fff !important;
     overflow: visible !important;
   }
 
-  /* Respiro interno (ajuste se quiser mais/menos margem visual) */
+  /* Respiro lateral (ajuste se quiser) */
   .lm-header,
   .header-info,
   .exames-list,
   .assinatura-digital,
   .lm-footer {
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
+    padding-left: 4mm !important;
+    padding-right: 4mm !important;
   }
 
-  /* Mantém tamanhos exatamente como na tela (nada de diminuir/aumentar) */
+  /* Tamanhos fiéis ao que você vê na tela */
   body { font-size: 14px !important; line-height: 1.6 !important; }
   .lm-header__clinic { font-size: 12px !important; }
   .lm-header__title  { font-size: 20px !important; }
@@ -164,20 +156,25 @@
   .assinatura-digital { font-size: 11px !important; }
   .lm-footer { font-size: 11px !important; }
 
-  /* Marca d’água e cores fiéis */
-  .lm-footer,
-  .exame-box,
-  .resultado-box {
+  /* Cores fiéis */
+  .lm-footer, .exame-box, .resultado-box {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
-  /* Evita página em branco e quebras ruins */
-  .laudos-container { break-inside: avoid; page-break-after: auto; }
+  /* Quebras controladas e sem página extra */
   .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-  .laudos-container > .laudo:last-of-type { break-after: auto; page-break-after: auto; }
-  .lm-footer { break-inside: avoid; page-break-inside: avoid; margin-top: 8mm !important; }
+  .laudos-container { break-inside: avoid; page-break-after: auto; }
+
+  /* Colapso de margens finais para não “sangrar” 0,5px */
+  .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
+  .assinatura-digital { margin-bottom: 6mm !important; }
+  .lm-footer { margin-top: 6mm !important; break-inside: avoid; page-break-inside: avoid; }
+
+  /* Evita qualquer ajuste de tamanho “esperto” do Safari/Chrome */
+  html { -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }
 }
+
   </style>
 </head>
 <body>

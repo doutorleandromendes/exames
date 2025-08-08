@@ -7,8 +7,10 @@
 
   <!-- PapaParse para CSV -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <!-- html2pdf (html2canvas + jsPDF bundle) para gerar PDF com nome customizado -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-YcsIP+fxpVf7a9b0q2tqk9gQf2kF1wz3xkY1w3z6nq3NQW8qkQfCq1JvQx1a3eB3k0kXq9GJgRkq0qN7dJwZwg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- html2pdf (html2canvas + jsPDF bundle) para gerar PDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- jsPDF puro para fallback (Safari/iOS/Chrome quando html2pdf “engasga”) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <style>
     :root{
@@ -112,7 +114,7 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* (Mantemos regras de impressão nativa como fallback, mas você vai usar o botão Salvar PDF) */
+    /* Fallback de impressão nativa (pode usar o botão Imprimir se quiser) */
     @media print {
       @page { size: A4 portrait; margin: 0; }
       .formulario, .acoes, details.debug { display: none !important; }
@@ -183,7 +185,7 @@
       <button onclick="gerarLaudo()">Adicionar exame</button>
       <button onclick="novoExameMesmoPaciente()">Novo exame (mesmo paciente)</button>
       <button onclick="salvarPDF()">Salvar PDF</button>
-      <!-- opcional: <button onclick="window.print()">Imprimir</button> -->
+      <button onclick="window.print()">Imprimir</button>
     </div>
   </div>
 
@@ -221,24 +223,6 @@
       }
       return s;
     }
-    function normalize(s){
-      return (s||'')
-        .toString()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-        .replace(/[–—−]/g,'-')
-        .replace(/\s+/g,' ')
-        .trim()
-        .lowerCase?.() || (s||'').toString().toLowerCase();
-    }
-
-    // Exames com “dosagem” (campo livre + unidade + referência automáticas)
-    const FREE_TEXT_EXAMS_DISPLAY = {
-      'dosagem serica de procalcitonina':    { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
-      'cistatina c - dosagem serica':        { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
-      'proteina c reativa - dosagem serica': { ref: 'Inferior a 0,1 mg/L',   unit: ' mg/L' },
-    };
-    function isDosagem(nome){ return (nome||'').toLowerCase().includes('dosagem'); }
-    function cfgDosagem(nome){ return FREE_TEXT_EXAMS_DISPLAY[(nome||'').toLowerCase()] || null; }
 
     // ==== Datas default ====
     document.addEventListener('DOMContentLoaded', () => {
@@ -410,7 +394,7 @@
       } else {
         const parts = (pacienteSel||'').split('|');
         nomeCompleto = parts[0] || '';
-        dn = parts[1] || '';
+        dn = toBRDate(parts[1] || '');
       }
 
       const dataTeste = toBRDate(document.getElementById('data').value);
@@ -431,7 +415,7 @@
         header.dataset.filled = '1';
       }
 
-      // Valor de referência & unidade automáticas p/ DOSAGENS
+      // Valor de referência & unidade automáticas p/ DOSAGENS (três casos configurados)
       let valorRef = 'NÃO REAGENTE';
       if (exame.toLowerCase().includes('dosagem')) {
         const cfg = {
@@ -477,8 +461,8 @@
       if (res) res.focus();
     }
 
-    // ==== Salvar PDF com nome customizado (html2pdf) ====
-    function salvarPDF(){
+    // ==== Salvar PDF com nome customizado (html2pdf + fallback jsPDF.html) ====
+    async function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {
         alert('Adicione pelo menos um exame antes de salvar o PDF.');
@@ -487,43 +471,67 @@
 
       // monta nome do arquivo
       const sel = document.getElementById('paciente').value;
-      let nomePaciente = '';
-      if (sel === 'manual') {
-        nomePaciente = (document.getElementById('pacienteNomeManual').value || '').trim();
-      } else {
-        nomePaciente = (sel.split('|')[0] || '').trim();
-      }
+      let nomePaciente = (sel === 'manual')
+        ? (document.getElementById('pacienteNomeManual').value || '').trim()
+        : (sel.split('|')[0] || '').trim();
+
       const dataISO = (document.getElementById('data').value || '').trim(); // YYYY-MM-DD
       const dataNome = dataISO ? dataISO.split('-').reverse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 
-      // opções do html2pdf (A4, borda a borda)
+      // garante visível e com respiro A4
+      const prevDisplay = laudos.style.display;
+      const prevPL = laudos.style.paddingLeft;
+      const prevPR = laudos.style.paddingRight;
+      laudos.style.display = 'block';
+      laudos.style.paddingLeft = '12mm';
+      laudos.style.paddingRight = '12mm';
+
+      // tenta html2pdf com timeout
       const opt = {
         margin: 0,
         filename: nomeArquivo,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: false, backgroundColor: '#ffffff' },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
       };
 
-      // garante que o container esteja visível
-      const prev = laudos.style.display;
-      laudos.style.display = 'block';
+      let salvou = false;
+      const timeout = new Promise(res => setTimeout(res, 6000)); // 6s
 
-      // aplica um “respiro” interno típico de A4 (12mm) sem depender do print nativo
-      laudos.style.paddingLeft = '12mm';
-      laudos.style.paddingRight = '12mm';
+      try {
+        await Promise.race([
+          html2pdf().set(opt).from(laudos).save().then(()=>{ salvou = true; }),
+          timeout
+        ]);
+      } catch(e) {
+        // cai pro fallback
+      }
 
-      html2pdf().set(opt).from(laudos).save().then(()=>{
-        // restaura estilos (se quiser)
-        laudos.style.display = prev || laudos.style.display;
-      }).catch(err=>{
-        console.error(err);
-        alert('Não foi possível gerar o PDF. Tente novamente.');
-        laudos.style.display = prev || laudos.style.display;
-      });
+      if (!salvou) {
+        // FALLBACK jsPDF.html
+        try {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', hotfixes: ['px_scaling'] });
+          await doc.html(laudos, {
+            x: 10, y: 10, width: 190,
+            windowWidth: document.documentElement.scrollWidth,
+            html2canvas: { scale: 2, useCORS: true, allowTaint: false, backgroundColor:'#ffffff' }
+          });
+          doc.save(nomeArquivo);
+          salvou = true;
+        } catch (e) {
+          console.error(e);
+          alert('Não foi possível gerar o PDF. Tente novamente.');
+        }
+      }
+
+      // restaura estilos
+      laudos.style.display = prevDisplay || laudos.style.display;
+      laudos.style.paddingLeft = prevPL || '';
+      laudos.style.paddingRight = prevPR || '';
     }
   </script>
 </body>

@@ -113,39 +113,71 @@
     .status.err { color: #b00020; }
 
     @media print {
-      /* página A4 com margem discreta */
-      @page { size: A4; margin: 12mm; }
+  /* Folha A4, zero margem do navegador */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
 
-      /* esconde UI */
-      .formulario, .acoes, details.debug { display: none !important; }
+  /* Nada de “zoom” automático do Safari/Chrome */
+  html {
+    -webkit-text-size-adjust: 100% !important;
+    text-size-adjust: 100% !important;
+  }
 
-      /* mostra saída */
-      .laudos-container { display: block; }
+  /* Esconde UI e mostra só a saída */
+  .formulario, .acoes, details.debug { display: none !important; }
+  .laudos-container { display: block !important; }
 
-      /* manter tamanhos iguais ao da tela */
-      body { font-size: 14px !important; line-height: 1.6 !important; }
-      .lm-header__clinic { font-size: 12px !important; }
-      .lm-header__title  { font-size: 20px !important; }
-      .header-info,
-      .header-info p,
-      .header-info strong,
-      .header-info span { font-size: 14px !important; }
-      .exame-box       { font-size: 16px !important; }
-      .resultado-box   { font-size: 16px !important; }
-      .amostra, .ref, .metodo { font-size: 13px !important; }
-      .assinatura-digital { font-size: 11px !important; }
-      .lm-footer { font-size: 11px !important; }
+  /* Full-bleed: conteúdo até as bordas laterais. 
+     Você controla o “respiro” lateral com estes paddings. */
+  html, body {
+    width: 210mm;
+    height: 297mm;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
 
-      /* evita quebras feias e página extra */
-      html, body { margin: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
-      .laudos-container { page-break-after: auto; break-inside: avoid; }
-      .laudo { page-break-inside: avoid; break-inside: avoid; margin-bottom: 12px; }
-      .laudos-container > .laudo:last-of-type { page-break-after: auto; break-after: auto; }
-      .lm-footer { page-break-inside: avoid; break-inside: avoid; margin-top: 8mm !important; }
+  /* Respiro interno (ajuste se quiser mais/menos margem visual) */
+  .lm-header,
+  .header-info,
+  .exames-list,
+  .assinatura-digital,
+  .lm-footer {
+    padding-left: 12mm !important;
+    padding-right: 12mm !important;
+  }
 
-      /* neutraliza padding da versão de tela para não "empurrar" conteúdo */
-      body { padding: 0 var(--pad-x) 0 var(--pad-x) !important; }
-    }
+  /* Mantém tamanhos exatamente como na tela (nada de diminuir/aumentar) */
+  body { font-size: 14px !important; line-height: 1.6 !important; }
+  .lm-header__clinic { font-size: 12px !important; }
+  .lm-header__title  { font-size: 20px !important; }
+  .header-info,
+  .header-info p,
+  .header-info strong,
+  .header-info span { font-size: 14px !important; }
+  .exame-box       { font-size: 16px !important; text-align: left !important; }
+  .resultado-box   { font-size: 16px !important; }
+  .amostra, .ref, .metodo { font-size: 13px !important; }
+  .assinatura-digital { font-size: 11px !important; }
+  .lm-footer { font-size: 11px !important; }
+
+  /* Marca d’água e cores fiéis */
+  .lm-footer,
+  .exame-box,
+  .resultado-box {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Evita página em branco e quebras ruins */
+  .laudos-container { break-inside: avoid; page-break-after: auto; }
+  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+  .laudos-container > .laudo:last-of-type { break-after: auto; page-break-after: auto; }
+  .lm-footer { break-inside: avoid; page-break-inside: avoid; margin-top: 8mm !important; }
+}
   </style>
 </head>
 <body>

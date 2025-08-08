@@ -5,17 +5,15 @@
   <title>Gerador de Laudos — Consultório Dr. Leandro Mendes</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- CSV parser -->
+  <!-- PapaParse para CSV -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <!-- Geração de PDF WYSIWYG com nome de arquivo customizado -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNa5l5rXJkZrR7pWgH0w7F2bK6FcX8g4gCqGm1jzFQ2i7qjz5U0D7zT3o2YkH8xCqg+3aYTs2xF9m0rL1r8Qxw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-NAH6dE9x0xIuX2Lxw9rCCr3Jz8Eo2q2o9zQm/Qq7W6i7S6+m3S8s6a+vVtQ4iQ0qv2i6H1vH8SxU2fK1Q4JvWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- html2pdf (html2canvas + jsPDF bundle) para gerar PDF com nome customizado -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-YcsIP+fxpVf7a9b0q2tqk9gQf2kF1wz3xkY1w3z6nq3NQW8qkQfCq1JvQx1a3eB3k0kXq9GJgRkq0qN7dJwZwg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <style>
     :root{
       --pad-x: 80px;
       --pad-top: 18px;
-      --gap: 10px;
       --txt-strong:#111;
       --txt:#333;
       --mute:#666;
@@ -114,54 +112,17 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* Impressão nativa (se quiser manter como opção) — WYSIWYG e sem página extra */
+    /* (Mantemos regras de impressão nativa como fallback, mas você vai usar o botão Salvar PDF) */
     @media print {
       @page { size: A4 portrait; margin: 0; }
-
       .formulario, .acoes, details.debug { display: none !important; }
       .laudos-container { display: block !important; }
-
-      html, body {
-        width: 210mm;
-        height: auto !important;
-        min-height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #fff !important;
-        overflow: visible !important;
-      }
-
-      /* Respiro lateral (ajuste conforme preferir) */
-      .lm-header,
-      .header-info,
-      .exames-list,
-      .assinatura-digital,
-      .lm-footer {
-        padding-left: 12mm !important;
-        padding-right: 12mm !important;
-      }
-
-      /* Mantém tamanhos como na tela */
-      body { font-size: 14px !important; line-height: 1.6 !important; }
-      .lm-header__clinic { font-size: 12px !important; }
-      .lm-header__title  { font-size: 20px !important; }
-      .header-info,
-      .header-info p,
-      .header-info strong,
-      .header-info span { font-size: 14px !important; }
-      .exame-box       { font-size: 16px !important; text-align: left !important; }
-      .resultado-box   { font-size: 16px !important; }
-      .amostra, .ref, .metodo { font-size: 13px !important; }
-      .assinatura-digital { font-size: 11px !important; }
-      .lm-footer { font-size: 11px !important; }
-
+      html, body { width: 210mm; height: auto !important; margin: 0 !important; padding: 0 !important; }
+      .lm-header, .header-info, .exames-list, .assinatura-digital, .lm-footer { padding-left: 12mm !important; padding-right: 12mm !important; }
       .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-      .laudos-container { break-inside: avoid; page-break-after: auto; }
       .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
       .assinatura-digital { margin-bottom: 6mm !important; }
       .lm-footer { margin-top: 6mm !important; break-inside: avoid; page-break-inside: avoid; }
-
-      html { -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }
     }
   </style>
 </head>
@@ -267,7 +228,7 @@
         .replace(/[–—−]/g,'-')
         .replace(/\s+/g,' ')
         .trim()
-        .toLowerCase();
+        .lowerCase?.() || (s||'').toString().toLowerCase();
     }
 
     // Exames com “dosagem” (campo livre + unidade + referência automáticas)
@@ -276,8 +237,8 @@
       'cistatina c - dosagem serica':        { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
       'proteina c reativa - dosagem serica': { ref: 'Inferior a 0,1 mg/L',   unit: ' mg/L' },
     };
-    function isDosagem(nome){ return normalize(nome).includes('dosagem'); }
-    function cfgDosagem(nome){ return FREE_TEXT_EXAMS_DISPLAY[normalize(nome)] || null; }
+    function isDosagem(nome){ return (nome||'').toLowerCase().includes('dosagem'); }
+    function cfgDosagem(nome){ return FREE_TEXT_EXAMS_DISPLAY[(nome||'').toLowerCase()] || null; }
 
     // ==== Datas default ====
     document.addEventListener('DOMContentLoaded', () => {
@@ -364,11 +325,11 @@
 
     // ==== Campo Resultado dinâmico ====
     function atualizarCampoResultado(){
-      const nomeExame = (document.getElementById('exame').value || '').trim();
+      const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const container = document.getElementById('resultado-container');
       container.innerHTML = '';
 
-      if (isDosagem(nomeExame)) {
+      if (nomeExame.includes('dosagem')) {
         const input = document.createElement('input');
         input.type = 'text';
         input.inputMode = 'decimal';
@@ -396,9 +357,9 @@
 
     // Default método = Imunofluorescência quando for “dosagem”
     function setMetodoDefaultParaExame(){
-      const nomeExame = (document.getElementById('exame').value || '').trim();
+      const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const metodoSel = document.getElementById('metodo');
-      if (isDosagem(nomeExame)) {
+      if (nomeExame.includes('dosagem')) {
         if (metodoSel.value !== 'Imunofluorescência') {
           const opt = Array.from(metodoSel.options).find(o => o.textContent.trim() === 'Imunofluorescência');
           if (opt) metodoSel.value = opt.value;
@@ -472,9 +433,13 @@
 
       // Valor de referência & unidade automáticas p/ DOSAGENS
       let valorRef = 'NÃO REAGENTE';
-      if (isDosagem(exame)) {
-        const cfg = cfgDosagem(exame);
-        if (cfg) {
+      if (exame.toLowerCase().includes('dosagem')) {
+        const cfg = {
+          ...(exame.toLowerCase().includes('procalcitonina') ? { ref:'Inferior a 0,10 ng/mL', unit:' ng/mL' } : {}),
+          ...(exame.toLowerCase().includes('cistatina') ? { ref:'Entre 0,57 e 1,06 mg/L', unit:' mg/L' } : {}),
+          ...(exame.toLowerCase().includes('proteina c reativa') ? { ref:'Inferior a 0,1 mg/L', unit:' mg/L' } : {}),
+        };
+        if (cfg.ref) {
           valorRef = cfg.ref;
           // se o usuário digitou só número, formata + unidade
           let num = resultadoBruto.trim().replace(',', '.');
@@ -482,8 +447,8 @@
           if (!isNaN(n)) {
             const casas = num.includes('.') ? 2 : 0;
             const str = n.toFixed(casas).replace('.', ',');
-            resultadoBruto = str + cfg.unit;
-          } else if (resultadoBruto && !resultadoBruto.includes((cfg.unit||'').trim())) {
+            resultadoBruto = str + (cfg.unit || '');
+          } else if (resultadoBruto && cfg.unit && !resultadoBruto.includes(cfg.unit.trim())) {
             resultadoBruto = resultadoBruto + cfg.unit;
           }
         } else {
@@ -512,15 +477,15 @@
       if (res) res.focus();
     }
 
-    // ==== Salvar PDF com nome customizado ====
-    async function salvarPDF(){
+    // ==== Salvar PDF com nome customizado (html2pdf) ====
+    function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {
         alert('Adicione pelo menos um exame antes de salvar o PDF.');
         return;
       }
 
-      // Nome do arquivo
+      // monta nome do arquivo
       const sel = document.getElementById('paciente').value;
       let nomePaciente = '';
       if (sel === 'manual') {
@@ -533,35 +498,32 @@
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 
-      // Geração com jsPDF (html2canvas)
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: 'mm', format: 'a4', hotfixes: ['px_scaling'] });
+      // opções do html2pdf (A4, borda a borda)
+      const opt = {
+        margin: 0,
+        filename: nomeArquivo,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      };
 
-      const prevDisplay = laudos.style.display;
+      // garante que o container esteja visível
+      const prev = laudos.style.display;
       laudos.style.display = 'block';
 
-      try {
-        await doc.html(laudos, {
-          callback: (doc) => doc.save(nomeArquivo),
-          x: 10,
-          y: 10,
-          width: 190, // área útil A4
-          windowWidth: document.documentElement.scrollWidth,
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            allowTaint: false,
-            backgroundColor: '#ffffff'
-          },
-          autoPaging: 'text',
-          margin: [0,0,0,0]
-        });
-      } catch (e) {
-        console.error(e);
+      // aplica um “respiro” interno típico de A4 (12mm) sem depender do print nativo
+      laudos.style.paddingLeft = '12mm';
+      laudos.style.paddingRight = '12mm';
+
+      html2pdf().set(opt).from(laudos).save().then(()=>{
+        // restaura estilos (se quiser)
+        laudos.style.display = prev || laudos.style.display;
+      }).catch(err=>{
+        console.error(err);
         alert('Não foi possível gerar o PDF. Tente novamente.');
-      } finally {
-        laudos.style.display = prevDisplay || laudos.style.display;
-      }
+        laudos.style.display = prev || laudos.style.display;
+      });
     }
   </script>
 </body>

@@ -196,41 +196,39 @@
 
     // Carrega exames
   fetch(examesURL)
-    .then(r => r.text())
-    .then(csv => {
-      const parsed = Papa.parse(csv, {
-        header: true,
-        delimiter: ';',           // <-- força ; como separador
-        skipEmptyLines: true,
-        transformHeader: h => (h || '').trim().replace(/^\uFEFF/, '') // tira BOM/espacos
-      });
-
-      const exames = (parsed.data || [])
-        .map(r => (r['Product Name'] || '').toString().trim())
-        .filter(Boolean)
-        .sort((a,b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
-
-      const sel = document.getElementById('exame');
-      sel.innerHTML = ''; // limpa qualquer resto
-      exames.forEach(nome => {
-        const opt = document.createElement('option');
-        opt.value = nome;
-        opt.textContent = nome;
-        sel.appendChild(opt);
-      });
-
-      // reconfigura o campo de resultado conforme o exame
-      sel.removeEventListener('change', atualizarCampoResultado);
-      sel.addEventListener('change', atualizarCampoResultado);
-      atualizarCampoResultado();
-
-      document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
-    })
-    .catch(err => {
-      console.error(err);
-      document.getElementById('statusExames').textContent = 'Erro ao carregar exames';
+  .then(r => r.text())
+  .then(csv => {
+    const parsed = Papa.parse(csv, {
+      header: true,
+      delimiter: ';',
+      skipEmptyLines: true
     });
 
+    const firstKey = parsed.meta.fields[0]; // sempre pega a primeira coluna
+    const exames = (parsed.data || [])
+      .map(r => (r[firstKey] || '').toString().trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
+    const sel = document.getElementById('exame');
+    sel.innerHTML = '';
+    exames.forEach(nome => {
+      const opt = document.createElement('option');
+      opt.value = nome;
+      opt.textContent = nome;
+      sel.appendChild(opt);
+    });
+
+    sel.removeEventListener('change', atualizarCampoResultado);
+    sel.addEventListener('change', atualizarCampoResultado);
+    atualizarCampoResultado();
+
+    document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
+  })
+  .catch(err => {
+    console.error(err);
+    document.getElementById('statusExames').textContent = 'Erro ao carregar exames';
+  });
 
     function isFreeTextExam(nomeExame){
       return Object.prototype.hasOwnProperty.call(FREE_TEXT_EXAMS, nomeExame);

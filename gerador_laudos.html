@@ -4,11 +4,13 @@
   <meta charset="UTF-8" />
   <title>Gerador de Laudos — Consultório Dr. Leandro Mendes</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Parser CSV -->
+
+  <!-- CSV parser -->
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-  <!-- Geração de PDF com captura do HTML -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNa5l5rXJkZrR7pWgH0w7F2bK6FcX8g4gCqGm1jzFQ2i7qjz5U0D7zT3o2YkH8xCqg+3aYTs2xF9m0rL1r8Qxw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-NAH6dE9x0xIuX2Lxw9rCCr3Jz8Eo2q2o9zQm/Qq7W6i7S6+m3S8s6a+vVtQ4iQ0qv2i6H1vH8SxU2fK1Q4JvWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Geração de PDF WYSIWYG com nome de arquivo customizado -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha512-BNa5l5rXJkZrR7pWgH0w7F2bK6FcX8g4gCqGm1jzFQ2i7qjz5U0D7zT3o2YkH8xCqg+3aYTs2xF9m0rL1r8Qxw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-NAH6dE9x0xIuX2Lxw9rCCr3Jz8Eo2q2o9zQm/Qq7W6i7S6+m3S8s6a+vVtQ4iQ0qv2i6H1vH8SxU2fK1Q4JvWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
   <style>
     :root{
       --pad-x: 80px;
@@ -38,7 +40,7 @@
     button { padding: 10px 16px; background: #007BFF; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     button + button { margin-left: 8px; }
 
-    /* Header */
+    /* Header minimalista */
     .lm-header{ position: relative; padding: 18px 0 14px 0; }
     .lm-header__wrap{ display:flex; align-items:flex-end; justify-content:flex-end; gap: 16px; }
     .lm-header__meta{ text-align:right; }
@@ -46,8 +48,6 @@
     .lm-header__title{ font: 600 20px/1.1 system-ui; color: var(--txt-strong); letter-spacing:.06em; text-transform: uppercase; }
     .lm-header__logo{ height: 44px; width:auto; object-fit: contain; opacity:.95; }
     .lm-header__rule{ height:2px; background: var(--accent); margin-top: 10px; opacity:.25; }
-
-    /* watermark */
     .lm-watermark{ position:absolute; right: clamp(0px, 4vw, 48px); top: 50%; transform: translateY(-50%); width: var(--wm-width); max-width: 700px; opacity: var(--wm-opacity); pointer-events:none; user-select:none; z-index: 0; }
 
     /* UI paciente manual */
@@ -62,16 +62,15 @@
     .exames-list { margin-top: 8px; }
     .laudo { position: relative; margin-top: 16px; page-break-inside: avoid; }
 
-    /* Nome do exame = igual ao resultado, alinhado à esquerda */
     .exame-box {
       font-weight: bold;
       font-style: italic;
       background: #e9e9e9;
       padding: 6px 10px;
-      text-align: left;
+      text-align: left;           /* alinhado à esquerda */
       margin: 14px 0;
       border-radius: 3px;
-      font-size: 16px;
+      font-size: 16px;            /* igual ao resultado */
     }
     .linha-top { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 4px; }
     .amostra, .ref { color: #666; font-size: 13px; margin: 0; }
@@ -93,11 +92,11 @@
       font-size: 11px;
       font-weight: bold;
       text-align: center;
-      margin-top: 48px; /* ~3 linhas antes do texto */
+      margin-top: 48px;   /* ~3 linhas antes do texto */
       margin-bottom: 8px;
     }
 
-    /* Footer */
+    /* Footer minimal */
     .lm-footer{
       background:#111;
       color:#f5f5f5;
@@ -115,69 +114,55 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
+    /* Impressão nativa (se quiser manter como opção) — WYSIWYG e sem página extra */
     @media print {
-  @page { size: A4 portrait; margin: 0; }
+      @page { size: A4 portrait; margin: 0; }
 
-  /* Esconde a UI, mostra a saída */
-  .formulario, .acoes, details.debug { display: none !important; }
-  .laudos-container { display: block !important; }
+      .formulario, .acoes, details.debug { display: none !important; }
+      .laudos-container { display: block !important; }
 
-  /* NÃO fixe altura! Deixe crescer naturalmente */
-  html, body {
-    /* width opcional: você pode manter se quiser 210mm exatos,
-       mas o que importa é NÃO ter height fixa */
-    width: 210mm;
-    height: auto !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #fff !important;
-    overflow: visible !important;
-  }
+      html, body {
+        width: 210mm;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+        overflow: visible !important;
+      }
 
-  /* Respiro lateral (ajuste se quiser) */
-  .lm-header,
-  .header-info,
-  .exames-list,
-  .assinatura-digital,
-  .lm-footer {
-    padding-left: 4mm !important;
-    padding-right: 4mm !important;
-  }
+      /* Respiro lateral (ajuste conforme preferir) */
+      .lm-header,
+      .header-info,
+      .exames-list,
+      .assinatura-digital,
+      .lm-footer {
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
 
-  /* Tamanhos fiéis ao que você vê na tela */
-  body { font-size: 14px !important; line-height: 1.6 !important; }
-  .lm-header__clinic { font-size: 12px !important; }
-  .lm-header__title  { font-size: 20px !important; }
-  .header-info,
-  .header-info p,
-  .header-info strong,
-  .header-info span { font-size: 14px !important; }
-  .exame-box       { font-size: 16px !important; text-align: left !important; }
-  .resultado-box   { font-size: 16px !important; }
-  .amostra, .ref, .metodo { font-size: 13px !important; }
-  .assinatura-digital { font-size: 11px !important; }
-  .lm-footer { font-size: 11px !important; }
+      /* Mantém tamanhos como na tela */
+      body { font-size: 14px !important; line-height: 1.6 !important; }
+      .lm-header__clinic { font-size: 12px !important; }
+      .lm-header__title  { font-size: 20px !important; }
+      .header-info,
+      .header-info p,
+      .header-info strong,
+      .header-info span { font-size: 14px !important; }
+      .exame-box       { font-size: 16px !important; text-align: left !important; }
+      .resultado-box   { font-size: 16px !important; }
+      .amostra, .ref, .metodo { font-size: 13px !important; }
+      .assinatura-digital { font-size: 11px !important; }
+      .lm-footer { font-size: 11px !important; }
 
-  /* Cores fiéis */
-  .lm-footer, .exame-box, .resultado-box {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
+      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+      .laudos-container { break-inside: avoid; page-break-after: auto; }
+      .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
+      .assinatura-digital { margin-bottom: 6mm !important; }
+      .lm-footer { margin-top: 6mm !important; break-inside: avoid; page-break-inside: avoid; }
 
-  /* Quebras controladas e sem página extra */
-  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-  .laudos-container { break-inside: avoid; page-break-after: auto; }
-
-  /* Colapso de margens finais para não “sangrar” 0,5px */
-  .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
-  .assinatura-digital { margin-bottom: 6mm !important; }
-  .lm-footer { margin-top: 6mm !important; break-inside: avoid; page-break-inside: avoid; }
-
-  /* Evita qualquer ajuste de tamanho “esperto” do Safari/Chrome */
-  html { -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }
-}
-
+      html { -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }
+    }
   </style>
 </head>
 <body>
@@ -234,15 +219,14 @@
     <div id="resultado-container"></div>
 
     <div class="acoes" style="margin-top:8px;">
-  <button onclick="gerarLaudo()">Adicionar exame</button>
-  <button onclick="novoExameMesmoPaciente()">Novo exame (mesmo paciente)</button>
-  <button onclick="salvarPDF()">Salvar PDF</button>
-  <!-- Se quiser manter a impressão nativa também-->
-  <button onclick="window.print()">Imprimir</button>
-  -->
-</div>
+      <button onclick="gerarLaudo()">Adicionar exame</button>
+      <button onclick="novoExameMesmoPaciente()">Novo exame (mesmo paciente)</button>
+      <button onclick="salvarPDF()">Salvar PDF</button>
+      <!-- opcional: <button onclick="window.print()">Imprimir</button> -->
+    </div>
+  </div>
 
-  <!-- Saída -->
+  <!-- Saída / WYSIWYG -->
   <div class="laudos-container" id="laudos"></div>
 
   <script>
@@ -256,13 +240,11 @@
       const busted = `${url}${sep}_ts=${Date.now()}`;
       return fetch(busted, { cache: 'no-store', mode: 'cors', credentials: 'omit', ...opts });
     }
-
     function togglePacienteManual(){
       const sel = document.getElementById('paciente');
       const manualWrap = document.getElementById('pacienteManual');
       manualWrap.style.display = sel.value === 'manual' ? 'flex' : 'none';
     }
-
     function toBRDate(str){
       if (!str) return '';
       const s = String(str).trim();
@@ -278,7 +260,6 @@
       }
       return s;
     }
-
     function normalize(s){
       return (s||'')
         .toString()
@@ -289,6 +270,7 @@
         .toLowerCase();
     }
 
+    // Exames com “dosagem” (campo livre + unidade + referência automáticas)
     const FREE_TEXT_EXAMS_DISPLAY = {
       'dosagem serica de procalcitonina':    { ref: 'Inferior a 0,10 ng/mL', unit: ' ng/mL' },
       'cistatina c - dosagem serica':        { ref: 'Entre 0,57 e 1,06 mg/L', unit: ' mg/L' },
@@ -302,7 +284,7 @@
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
-    // ==== Carrega Pacientes (CSV) + opção manual ====
+    // ==== Carrega Pacientes ====
     fetchNoCache(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -315,7 +297,6 @@
             dn: toBRDate(r[keys[2]]||'')
           };
         }).filter(p=>p.nome);
-
         pacientes.sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'}));
 
         const sel = document.getElementById('paciente');
@@ -334,25 +315,23 @@
         });
 
         document.getElementById('statusPac').textContent = `Pacientes carregados: ${pacientes.length}`;
-
-        // estado inicial
         togglePacienteManual();
         sel.addEventListener('change', togglePacienteManual);
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    // ==== Carrega Exames (CSV ; primeira coluna) ====
+    // ==== Carrega Exames (primeira coluna do CSV ; delimitador ;) ====
     fetchNoCache(examesURL)
       .then(r=>r.text())
       .then(csv=>{
-        // tenta com ; e header
+        // tenta com header ; (GitHub CSV tem ; e header: Product Name;Price;...)
         let parsed = Papa.parse(csv, { header: true, delimiter: ';', skipEmptyLines: true });
         let exames = [];
         if (parsed.meta && parsed.data && parsed.data.length) {
           const firstKey = parsed.meta.fields?.[0] || 'Product Name';
           exames = parsed.data.map(r => (r[firstKey]||'').toString().trim()).filter(Boolean);
         }
-        // fallback
+        // fallback: sem header
         if (!exames.length) {
           parsed = Papa.parse(csv, { header: false, delimiter: ';', skipEmptyLines: true });
           const rows = parsed.data || [];
@@ -383,7 +362,7 @@
       })
       .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    // ==== Campo Resultado ====
+    // ==== Campo Resultado dinâmico ====
     function atualizarCampoResultado(){
       const nomeExame = (document.getElementById('exame').value || '').trim();
       const container = document.getElementById('resultado-container');
@@ -398,8 +377,7 @@
         input.style.fontWeight = 'bold';
         input.style.textAlign = 'center';
         input.addEventListener('input', (e)=>{
-          // permite só dígitos, vírgula e ponto
-          e.target.value = e.target.value.replace(/[^\d.,]/g,'');
+          e.target.value = e.target.value.replace(/[^\d.,]/g,''); // só número, vírgula e ponto
         });
         container.appendChild(input);
       } else {
@@ -421,7 +399,6 @@
       const nomeExame = (document.getElementById('exame').value || '').trim();
       const metodoSel = document.getElementById('metodo');
       if (isDosagem(nomeExame)) {
-        // tenta selecionar "Imunofluorescência" (mantém se já for outro por escolha manual)
         if (metodoSel.value !== 'Imunofluorescência') {
           const opt = Array.from(metodoSel.options).find(o => o.textContent.trim() === 'Imunofluorescência');
           if (opt) metodoSel.value = opt.value;
@@ -429,7 +406,7 @@
       }
     }
 
-    // ==== Estrutura fixa (header + watermark + footer uma vez) ====
+    // ==== Estrutura fixa da saída ====
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -460,7 +437,7 @@
       cont.style.display='block';
     }
 
-    // ==== Geração do laudo ====
+    // ==== Gerar cada laudo ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -482,7 +459,7 @@
       let resultadoBruto = document.getElementById('resultado').value || '';
       const hoje = new Date().toLocaleDateString('pt-BR');
 
-      // identificação, uma vez
+      // identificação uma vez
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
@@ -499,7 +476,7 @@
         const cfg = cfgDosagem(exame);
         if (cfg) {
           valorRef = cfg.ref;
-          // se o usuário digitou só o número, formata e concatena a unidade
+          // se o usuário digitou só número, formata + unidade
           let num = resultadoBruto.trim().replace(',', '.');
           const n = parseFloat(num);
           if (!isNaN(n)) {
@@ -534,66 +511,58 @@
       const res = document.getElementById('resultado');
       if (res) res.focus();
     }
+
+    // ==== Salvar PDF com nome customizado ====
+    async function salvarPDF(){
+      const laudos = document.getElementById('laudos');
+      if (!laudos || !laudos.querySelector('#examesList .laudo')) {
+        alert('Adicione pelo menos um exame antes de salvar o PDF.');
+        return;
+      }
+
+      // Nome do arquivo
+      const sel = document.getElementById('paciente').value;
+      let nomePaciente = '';
+      if (sel === 'manual') {
+        nomePaciente = (document.getElementById('pacienteNomeManual').value || '').trim();
+      } else {
+        nomePaciente = (sel.split('|')[0] || '').trim();
+      }
+      const dataISO = (document.getElementById('data').value || '').trim(); // YYYY-MM-DD
+      const dataNome = dataISO ? dataISO.split('-').reverse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
+      const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
+      const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
+
+      // Geração com jsPDF (html2canvas)
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', hotfixes: ['px_scaling'] });
+
+      const prevDisplay = laudos.style.display;
+      laudos.style.display = 'block';
+
+      try {
+        await doc.html(laudos, {
+          callback: (doc) => doc.save(nomeArquivo),
+          x: 10,
+          y: 10,
+          width: 190, // área útil A4
+          windowWidth: document.documentElement.scrollWidth,
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: '#ffffff'
+          },
+          autoPaging: 'text',
+          margin: [0,0,0,0]
+        });
+      } catch (e) {
+        console.error(e);
+        alert('Não foi possível gerar o PDF. Tente novamente.');
+      } finally {
+        laudos.style.display = prevDisplay || laudos.style.display;
+      }
+    }
   </script>
-  <script>
-  async function salvarPDF(){
-    // Garante que a estrutura existe e há pelo menos um exame
-    const laudos = document.getElementById('laudos');
-    if (!laudos || !laudos.querySelector('#examesList .laudo')) {
-      alert('Adicione pelo menos um exame antes de salvar o PDF.');
-      return;
-    }
-
-    // Define nome do arquivo a partir do paciente e data
-    const sel = document.getElementById('paciente').value;
-    let nomePaciente = '';
-    if (sel === 'manual') {
-      nomePaciente = (document.getElementById('pacienteNomeManual').value || '').trim();
-    } else {
-      nomePaciente = (sel.split('|')[0] || '').trim();
-    }
-    const dataISO = (document.getElementById('data').value || '').trim(); // YYYY-MM-DD
-    const dataNome = dataISO ? dataISO.split('-').reverse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
-
-    // Sanitiza nome do arquivo (sem caracteres problemáticos)
-    const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
-    const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
-
-    // Usa jsPDF para capturar o HTML renderizado (WYSIWYG)
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', hotfixes: ['px_scaling'] });
-
-    // A largura útil de um A4 é ~190mm (margem pequena). Ajuste se quiser mais “sangria”.
-    const options = {
-      x: 10,
-      y: 10,
-      width: 190,                // controla escala do conteúdo
-      windowWidth: document.documentElement.scrollWidth, // ajuda o html2canvas a manter proporcional
-      html2canvas: {
-        scale: 2,                // mais nítido
-        useCORS: true,           // permite imagens externas same-origin/CDN
-        allowTaint: false,
-        backgroundColor: '#ffffff'
-      },
-      autoPaging: 'text',        // ajuda quando tiver muitos laudos
-      margin: [0,0,0,0]          // margem do motor html->pdf (já estamos definindo x/y/width)
-    };
-
-    // Garante que a área de laudos está visível
-    const prevDisplay = laudos.style.display;
-    laudos.style.display = 'block';
-
-    try {
-      await doc.html(laudos, {
-        callback: (doc) => doc.save(nomeArquivo),
-        ...options
-      });
-    } catch (e) {
-      console.error(e);
-      alert('Não foi possível gerar o PDF. Tente novamente.');
-    } finally {
-      // Restaura display (se você escondia quando não está imprimindo)
-      laudos.style.display = prevDisplay || laudos.style.display;
-    }
-  }
-</script>
+</body>
+</html>

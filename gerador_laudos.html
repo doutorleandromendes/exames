@@ -313,7 +313,7 @@
       const container = document.getElementById('resultado-container');
       container.innerHTML = '';
 
-      if (nomeExame.includes('dosagem')) {
+      if (nomeExame.includes('dosagem') || nomeExame.includes('microscopia')) {
         const input = document.createElement('input');
         input.type = 'text';
         input.inputMode = 'decimal';

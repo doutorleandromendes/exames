@@ -309,35 +309,49 @@
 
     // ==== Campo Resultado dinâmico ====
     function atualizarCampoResultado(){
-      const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
-      const container = document.getElementById('resultado-container');
-      container.innerHTML = '';
+  const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
+  const container = document.getElementById('resultado-container');
+  container.innerHTML = '';
 
-      if (nomeExame.includes('dosagem') || nomeExame.includes('microscopia')) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.inputMode = 'decimal';
-        input.placeholder = 'Digite apenas o número';
-        input.id = 'resultado';
-        input.style.fontWeight = 'bold';
-        input.style.textAlign = 'center';
-        input.addEventListener('input', (e)=>{
-          e.target.value = e.target.value.replace(/[^\d.,<]/g,''); // só número, vírgula e ponto
-        });
-        container.appendChild(input);
-      } else {
-        const select = document.createElement('select');
-        select.id = 'resultado';
-        select.style.fontWeight = 'bold';
-        select.style.textAlign = 'center';
-        ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{
-          const o=document.createElement('option');
-          o.value=v; o.textContent=v;
-          select.appendChild(o);
-        });
-        container.appendChild(select);
-      }
-    }
+  if (nomeExame.includes('dosagem')) {
+    // Campo só para números
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.placeholder = 'Digite apenas o número';
+    input.id = 'resultado';
+    input.style.fontWeight = 'bold';
+    input.style.textAlign = 'center';
+    input.addEventListener('input', (e)=>{
+      e.target.value = e.target.value.replace(/[^\d.,<>]/g,''); // só número, vírgula e ponto
+    });
+    container.appendChild(input);
+
+  } else if (nomeExame.includes('microscopia')) {
+    // Campo de texto livre
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Digite o resultado';
+    input.id = 'resultado';
+    input.style.fontWeight = 'bold';
+    input.style.textAlign = 'center';
+    container.appendChild(input);
+
+  } else {
+    // Dropdown padrão
+    const select = document.createElement('select');
+    select.id = 'resultado';
+    select.style.fontWeight = 'bold';
+    select.style.textAlign = 'center';
+    ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{
+      const o=document.createElement('option');
+      o.value=v; o.textContent=v;
+      select.appendChild(o);
+    });
+    container.appendChild(select);
+  }
+}
+
 
     // Default método = Imunofluorescência quando for “dosagem”
     function setMetodoDefaultParaExame(){

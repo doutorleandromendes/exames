@@ -436,6 +436,7 @@
           ...(exame.toLowerCase().includes('procalcitonina') ? { ref:'Inferior a 0,10 ng/mL', unit:' ng/mL' } : {}),
           ...(exame.toLowerCase().includes('cistatina') ? { ref:'Entre 0,57 e 1,06 mg/L', unit:' mg/L' } : {}),
           ...(exame.toLowerCase().includes('reativa') ? { ref:'Inferior a 0,1 mg/L', unit:' mg/L' } : {}),
+          ...(exame.toLowerCase().includes('glicada') ? { ref:'Inferior a 5,7 % (Diagnóstico)', unit:' %' } : {}),
         };
         if (cfg.ref) {
           valorRef = cfg.ref;

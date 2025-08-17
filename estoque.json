@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T22:58:51.134Z"
+    "updated": "2025-08-17T23:08:35.099Z"
   },
   "locations": {
     "EM_USO": [
@@ -308,7 +308,7 @@
       },
       {
         "sku": "CI",
-        "estoque": "28",
+        "estoque": "9",
         "alerta": 5
       },
       {
@@ -318,7 +318,7 @@
       },
       {
         "sku": "LI",
-        "estoque": "61",
+        "estoque": "5",
         "alerta": 5
       },
       {
@@ -348,7 +348,7 @@
       },
       {
         "sku": "HB-AA",
-        "estoque": "15",
+        "estoque": "33",
         "alerta": 5
       },
       {
@@ -378,7 +378,7 @@
       },
       {
         "sku": "C-A",
-        "estoque": "16",
+        "estoque": "24",
         "alerta": 5
       },
       {
@@ -388,7 +388,7 @@
       },
       {
         "sku": "M-A",
-        "estoque": "4",
+        "estoque": "27",
         "alerta": 5
       },
       {
@@ -398,7 +398,7 @@
       },
       {
         "sku": "HI",
-        "estoque": "",
+        "estoque": "16",
         "alerta": 5
       },
       {
@@ -463,12 +463,12 @@
       },
       {
         "sku": "A-A",
-        "estoque": "",
+        "estoque": "19",
         "alerta": 5
       },
       {
         "sku": "SP-A",
-        "estoque": "30",
+        "estoque": "17",
         "alerta": 10
       },
       {
@@ -574,6 +574,21 @@
       {
         "sku": "HL-A",
         "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HP-A",
+        "estoque": "11",
+        "alerta": 5
+      },
+      {
+        "sku": "PRSC-A",
+        "estoque": "17",
+        "alerta": 10
+      },
+      {
+        "sku": "DC-AA",
+        "estoque": "29",
         "alerta": 5
       }
     ]

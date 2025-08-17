@@ -1,0 +1,21 @@
+
+{
+  "name": "Estoque Clínica (Online)",
+  "short_name": "Estoque Clínica",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#2d7ef7",
+  "background_color": "#f7f7f9",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

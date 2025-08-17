@@ -1,96 +1,309 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Controle de Estoque - Clínica</title>
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon-192.png">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#2d7ef7">
+  <title>Estoque Clínica</title>
   <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    .item { border: 1px solid #ccc; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
-    button { border: none; border-radius: 8px; padding: 0.5rem 1rem; margin: 0 0.25rem; font-size: 1rem; cursor: pointer; }
-    .minus { background: #f44336; color: white; }
-    .plus { background: #4CAF50; color: white; }
-    input { width: 60px; text-align: center; font-size: 1rem; }
+    :root { --pad: 14px; --gap: 10px; --radius: 12px; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f7f7f9; color: #111; }
+    header { position: sticky; top: 0; z-index: 10; background: #fff; padding: var(--pad); border-bottom: 1px solid #ececf4; }
+    h1 { margin: 0 0 8px 0; font-size: 18px; }
+    .toolbar { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: var(--gap); align-items: center; }
+    .select { padding: 10px 12px; border: 1px solid #dcdce6; border-radius: 10px; font-size: 16px; background: #fff; }
+    .search { width: 100%; padding: 10px 12px; border: 1px solid #dcdce6; border-radius: 10px; font-size: 16px; }
+    .btn { border: 0; padding: 10px 14px; border-radius: 10px; font-size: 14px; cursor: pointer; }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: #2d7ef7; color: #fff; }
+    .btn-outline { background: #fff; color: #2d7ef7; border: 1px solid #b8d0ff; }
+    .wrap { padding: var(--pad); }
+    .card { background: #fff; border: 1px solid #ececf4; border-radius: var(--radius); padding: 12px; margin-bottom: var(--gap); display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+    .nome { font-weight: 600; line-height: 1.2; }
+    .sku { font-size: 12px; color: #666; }
+    .categoria { font-size: 12px; color: #666; }
+    .right { display: grid; grid-auto-flow: column; gap: 8px; align-items: center; }
+    input.qty { width: 88px; padding: 8px 10px; font-size: 16px; border: 1px solid #dcdce6; border-radius: 8px; text-align: center; }
+    .minus, .plus { padding: 10px 12px; border-radius: 10px; font-size: 16px; min-width: 46px; border: none; }
+    .minus { background: #e53935; color: #fff; }
+    .plus { background: #2e7d32; color: #fff; }
+    .small { font-size: 12px; color: #666; }
+    .footer { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #ececf4; padding: 8px var(--pad); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--gap); }
+    .low { color: #c62828; font-weight: 700; }
+    dialog { border: 1px solid #e7e7ef; border-radius: 12px; padding: 16px; max-width: 560px; width: calc(100% - 40px); }
+    dialog form { display: grid; gap: 10px; }
+    dialog input { width: 100%; padding: 8px 10px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 14px; }
+    dialog .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .hint { font-size: 12px; color: #666; }
+    .link { color: #2d7ef7; text-decoration: underline; cursor: pointer; }
   </style>
 </head>
 <body>
-  <h1>Controle de Estoque</h1>
-  <div id="lista">Carregando lista...</div>
+<header>
+  <h1>Estoque Clínica</h1>
+  <div class="toolbar">
+    <select id="location" class="select" title="Local do estoque">
+      <option value="EM_USO">EM USO</option>
+      <option value="STORAGE">STORAGE</option>
+    </select>
+    <input id="q" class="search" placeholder="Buscar por nome ou SKU…" inputmode="search" />
+    <button id="refreshBtn" class="btn btn-outline">Recarregar CSV</button>
+    <button id="saveBtn" class="btn btn-primary">Salvar no GitHub</button>
+    <button id="settingsBtn" class="btn btn-outline">Configurações</button>
+  </div>
+  <div class="small" id="status">Carregando lista online…</div>
+</header>
 
-  <script>
-    const lista = document.getElementById('lista');
-    const STORAGE_KEY = 'estoqueClinica';
+<div class="wrap" id="list"></div>
 
-    async function carregarExames() {
-      const url = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
-      const resp = await fetch(url);
-      const texto = await resp.text();
-      const linhas = texto.split(/\r?\n/);
-      let produtos = [];
-      linhas.forEach(l => {
-        if (!l.trim()) return;
-        let nome = l.split(';')[0].trim();
-        if (/igg|igm/i.test(nome)) nome = 'IgG/IgM';
-        if (/epstein/i.test(nome)) nome = 'Epstein-Barr';
-        if (!produtos.includes(nome)) produtos.push(nome);
-      });
-      return produtos.sort();
+<div class="footer">
+  <button id="preencherZero" class="btn btn-outline">Preencher 0 em branco</button>
+  <button id="exportCsv" class="btn btn-outline">Exportar CSV</button>
+  <button id="installBtn" class="btn btn-outline" style="display:none">Instalar App</button>
+</div>
+
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h3>Configurações (GitHub)</h3>
+    <div class="hint">Este app grava um <code>estoque.json</code> com separação por local: <b>EM_USO</b> e <b>STORAGE</b>.</div>
+    <div class="row">
+      <label>Owner/Org: <input id="ghOwner" placeholder="doutorleandromendes" /></label>
+      <label>Repositório: <input id="ghRepo" placeholder="exames" /></label>
+    </div>
+    <div class="row">
+      <label>Branch: <input id="ghBranch" placeholder="main" /></label>
+      <label>CSV (caminho): <input id="ghCsvPath" placeholder="products.csv" /></label>
+    </div>
+    <label>JSON (caminho): <input id="ghJsonPath" placeholder="estoque.json" /></label>
+    <label>Token GitHub (fine-grained, Contents: Read/Write): <input id="ghToken" type="password" placeholder="github_pat_..." /></label>
+    <div class="row">
+      <label>Seu nome (commit): <input id="ghName" placeholder="Seu Nome" /></label>
+      <label>Seu e-mail (commit): <input id="ghEmail" placeholder="seuemail@exemplo.com" /></label>
+    </div>
+    <menu>
+      <button value="cancel">Cancelar</button>
+      <button id="saveSettings" value="default" class="btn btn-primary">Salvar</button>
+    </menu>
+  </form>
+</dialog>
+
+<script>
+// --- PWA registration ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error));
+}
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; const b=document.getElementById('installBtn'); b.style.display='block'; b.onclick=async()=>{ b.style.display='none'; if(deferredPrompt){ deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; } }; });
+
+// --- Config ---
+const CFG_KEY="estoqueClinica_cfg";
+function $(id){ return document.getElementById(id); }
+function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch{return {};} }
+function saveCfg(o){ localStorage.setItem(CFG_KEY, JSON.stringify(o)); }
+let cfg=Object.assign({owner:"doutorleandromendes",repo:"exames",branch:"main",csvPath:"products.csv",jsonPath:"estoque.json",token:"",name:"",email:""}, loadCfg());
+
+// --- Helpers ---
+function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]); }
+function slugifySKU(text){
+  const base=(text||"").toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join('');
+  let sku=base.slice(0,8) || (text||"").toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+  return sku || "SKU";
+}
+function categoriaInferida(nome){
+  const n=(nome||"").toLowerCase();
+  if (n.includes('microscopia')) return 'Microscopia';
+  if (n.includes('dosagem') || n.includes('hemoglobina glicada') || n.includes('cistatina c') || n.includes('proteína c reativa')) return 'Dosagem';
+  if (n.includes('antígeno') || n.includes('antigeno')) return 'Antígeno';
+  return 'Sorologia';
+}
+function unifyName(raw){
+  let n=raw.trim();
+  if (/epstein\s*-?\s*barr/i.test(n)) return "Epstein-Barr (VCA/EBNA/Heterófilos)";
+  const g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
+  if (g){ const base=g[1].trim(); return base + " (IgG/IgM)"; }
+  return n;
+}
+function parseCSVFirstFieldBeforeSemicolon(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
+  const items=[]; for(const line of lines){ const first=line.split(';')[0].trim(); if(first) items.push(first); }
+  return items;
+}
+function dedupeAndMap(rawNames){
+  const map=new Map();
+  rawNames.forEach(name=>{ const u=unifyName(name); if(!map.has(u)){ const sku=slugifySKU(u); map.set(u,{sku,nome:u,categoria:categoriaInferida(u),estoque:"",alerta: (/(hiv|streptococcus pyogenes|covid|sars\-cov2)/i.test(u)?10:5)});} });
+  return Array.from(map.values());
+}
+
+// --- GitHub API ---
+async function githubGet(owner,repo,path,token){
+  const url=`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const res=await fetch(url,{ headers: token ? {'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'} : {'Accept':'application/vnd.github+json'} });
+  if(res.status===404) return {exists:false};
+  if(!res.ok) throw new Error('GitHub GET falhou: '+res.status);
+  const data=await res.json(); const content=atob(data.content.replace(/\n/g,''));
+  return {exists:true, sha:data.sha, content, jsonSafe: safeParseJSON(content)};
+}
+function safeParseJSON(t){ try{ return JSON.parse(t); }catch{return null;} }
+async function githubPutJSON(owner,repo,path,token,json,sha,name,email){
+  if(!token) throw new Error('Token não configurado.');
+  const url=`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const body={ message:'Atualiza estoque.json (app de estoque c/ locais)',
+               content: btoa(unescape(encodeURIComponent(JSON.stringify(json,null,2)))),
+               committer:{ name: name||"bot", email: email||"bot@example.com" } };
+  if(sha) body.sha=sha;
+  const res=await fetch(url,{ method:'PUT', headers:{ 'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json' }, body: JSON.stringify(body) });
+  if(!res.ok) throw new Error('GitHub PUT falhou: '+res.status+' '+(await res.text()));
+  return await res.json();
+}
+
+// --- Estado ---
+let produtos=[]; let remoteSha=null; let locationSel='EM_USO';
+const LOCATIONS=['EM_USO','STORAGE'];
+
+// --- UI ---
+function render(){
+  const root=$('list'); root.innerHTML='';
+  const q=$('q').value.trim().toLowerCase();
+  const items=produtos.filter(p=>!q||p.nome.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
+  items.forEach(p=>{
+    const card=document.createElement('div'); card.className='card';
+    const left=document.createElement('div'); const right=document.createElement('div'); right.className='right';
+    const low=(p.estoque!=="" && Number(p.estoque)<=Number(p.alerta));
+    left.innerHTML=`<div class="nome">${escapeHtml(p.nome)}</div>
+      <div class="sku">SKU: <b>${escapeHtml(p.sku)}</b> • <span class="categoria">${escapeHtml(p.categoria)}</span> ${low?'<span class="low">• Abaixo do alerta</span>':''}</div>`;
+    const minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
+    const plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
+    const input=document.createElement('input'); input.className='qty'; input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=p.estoque;
+    input.oninput=(e)=>{ p.estoque=e.target.value; };
+    minus.onclick=()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); input.value=n; p.estoque=String(n); };
+    plus.onclick =()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=n+1; input.value=n; p.estoque=String(n); };
+    right.append(minus,input,plus); card.append(left,right); root.append(card);
+  });
+  if(!items.length) root.innerHTML='<div class="small">Nenhum item encontrado.</div>';
+}
+
+function exportCSV(){
+  const head=['local','sku','nome','categoria','estoque','alerta'];
+  const esc=v=> /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g,'""') + '"' : String(v);
+  const lines=[head.join(',')];
+  produtos.forEach(p=>lines.push(['"'+locationSel+'"',p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(',')));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+}
+
+// --- Carga CSV ---
+async function loadCsvOnline(){
+  $('status').textContent='Carregando lista...';
+  let text="";
+  try{
+    const rawUrl=`https://raw.githubusercontent.com/${cfg.owner}/${cfg.repo}/${cfg.branch}/${cfg.csvPath}`;
+    const res=await fetch(rawUrl,{cache:'no-store'});
+    if(!res.ok) throw new Error('RAW falhou ('+res.status+')');
+    text=await res.text();
+  }catch(e){
+    try{
+      const file=await githubGet(cfg.owner,cfg.repo,cfg.csvPath,cfg.token);
+      if(!file.exists||!file.content) throw new Error('CSV não encontrado via API.');
+      text=file.content;
+    }catch(err){ $('status').textContent='Erro ao carregar CSV: '+err.message; throw err; }
+  }
+  const rawNames=parseCSVFirstFieldBeforeSemicolon(text);
+  const all=dedupeAndMap(rawNames);
+  produtos=all.map(p=>({ ...p, estoque: "" }));
+  $('status').textContent='Lista carregada.';
+  render();
+}
+
+// --- Carga/Saída JSON (com locais) ---
+function emptyPayloadFrom(prodList){
+  return {
+    meta: { updated: new Date().toISOString() },
+    locations: {
+      EM_USO: prodList.map(p => ({ sku:p.sku, estoque: p.estoque||"", alerta:p.alerta })),
+      STORAGE: prodList.map(p => ({ sku:p.sku, estoque: "", alerta:p.alerta }))
     }
+  };
+}
+function applyLocationData(payload){
+  const loc = payload?.locations?.[locationSel] || [];
+  const bySku = new Map(loc.map(x=>[x.sku, x]));
+  produtos.forEach(p => { if (bySku.has(p.sku)) { const row=bySku.get(p.sku); p.estoque = String(row.estoque ?? ''); p.alerta = row.alerta ?? p.alerta; } });
+}
+function buildPayloadFromUI(existingPayload){
+  const base = existingPayload && existingPayload.locations ? existingPayload : emptyPayloadFrom(produtos);
+  // Atualiza a localização selecionada com os estoques da UI
+  const list = produtos.map(p => ({ sku:p.sku, estoque: p.estoque||"", alerta:p.alerta }));
+  base.locations[locationSel] = list;
+  base.meta = { updated: new Date().toISOString() };
+  return base;
+}
 
-    function salvarEstoque(dados) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(dados));
+async function loadJsonOnline(){
+  try{
+    const file=await githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token);
+    remoteSha=file.sha||null;
+    if(file.exists && file.jsonSafe){
+      applyLocationData(file.jsonSafe);
+      $('status').textContent='Estoque carregado ('+locationSel+').';
+      render();
+    } else {
+      $('status').textContent='Sem estoque remoto ainda. Você pode salvar para criar.';
     }
+  }catch(e){ console.warn('Falha ao carregar estoque.json', e); }
+}
 
-    function carregarEstoque() {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    }
+async function saveJsonOnline(){
+  try{
+    $('status').textContent='Salvando no GitHub...';
+    // Busca o payload existente para preservar a outra localização
+    let current = null; let sha = remoteSha;
+    try{
+      const file = await githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token);
+      if (file.exists){ current = file.jsonSafe; sha = file.sha; }
+    }catch{}
+    const payload = buildPayloadFromUI(current);
+    const res=await githubPutJSON(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token,payload,sha,cfg.name,cfg.email);
+    remoteSha = (res.content && res.content.sha) ? res.content.sha : sha;
+    $('status').textContent='Salvo ('+locationSel+') no GitHub.';
+    alert('Estoque de '+locationSel+' salvo no GitHub!');
+  }catch(e){
+    console.error(e);
+    $('status').textContent='Falha ao salvar.';
+    alert('Erro ao salvar no GitHub: '+e.message);
+  }
+}
 
-    async function init() {
-      const produtos = await carregarExames();
-      const estoque = carregarEstoque();
-      lista.innerHTML = '';
-      produtos.forEach(p => {
-        const div = document.createElement('div');
-        div.className = 'item';
-        const nome = document.createElement('span');
-        nome.textContent = p;
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.value = estoque[p] || 0;
-        input.addEventListener('change', () => {
-          estoque[p] = parseInt(input.value) || 0;
-          salvarEstoque(estoque);
-        });
-        const menos = document.createElement('button');
-        menos.textContent = '-1';
-        menos.className = 'minus';
-        menos.onclick = () => {
-          input.value = (parseInt(input.value) || 0) - 1;
-          estoque[p] = parseInt(input.value);
-          salvarEstoque(estoque);
-        };
-        const mais = document.createElement('button');
-        mais.textContent = '+1';
-        mais.className = 'plus';
-        mais.onclick = () => {
-          input.value = (parseInt(input.value) || 0) + 1;
-          estoque[p] = parseInt(input.value);
-          salvarEstoque(estoque);
-        };
-        div.appendChild(nome);
-        div.appendChild(menos);
-        div.appendChild(input);
-        div.appendChild(mais);
-        lista.appendChild(div);
-      });
-    }
-    init();
+// --- Eventos ---
+$('q').addEventListener('input', render);
+$('refreshBtn').addEventListener('click', async()=>{ await loadCsvOnline(); await loadJsonOnline(); });
+$('exportCsv').addEventListener('click', exportCSV);
+$('preencherZero').addEventListener('click', ()=>{ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(p=>{ if(!p.estoque) p.estoque='0'; }); render(); });
+$('settingsBtn').addEventListener('click', ()=>{
+  $('ghOwner').value=cfg.owner||''; $('ghRepo').value=cfg.repo||''; $('ghBranch').value=cfg.branch||'main';
+  $('ghCsvPath').value=cfg.csvPath||'products.csv'; $('ghJsonPath').value=cfg.jsonPath||'estoque.json';
+  $('ghToken').value=cfg.token||''; $('ghName').value=cfg.name||''; $('ghEmail').value=cfg.email||'';
+  document.querySelector('dialog').showModal();
+});
+$('saveSettings').addEventListener('click', ()=>{
+  cfg={ owner:$('ghOwner').value.trim()||'doutorleandromendes', repo:$('ghRepo').value.trim()||'exames', branch:$('ghBranch').value.trim()||'main',
+        csvPath:$('ghCsvPath').value.trim()||'products.csv', jsonPath:$('ghJsonPath').value.trim()||'estoque.json',
+        token:$('ghToken').value.trim(), name:$('ghName').value.trim(), email:$('ghEmail').value.trim() };
+  saveCfg(cfg); document.querySelector('dialog').close();
+  loadCsvOnline().then(loadJsonOnline);
+});
+$('saveBtn').addEventListener('click', saveJsonOnline);
+$('location').addEventListener('change', async (e)=>{
+  locationSel = e.target.value;
+  // Quando troca o local, recarrega os dados daquela localização
+  await loadJsonOnline(); render();
+});
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
-    }
-  </script>
+// --- Start ---
+let locationSel = document.getElementById('location').value;
+loadCsvOnline().then(loadJsonOnline);
+</script>
 </body>
 </html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle de Estoque - Clínica</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <style>
+    body { font-family: sans-serif; padding: 1rem; }
+    .item { border: 1px solid #ccc; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+    button { border: none; border-radius: 8px; padding: 0.5rem 1rem; margin: 0 0.25rem; font-size: 1rem; cursor: pointer; }
+    .minus { background: #f44336; color: white; }
+    .plus { background: #4CAF50; color: white; }
+    input { width: 60px; text-align: center; font-size: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Controle de Estoque</h1>
+  <div id="lista">Carregando lista...</div>
+
+  <script>
+    const lista = document.getElementById('lista');
+    const STORAGE_KEY = 'estoqueClinica';
+
+    async function carregarExames() {
+      const url = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
+      const resp = await fetch(url);
+      const texto = await resp.text();
+      const linhas = texto.split(/\r?\n/);
+      let produtos = [];
+      linhas.forEach(l => {
+        if (!l.trim()) return;
+        let nome = l.split(';')[0].trim();
+        if (/igg|igm/i.test(nome)) nome = 'IgG/IgM';
+        if (/epstein/i.test(nome)) nome = 'Epstein-Barr';
+        if (!produtos.includes(nome)) produtos.push(nome);
+      });
+      return produtos.sort();
+    }
+
+    function salvarEstoque(dados) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(dados));
+    }
+
+    function carregarEstoque() {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    }
+
+    async function init() {
+      const produtos = await carregarExames();
+      const estoque = carregarEstoque();
+      lista.innerHTML = '';
+      produtos.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        const nome = document.createElement('span');
+        nome.textContent = p;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.value = estoque[p] || 0;
+        input.addEventListener('change', () => {
+          estoque[p] = parseInt(input.value) || 0;
+          salvarEstoque(estoque);
+        });
+        const menos = document.createElement('button');
+        menos.textContent = '-1';
+        menos.className = 'minus';
+        menos.onclick = () => {
+          input.value = (parseInt(input.value) || 0) - 1;
+          estoque[p] = parseInt(input.value);
+          salvarEstoque(estoque);
+        };
+        const mais = document.createElement('button');
+        mais.textContent = '+1';
+        mais.className = 'plus';
+        mais.onclick = () => {
+          input.value = (parseInt(input.value) || 0) + 1;
+          estoque[p] = parseInt(input.value);
+          salvarEstoque(estoque);
+        };
+        div.appendChild(nome);
+        div.appendChild(menos);
+        div.appendChild(input);
+        div.appendChild(mais);
+        lista.appendChild(div);
+      });
+    }
+    init();
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>

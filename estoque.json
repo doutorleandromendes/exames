@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T22:51:25.397Z"
+    "updated": "2025-08-17T22:52:26.760Z"
   },
   "locations": {
     "EM_USO": [
@@ -328,12 +328,12 @@
       },
       {
         "sku": "H-3G",
-        "estoque": "",
+        "estoque": "21",
         "alerta": 10
       },
       {
         "sku": "H-4G",
-        "estoque": "",
+        "estoque": "34",
         "alerta": 10
       },
       {
@@ -373,17 +373,17 @@
       },
       {
         "sku": "S-AT",
-        "estoque": "",
+        "estoque": "29",
         "alerta": 5
       },
       {
         "sku": "C-A",
-        "estoque": "",
+        "estoque": "16",
         "alerta": 5
       },
       {
         "sku": "G-A",
-        "estoque": "",
+        "estoque": "16",
         "alerta": 5
       },
       {

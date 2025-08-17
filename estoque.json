@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T22:50:07.929Z"
+    "updated": "2025-08-17T22:51:25.397Z"
   },
   "locations": {
     "EM_USO": [
@@ -388,12 +388,12 @@
       },
       {
         "sku": "M-A",
-        "estoque": "",
+        "estoque": "4",
         "alerta": 5
       },
       {
         "sku": "MI",
-        "estoque": "",
+        "estoque": "3",
         "alerta": 5
       },
       {
@@ -408,7 +408,7 @@
       },
       {
         "sku": "CI",
-        "estoque": "",
+        "estoque": "9",
         "alerta": 5
       },
       {
@@ -418,12 +418,12 @@
       },
       {
         "sku": "RI",
-        "estoque": "",
+        "estoque": "18",
         "alerta": 5
       },
       {
         "sku": "SI",
-        "estoque": "",
+        "estoque": "15",
         "alerta": 5
       },
       {
@@ -468,7 +468,7 @@
       },
       {
         "sku": "SP-A",
-        "estoque": "",
+        "estoque": "30",
         "alerta": 10
       },
       {
@@ -478,7 +478,7 @@
       },
       {
         "sku": "M-A",
-        "estoque": "",
+        "estoque": "27",
         "alerta": 5
       },
       {
@@ -493,7 +493,7 @@
       },
       {
         "sku": "C-A",
-        "estoque": "",
+        "estoque": "24",
         "alerta": 5
       },
       {

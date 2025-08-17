@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Controle de Estoque</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background:#fafafa; }
+    header { background:#1976d2; color:#fff; padding:1rem; text-align:center; }
+    #status { padding:0.5rem; font-size:0.9rem; text-align:center; }
+    #controls { display:flex; gap:0.5rem; justify-content:center; margin:0.5rem; flex-wrap:wrap; }
+    button { padding:0.5rem 0.75rem; border:none; border-radius:6px; cursor:pointer; font-size:0.9rem; }
+    button.minus { background:#e53935; color:#fff; }
+    button.plus { background:#43a047; color:#fff; }
+    button.action { background:#1976d2; color:#fff; }
+    #q { flex:1; padding:0.5rem; font-size:1rem; border-radius:6px; border:1px solid #ccc; }
+    .card { background:#fff; border:1px solid #ddd; border-radius:8px; margin:0.5rem; padding:0.5rem; display:flex; justify-content:space-between; align-items:center; }
+    .nome { font-weight:600; margin-bottom:0.25rem; }
+    .sku { font-size:0.8rem; color:#555; }
+    .right { display:flex; gap:0.25rem; align-items:center; }
+    .qty { width:60px; text-align:center; padding:0.25rem; border:1px solid #ccc; border-radius:6px; font-size:1rem; }
+    .low { color: #c62828; font-weight: 700; }
+    .low-card { background: #fff8e1; border-color: #f7c948; }
+    .low-input { background: #fff59d; }
+    select { padding:0.4rem; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h2>Controle de Estoque</h2>
+    <select id="locationSel">
+      <option value="EM_USO">EM USO</option>
+      <option value="STORAGE">STORAGE</option>
+    </select>
+  </header>
+  <div id="status">Carregando lista...</div>
+  <div id="controls">
+    <input type="text" id="q" placeholder="Buscar..." />
+    <button class="action" onclick="loadCSV()">Recarregar CSV</button>
+    <button class="action" onclick="saveToGitHub()">Salvar no GitHub</button>
+    <button class="action" onclick="exportCSV()">Exportar CSV</button>
+  </div>
+  <div id="list"></div>
+
+<script>
+let produtos = [];
+window.locationSel = 'EM_USO';
+
+document.getElementById('locationSel').addEventListener('change', function(){
+  window.locationSel = this.value;
+  render();
+});
+
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"]'/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\'':'&#39;'}[c]));
+}
+
+async function loadCSV(){
+  try {
+    const resp = await fetch('https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv');
+    const text = await resp.text();
+    const lines = text.split(/\r?\n/);
+    const rawNames = lines.map(l => l.split(';')[0].trim()).filter(Boolean);
+    produtos = dedupeAndMap(rawNames);
+    render();
+  } catch(e){
+    document.getElementById('status').textContent = 'Erro ao carregar CSV: ' + e.message;
+  }
+}
+
+function dedupeAndMap(names){
+  let map = {};
+  names.forEach(n => {
+    let key = n.toLowerCase();
+    if(key.includes('igg') || key.includes('igm')) key = 'anticorpos';
+    if(key.includes('epstein')) key = 'epstein-barr';
+    if(!map[key]) map[key] = {nome:n, sku:key, categoria:'', estoque:'', alerta:5};
+  });
+  return Object.values(map);
+}
+
+function render(){
+  try {
+    var root = document.getElementById('list');
+    var statusEl = document.getElementById('status');
+    if (!root) return;
+
+    var q = (document.getElementById('q') && document.getElementById('q').value || '').trim().toLowerCase();
+
+    var items = (Array.isArray(produtos) ? produtos.slice() : []).filter(function(p){
+      if (!p) return false;
+      var n = (p.nome || '').toLowerCase();
+      var s = (p.sku  || '').toLowerCase();
+      return !q || n.indexOf(q) >= 0 || s.indexOf(q) >= 0;
+    });
+
+    items.sort(function(a,b){
+      return String(a && a.nome || '').localeCompare(String(b && b.nome || ''), 'pt', {sensitivity:'base'});
+    });
+
+    var threshold = (window.locationSel === 'STORAGE') ? 10 : 5;
+
+    root.innerHTML = '';
+    for (var i=0;i<items.length;i++){
+      var p = items[i] || {};
+      // agora só considera abaixo do alerta se for MENOR que o threshold
+      var low = (p.estoque !== '' && !isNaN(Number(p.estoque)) && Number(p.estoque) < threshold);
+
+      var card = document.createElement('div');
+      card.className = 'card' + (low ? ' low-card' : '');
+
+      var left = document.createElement('div');
+      var right = document.createElement('div');
+      right.className = 'right';
+
+      left.innerHTML =
+        '<div class="nome">'+ (p.nome ? escapeHtml(p.nome) : '') +'</div>' +
+        '<div class="sku">SKU: <b>'+ (p.sku ? escapeHtml(p.sku) : '') +
+        '</b> ' + (low ? '<span class="low">• Abaixo do alerta</span>' : '') + '</div>';
+
+      var minus = document.createElement('button');
+      minus.className = 'minus';
+      minus.textContent = '–1';
+
+      var plus = document.createElement('button');
+      plus.className = 'plus';
+      plus.textContent = '+1';
+
+      var input = document.createElement('input');
+      input.className = 'qty' + (low ? ' low-input' : '');
+      input.type = 'number';
+      input.inputMode = 'numeric';
+      input.placeholder = 'Estoque';
+      input.value = (p.estoque === 0 ? '0' : (p.estoque || ''));
+
+      (function(pp, inp){
+        inp.oninput = function(){ pp.esto = inp.value; };
+        minus.onclick = function(){
+          var n = parseInt(inp.value || '0', 10); if (isNaN(n)) n = 0;
+          n = Math.max(0, n - 1); inp.value = n; pp.estoque = String(n);
+          render();
+        };
+        plus.onclick = function(){
+          var n = parseInt(inp.value || '0', 10); if (isNaN(n)) n = 0;
+          n = n + 1; inp.value = n; pp.estoque = String(n);
+          render();
+        };
+      })(p, input);
+
+      right.appendChild(minus);
+      right.appendChild(input);
+      right.appendChild(plus);
+      card.appendChild(left);
+      card.appendChild(right);
+      root.appendChild(card);
+    }
+
+    if (!items.length){
+      root.innerHTML = '<div class="small">Nenhum item encontrado.</div>';
+    }
+
+    if (statusEl && produtos && produtos.length){
+      statusEl.textContent = 'Lista carregada (' + (window.locationSel || 'EM_USO') + ').';
+    }
+  } catch (e){
+    console.error(e);
+    var statusEl2 = document.getElementById('status');
+    if (statusEl2) statusEl2.textContent = 'Falha ao renderizar: ' + e.message;
+  }
+}
+
+function saveToGitHub(){
+  alert('Aqui entra a lógica de salvar com token.');
+}
+function exportCSV(){
+  alert('Export CSV ainda não implementado.');
+}
+
+// inicializa
+loadCSV();
+</script>
+</body>
+</html>

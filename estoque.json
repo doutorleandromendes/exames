@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T22:52:26.760Z"
+    "updated": "2025-08-17T22:57:20.128Z"
   },
   "locations": {
     "EM_USO": [
@@ -293,27 +293,27 @@
     "STORAGE": [
       {
         "sku": "DI",
-        "estoque": "",
+        "estoque": "16",
         "alerta": 5
       },
       {
         "sku": "D-AN",
-        "estoque": "",
+        "estoque": "22",
         "alerta": 5
       },
       {
         "sku": "ZI",
-        "estoque": "",
+        "estoque": "12",
         "alerta": 5
       },
       {
         "sku": "CI",
-        "estoque": "",
+        "estoque": "28",
         "alerta": 5
       },
       {
         "sku": "FAI",
-        "estoque": "",
+        "estoque": "25",
         "alerta": 5
       },
       {
@@ -323,7 +323,7 @@
       },
       {
         "sku": "VWNI",
-        "estoque": "",
+        "estoque": "8",
         "alerta": 5
       },
       {
@@ -403,7 +403,7 @@
       },
       {
         "sku": "HI",
-        "estoque": "",
+        "estoque": "16",
         "alerta": 5
       },
       {
@@ -473,7 +473,7 @@
       },
       {
         "sku": "L-A",
-        "estoque": "",
+        "estoque": "12",
         "alerta": 5
       },
       {
@@ -498,22 +498,22 @@
       },
       {
         "sku": "LI",
-        "estoque": "",
+        "estoque": "5",
         "alerta": 5
       },
       {
         "sku": "LD-A",
-        "estoque": "",
+        "estoque": "10",
         "alerta": 5
       },
       {
         "sku": "M-ADPV",
-        "estoque": "",
+        "estoque": "29",
         "alerta": 5
       },
       {
         "sku": "M-ADPF",
-        "estoque": "",
+        "estoque": "13",
         "alerta": 5
       },
       {
@@ -568,7 +568,7 @@
       },
       {
         "sku": "DDCTC-AT",
-        "estoque": "",
+        "estoque": "15",
         "alerta": 5
       },
       {

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T22:47:49.048Z"
+    "updated": "2025-08-17T22:50:07.929Z"
   },
   "locations": {
     "EM_USO": [
@@ -308,7 +308,7 @@
       },
       {
         "sku": "CI",
-        "estoque": "12",
+        "estoque": "",
         "alerta": 5
       },
       {
@@ -318,7 +318,7 @@
       },
       {
         "sku": "LI",
-        "estoque": "",
+        "estoque": "61",
         "alerta": 5
       },
       {
@@ -338,37 +338,37 @@
       },
       {
         "sku": "HAI",
-        "estoque": "",
+        "estoque": "37",
         "alerta": 5
       },
       {
         "sku": "HB-ADS",
-        "estoque": "",
+        "estoque": "24",
         "alerta": 5
       },
       {
         "sku": "HB-AA",
-        "estoque": "",
+        "estoque": "15",
         "alerta": 5
       },
       {
         "sku": "HB-AH",
-        "estoque": "",
+        "estoque": "15",
         "alerta": 5
       },
       {
         "sku": "HB-AA",
-        "estoque": "",
+        "estoque": "33",
         "alerta": 5
       },
       {
         "sku": "HC-AT",
-        "estoque": "",
+        "estoque": "18",
         "alerta": 5
       },
       {
         "sku": "HEI",
-        "estoque": "",
+        "estoque": "14",
         "alerta": 5
       },
       {
@@ -413,7 +413,7 @@
       },
       {
         "sku": "TI",
-        "estoque": "",
+        "estoque": "35",
         "alerta": 5
       },
       {
@@ -428,7 +428,7 @@
       },
       {
         "sku": "EV",
-        "estoque": "",
+        "estoque": "36",
         "alerta": 5
       },
       {

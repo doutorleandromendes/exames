@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T20:15:57.106Z"
+    "updated": "2025-08-17T22:19:57.153Z"
   },
   "locations": {
     "EM_USO": [
@@ -308,7 +308,7 @@
       },
       {
         "sku": "CI",
-        "estoque": "",
+        "estoque": "12",
         "alerta": 5
       },
       {
@@ -469,7 +469,7 @@
       {
         "sku": "SP-A",
         "estoque": "",
-        "alerta": 5
+        "alerta": 10
       },
       {
         "sku": "L-A",

@@ -2,11 +2,12 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <link rel="manifest" href="./manifest.webmanifest">
-  <meta name="theme-color" content="#2d7ef7">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Estoque Clínica</title>
+  <meta name="theme-color" content="#2d7ef7">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon-192.png">
   <style>
     :root { --pad: 14px; --gap: 10px; --radius: 12px; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -45,11 +46,11 @@
 <header>
   <h1>Estoque Clínica</h1>
   <div class="toolbar">
-    <select id="location" class="select" title="Local do estoque">
+    <select id="location" class="select">
       <option value="EM_USO">EM USO</option>
       <option value="STORAGE">STORAGE</option>
     </select>
-    <input id="q" class="search" placeholder="Buscar por nome ou SKU…" inputmode="search" />
+    <input id="q" class="search" placeholder="Buscar por nome ou SKU…" inputmode="search">
     <button id="refreshBtn" class="btn btn-outline">Recarregar CSV</button>
     <button id="saveBtn" class="btn btn-primary">Salvar no GitHub</button>
     <button id="settingsBtn" class="btn btn-outline">Configurações</button>
@@ -70,18 +71,18 @@
     <h3>Configurações (GitHub)</h3>
     <div class="hint">Grava um único <code>estoque.json</code> com duas localizações: <b>EM_USO</b> e <b>STORAGE</b>.</div>
     <div class="row">
-      <label>Owner/Org: <input id="ghOwner" placeholder="doutorleandromendes" /></label>
-      <label>Repositório: <input id="ghRepo" placeholder="exames" /></label>
+      <label>Owner/Org: <input id="ghOwner" placeholder="doutorleandromendes"></label>
+      <label>Repositório: <input id="ghRepo" placeholder="exames"></label>
     </div>
     <div class="row">
-      <label>Branch: <input id="ghBranch" placeholder="main" /></label>
-      <label>CSV (caminho): <input id="ghCsvPath" placeholder="products.csv" /></label>
+      <label>Branch: <input id="ghBranch" placeholder="main"></label>
+      <label>CSV (caminho): <input id="ghCsvPath" placeholder="products.csv"></label>
     </div>
-    <label>JSON (caminho): <input id="ghJsonPath" placeholder="estoque.json" /></label>
-    <label>Token GitHub (fine-grained, Contents: Read/Write): <input id="ghToken" type="password" placeholder="github_pat_..." /></label>
+    <label>JSON (caminho): <input id="ghJsonPath" placeholder="estoque.json"></label>
+    <label>Token GitHub (fine-grained, Contents: Read/Write): <input id="ghToken" type="password" placeholder="github_pat_..."></label>
     <div class="row">
-      <label>Seu nome (commit): <input id="ghName" placeholder="Seu Nome" /></label>
-      <label>Seu e-mail (commit): <input id="ghEmail" placeholder="seuemail@exemplo.com" /></label>
+      <label>Seu nome (commit): <input id="ghName" placeholder="Seu Nome"></label>
+      <label>Seu e-mail (commit): <input id="ghEmail" placeholder="seuemail@exemplo.com"></label>
     </div>
     <menu>
       <button value="cancel">Cancelar</button>
@@ -91,245 +92,275 @@
 </dialog>
 
 <script>
-// --- PWA registration ---
+// ======== PWA (sem sintaxe moderna) ========
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js').catch(console.error); });
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('./sw.js')['catch'](function(e){ console.log('SW fail', e); });
+  });
 }
-var deferredPrompt=null;
-window.addEventListener('beforeinstallprompt', function(e){
+var deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e) {
   e.preventDefault();
-  deferredPrompt=e;
-  var b=document.getElementById('installBtn');
-  b.style.display='block';
-  b.onclick=function(){
-    b.style.display='none';
-    if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt=null; }
-  };
-})
+  deferredPrompt = e;
+  var b = document.getElementById('installBtn');
+  b.style.display = 'block';
+  b.onclick = function() { try { deferredPrompt && deferredPrompt.prompt(); } catch(_e){} b.style.display = 'none'; };
+});
 
-// --- Config ---
-var CFG_KEY="estoqueClinica_cfg";
+// ======== Estado/Config ========
+var CFG_KEY = 'estoqueClinica_cfg';
 function $(id){ return document.getElementById(id); }
-function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch(e){return {};} }
+function loadCfg(){ try { return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); } catch(e){ return {}; } }
 function saveCfg(o){ localStorage.setItem(CFG_KEY, JSON.stringify(o)); }
-var cfg=(function(){ var def={owner:"doutorleandromendes",repo:"exames",branch:"main",csvPath:"products.csv",jsonPath:"estoque.json",token:"",name:"",email:""}; var cur=loadCfg(); for(var k in def){ if(!(k in cur)) cur[k]=def[k]; } return cur; })();
+var cfg = (function(){ var def={owner:'doutorleandromendes',repo:'exames',branch:'main',csvPath:'products.csv',jsonPath:'estoque.json',token:'',name:'',email:''}; var cur=loadCfg(); for (var k in def){ if(!(k in cur)) cur[k]=def[k]; } return cur; })();
 
-// --- Helpers ---
+var produtos = [];
+var remoteSha = null;
+var locationSel = 'EM_USO';
+
+// ======== Utils ========
 function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; }); }
 function slugifySKU(text){
-  var base=(text||"").toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('');
-  var sku=base.slice(0,8) || (text||"").toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
-  return sku || "SKU";
+  var base=(text||'').toUpperCase().split('').map(function(ch){ return ch.normalize ? ch.normalize('NFD') : ch; }).join('');
+  base = (text||'').toUpperCase().replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('');
+  var sku = base.slice(0,8) || (text||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+  return sku || 'SKU';
 }
 function categoriaInferida(nome){
-  var n=(nome||"").toLowerCase();
+  var n=(nome||'').toLowerCase();
   if (n.indexOf('microscopia')>=0) return 'Microscopia';
   if (n.indexOf('dosagem')>=0 || n.indexOf('hemoglobina glicada')>=0 || n.indexOf('cistatina c')>=0 || n.indexOf('proteína c reativa')>=0 || n.indexOf('proteina c reativa')>=0) return 'Dosagem';
   if (n.indexOf('antígeno')>=0 || n.indexOf('antigeno')>=0) return 'Antígeno';
   return 'Sorologia';
 }
 function unifyName(raw){
-  var n=raw.trim();
-  if (/epstein\s*-?\s*barr/i.test(n)) return "Epstein-Barr (VCA/EBNA/Heterófilos)";
-  var g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
-  if (g){ var base=g[1].trim(); return base + " (IgG/IgM)"; }
+  var n = String(raw||'').trim();
+  if (/epstein\s*-?\s*barr/i.test(n)) return 'Epstein-Barr (VCA/EBNA/Heterófilos)';
+  var g = n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
+  if (g){ var base=g[1].trim(); return base + ' (IgG/IgM)'; }
   return n;
 }
 function parseCSVFirstFieldBeforeSemicolon(text){
-  var lines=text.split(/\r?\n/).filter(function(l){ return l.trim().length; });
-  var items=[]; for(var i=0;i<lines.length;i++){ var first=lines[i].split(';')[0].trim(); if(first) items.push(first); }
+  var lines = text.split(/\r?\n/);
+  var items = [];
+  for (var i=0;i<lines.length;i++){
+    var line = lines[i];
+    if (!line || !line.trim()) continue;
+    var first = line.split(';')[0];
+    first = first ? String(first).trim() : '';
+    if (first) items.push(first);
+  }
   return items;
 }
 function dedupeAndMap(rawNames){
-  var map={};
+  var map = {};
   for (var i=0;i<rawNames.length;i++){
-    var u=unifyName(rawNames[i]);
+    var u = unifyName(rawNames[i]);
     if (!map[u]){
-      var sku=slugifySKU(u);
-      map[u]={sku:sku,nome:u,categoria:categoriaInferida(u),estoque:"",alerta: (/(hiv|streptococcus pyogenes|covid|sars\-cov2)/i.test(u)?10:5)};
+      var sku = slugifySKU(u);
+      map[u] = { sku: sku, nome: u, categoria: categoriaInferida(u), estoque: '', alerta: (/(hiv|streptococcus pyogenes|covid|sars\-cov2)/i.test(u) ? 10 : 5) };
     }
   }
-  var arr=[]; for (var k in map){ arr.push(map[k]); }
+  var arr = []; for (var k in map){ arr.push(map[k]); }
   return arr;
 }
 
-// --- GitHub API ---
-function githubGet(owner,repo,path,token, cbSuccess, cbError){
-  var url='https://api.github.com/repos/'+owner+'/'+repo+'/contents/'+encodeURIComponent(path);
-  var headers={'Accept':'application/vnd.github+json'};
-  if(token) headers['Authorization']='Bearer '+token;
-  fetch(url,{ headers: headers }).then(function(res){
-    if(res.status===404){ cbSuccess({exists:false}); return; }
-    if(!res.ok){ cbError(new Error('GitHub GET falhou: '+res.status)); return; }
+// ======== GitHub API (callbacks, sem vírgulas finais) ========
+function githubGet(path, onOk, onErr){
+  var url = 'https://api.github.com/repos/'+cfg.owner+'/'+cfg.repo+'/contents/'+encodeURIComponent(path);
+  var headers = {'Accept':'application/vnd.github+json'};
+  if (cfg.token) headers['Authorization'] = 'Bearer ' + cfg.token;
+  fetch(url, {headers: headers}).then(function(res){
+    if (res.status === 404){ onOk({exists:false}); return; }
+    if (!res.ok){ onErr(new Error('GitHub GET: '+res.status)); return; }
     res.json().then(function(data){
-      var content=atob(data.content.replace(/\n/g,''));
-      cbSuccess({exists:true, sha:data.sha, content:content, jsonSafe: safeParseJSON(content)});
-    });
-  }).catch(cbError);
+      try{
+        var content = atob(String(data.content||'').replace(/\n/g,''));
+        var jsonSafe = null;
+        try{ jsonSafe = JSON.parse(content); }catch(_e){ jsonSafe = null; }
+        onOk({exists:true, sha:data.sha, content:content, jsonSafe: jsonSafe});
+      }catch(e){ onErr(e); }
+    }, onErr);
+  })['catch'](onErr);
 }
-function safeParseJSON(t){ try{ return JSON.parse(t); }catch(e){ return null; } }
-function githubPutJSON(owner,repo,path,token,json,sha,name,email, cbSuccess, cbError){
-  if(!token){ cbError(new Error('Token não configurado.')); return; }
-  var url='https://api.github.com/repos/'+owner+'/'+repo+'/contents/'+encodeURIComponent(path);
-  var body={ message:'Atualiza estoque.json (app de estoque c/ locais)',
-             content: btoa(unescape(encodeURIComponent(JSON.stringify(json,null,2)))),
-             committer:{ name: name||"bot", email: email||"bot@example.com" } };
-  if(sha) body.sha=sha;
-  fetch(url,{ method:'PUT', headers:{ 'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json' }, body: JSON.stringify(body) })
-    .then(function(res){ if(!res.ok){ return res.text().then(function(t){ throw new Error('GitHub PUT falhou: '+res.status+' '+t); }); } return res.json(); })
-    .then(cbSuccess).catch(cbError);
+function githubPutJSON(path, json, sha, onOk, onErr){
+  if (!cfg.token){ onErr(new Error('Token não configurado.')); return; }
+  var url = 'https://api.github.com/repos/'+cfg.owner+'/'+cfg.repo+'/contents/'+encodeURIComponent(path);
+  var body = {
+    message: 'Atualiza estoque.json (app c/ locais)',
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(json, null, 2)))),
+    committer: { name: cfg.name||'bot', email: cfg.email||'bot@example.com' }
+  };
+  if (sha) body.sha = sha;
+  fetch(url, {method:'PUT', headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json'}, body: JSON.stringify(body)})
+    .then(function(res){ if(!res.ok){ return res.text().then(function(t){ throw new Error('GitHub PUT: '+res.status+' '+t); }); } return res.json(); })
+    .then(onOk)['catch'](onErr);
 }
 
-// --- Estado ---
-var produtos=[]; var remoteSha=null; var locationSel='EM_USO';
-
-// --- UI ---
+// ======== UI ========
 function render(){
-  var root=$('list'); root.innerHTML='';
-  var q=$('q').value.trim().toLowerCase();
-  var items=produtos.filter(function(p){ return !q || p.nome.toLowerCase().indexOf(q)>=0 || p.sku.toLowerCase().indexOf(q)>=0; });
-  items.forEach(function(p){
-    var card=document.createElement('div'); card.className='card';
-    var left=document.createElement('div'); var right=document.createElement('div'); right.className='right';
-    var low=(p.estoque!=="" && Number(p.estoque)<=Number(p.alerta));
-    left.innerHTML='<div class="nome">'+escapeHtml(p.nome)+'</div>' +
+  var root = $('list'); root.innerHTML='';
+  var q = $('q').value.trim().toLowerCase();
+  var items = produtos.filter(function(p){ return !q || p.nome.toLowerCase().indexOf(q)>=0 || p.sku.toLowerCase().indexOf(q)>=0; });
+  for (var i=0;i<items.length;i++){
+    var p = items[i];
+    var card = document.createElement('div'); card.className='card';
+    var left = document.createElement('div'); var right = document.createElement('div'); right.className='right';
+    var low = (p.estoque !== '' && Number(p.estoque) <= Number(p.alerta));
+    left.innerHTML = '<div class="nome">'+escapeHtml(p.nome)+'</div>' +
       '<div class="sku">SKU: <b>'+escapeHtml(p.sku)+'</b> • <span class="categoria">'+escapeHtml(p.categoria)+'</span> '+(low?'<span class="low">• Abaixo do alerta</span>':'')+'</div>';
-    var minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
-    var plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
-    var input=document.createElement('input'); input.className='qty'; input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=p.estoque;
-    input.oninput=function(e){ p.estoque=e.target.value; };
-    minus.onclick=function(){ var n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); input.value=n; p.estoque=String(n); };
-    plus.onclick=function(){ var n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=n+1; input.value=n; p.estoque=String(n); };
+    var minus = document.createElement('button'); minus.className='minus'; minus.textContent='–1';
+    var plus = document.createElement('button'); plus.className='plus'; plus.textContent='+1';
+    var input = document.createElement('input'); input.className='qty'; input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value = p.estoque;
+    input.oninput = (function(pp, inp){ return function(){ pp.estoque = inp.value; }; })(p, input);
+    minus.onclick = (function(pp, inp){ return function(){ var n=parseInt(inp.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); inp.value=n; pp.estoque=String(n); }; })(p, input);
+    plus.onclick  = (function(pp, inp){ return function(){ var n=parseInt(inp.value||'0',10); if(isNaN(n)) n=0; n=n+1; inp.value=n; pp.estoque=String(n); }; })(p, input);
     right.appendChild(minus); right.appendChild(input); right.appendChild(plus); card.appendChild(left); card.appendChild(right); root.appendChild(card);
-  });
-  if(!items.length) root.innerHTML='<div class="small">Nenhum item encontrado.</div>';
+  }
+  if (!items.length){ root.innerHTML = '<div class="small">Nenhum item encontrado.</div>'; }
 }
 
 function exportCSV(){
   var head=['local','sku','nome','categoria','estoque','alerta'];
   function esc(v){ v=String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
   var lines=[head.join(',')];
-  produtos.forEach(function(p){ lines.push([locationSel,p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(',')); });
+  for (var i=0;i<produtos.length;i++){
+    var p=produtos[i];
+    lines.push([locationSel,p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(','));
+  }
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
   var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
 }
 
-// --- Carga CSV ---
-function loadCsvOnline(cb){
+// ======== CSV/JSON ========
+function loadCsvOnline(next){
   $('status').textContent='Carregando lista...';
   var rawUrl='https://raw.githubusercontent.com/'+cfg.owner+'/'+cfg.repo+'/'+cfg.branch+'/'+cfg.csvPath;
-  fetch(rawUrl,{cache:'no-store'}).then(function(res){
-    if(!res.ok) throw new Error('RAW falhou ('+res.status+')');
+  fetch(rawUrl, {cache:'no-store'}).then(function(res){
+    if(!res.ok) throw new Error('RAW '+res.status);
     return res.text();
   }).then(function(text){
-    var rawNames=parseCSVFirstFieldBeforeSemicolon(text);
-    produtos=dedupeAndMap(rawNames);
+    var rawNames = parseCSVFirstFieldBeforeSemicolon(text);
+    produtos = dedupeAndMap(rawNames);
     $('status').textContent='Lista carregada.';
-    render(); cb && cb();
-  }).catch(function(){
-    // tenta via API (repo privado)
-    githubGet(cfg.owner,cfg.repo,cfg.csvPath,cfg.token, function(file){
-      if(!file.exists||!file.content){ $('status').textContent='Erro ao carregar CSV pela API.'; return; }
-      var rawNames=parseCSVFirstFieldBeforeSemicolon(file.content);
-      produtos=dedupeAndMap(rawNames);
+    render();
+    next && next();
+  }).catch(function(_e){
+    // tenta via API
+    githubGet(cfg.csvPath, function(file){
+      if (!file.exists || !file.content){ $('status').textContent='Erro: CSV não carregado.'; return; }
+      var rawNames = parseCSVFirstFieldBeforeSemicolon(file.content);
+      produtos = dedupeAndMap(rawNames);
       $('status').textContent='Lista carregada (API).';
-      render(); cb && cb();
-    }, function(err){ $('status').textContent='Erro ao carregar CSV: '+err.message; });
+      render();
+      next && next();
+    }, function(err){ $('status').textContent='Erro CSV: '+err.message; });
   });
 }
 
-// --- Carga/Saída JSON (com locais) ---
-function emptyPayloadFrom(prodList){
-  var emUso=[], storage=[];
-  for (var i=0;i<prodList.length;i++){
-    var p=prodList[i];
-    emUso.push({ sku:p.sku, estoque:"", alerta:p.alerta });
-    storage.push({ sku:p.sku, estoque:"", alerta:p.alerta });
+function emptyPayloadFrom(){
+  var em=[], st=[];
+  for (var i=0;i<produtos.length;i++){
+    var p=produtos[i];
+    em.push({sku:p.sku, estoque:'', alerta:p.alerta});
+    st.push({sku:p.sku, estoque:'', alerta:p.alerta});
   }
-  return { meta:{ updated: new Date().toISOString() }, locations:{ EM_USO: emUso, STORAGE: storage } };
+  return { meta:{updated:new Date().toISOString()}, locations:{ EM_USO: em, STORAGE: st } };
 }
 function applyLocationData(payload){
-  var loc = payload && payload.locations ? payload.locations[locationSel] : null;
-  if (!loc) return;
-  var bySku={}; for (var i=0;i<loc.length;i++){ bySku[loc[i].sku]=loc[i]; }
+  if (!payload || !payload.locations) return;
+  var loc = payload.locations[locationSel] || [];
+  var bySku = {};
+  for (var i=0;i<loc.length;i++){ bySku[loc[i].sku]=loc[i]; }
   for (var j=0;j<produtos.length;j++){
     var p=produtos[j];
     if (bySku[p.sku]){
       var row=bySku[p.sku];
-      p.estoque = String(row.estoque || '');
+      p.estoque = (row.estoque===0 || row.estoque==='0') ? '0' : String(row.estoque||'');
       if (typeof row.alerta !== 'undefined') p.alerta = row.alerta;
     }
   }
 }
-function buildPayloadFromUI(existingPayload){
-  var base = (existingPayload && existingPayload.locations) ? existingPayload : emptyPayloadFrom(produtos);
-  var list=[]; for (var i=0;i<produtos.length;i++){ var p=produtos[i]; list.push({ sku:p.sku, estoque:p.estoque||"", alerta:p.alerta }); }
+function buildPayloadFromUI(existing){
+  var base = (existing && existing.locations) ? existing : emptyPayloadFrom();
+  var list = [];
+  for (var i=0;i<produtos.length;i++){
+    var p=produtos[i];
+    list.push({ sku:p.sku, estoque:p.estoque||'', alerta:p.alerta });
+  }
   base.locations[locationSel] = list;
   base.meta = { updated: new Date().toISOString() };
   return base;
 }
 
 function loadJsonOnline(){
-  githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token, function(file){
-    remoteSha=file.sha||null;
-    if(file.exists && file.jsonSafe){
-      applyLocationData(file.jsonSafe);
-      $('status').textContent='Estoque carregado ('+locationSel+').';
-      render();
-    } else {
-      $('status').textContent='Sem estoque remoto ainda. Você pode salvar para criar.';
-    }
-  }, function(e){ console.warn('Falha ao carregar estoque.json', e); });
+  githubGet(cfg.jsonPath, function(file){
+    remoteSha = file.sha || null;
+    if (file.exists && file.jsonSafe){ applyLocationData(file.jsonSafe); $('status').textContent='Estoque carregado ('+locationSel+').'; render(); }
+    else { $('status').textContent='Sem estoque remoto ainda.'; }
+  }, function(err){ $('status').textContent='Erro JSON: '+err.message; });
 }
 
 function saveJsonOnline(){
-  $('status').textContent='Salvando no GitHub...';
-  // primeiro puxa o existente para preservar a outra localização
-  githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token, function(file){
+  $('status').textContent='Salvando...';
+  githubGet(cfg.jsonPath, function(file){
     var current = file.exists ? file.jsonSafe : null;
     var sha = file.exists ? file.sha : null;
     var payload = buildPayloadFromUI(current);
-    githubPutJSON(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token,payload,sha,cfg.name,cfg.email, function(res){
+    githubPutJSON(cfg.jsonPath, payload, sha, function(res){
       remoteSha = (res.content && res.content.sha) ? res.content.sha : sha;
-      $('status').textContent='Salvo ('+locationSel+') no GitHub.';
-      alert('Estoque de '+locationSel+' salvo no GitHub!');
-    }, function(err){
-      $('status').textContent='Falha ao salvar.';
-      alert('Erro ao salvar no GitHub: '+err.message);
-    });
-  }, function(err){
-    $('status').textContent='Falha ao salvar.';
-    alert('Erro ao ler estoque.json antes de salvar: '+err.message);
-  });
+      $('status').textContent='Salvo ('+locationSel+').';
+      alert('Estoque salvo no GitHub!');
+    }, function(err){ $('status').textContent='Falha ao salvar.'; alert('Erro ao salvar: '+err.message); });
+  }, function(err){ $('status').textContent='Falha ao ler JSON.'; alert('Erro ao ler estoque.json: '+err.message); });
 }
 
-// --- Eventos ---
-$('q').addEventListener('input', render);
-$('refreshBtn').addEventListener('click', function(){ loadCsvOnline(loadJsonOnline); });
-$('exportCsv').addEventListener('click', exportCSV);
-$('preencherZero').addEventListener('click', function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(function(p){ if(!p.estoque) p.estoque='0'; }); render(); });
-$('settingsBtn').addEventListener('click', function(){
-  $('ghOwner').value=cfg.owner||''; $('ghRepo').value=cfg.repo||''; $('ghBranch').value=cfg.branch||'main';
-  $('ghCsvPath').value=cfg.csvPath||'products.csv'; $('ghJsonPath').value=cfg.jsonPath||'estoque.json';
-  $('ghToken').value=cfg.token||''; $('ghName').value=cfg.name||''; $('ghEmail').value=cfg.email||'';
-  document.querySelector('dialog').showModal();
-});
-$('saveSettings').addEventListener('click', function(){
-  cfg={ owner:$('ghOwner').value.trim()||'doutorleandromendes', repo:$('ghRepo').value.trim()||'exames', branch:$('ghBranch').value.trim()||'main',
-        csvPath:$('ghCsvPath').value.trim()||'products.csv', jsonPath:$('ghJsonPath').value.trim()||'estoque.json',
-        token:$('ghToken').value.trim(), name:$('ghName').value.trim(), email:$('ghEmail').value.trim() };
-  saveCfg(cfg); document.querySelector('dialog').close();
+// ======== Eventos (garantidos) ========
+document.addEventListener('DOMContentLoaded', function(){
+  // preencher dropdown padrão
+  var locEl = $('location');
+  if (locEl && locEl.value){ locationSel = locEl.value; }
+
+  $('q').addEventListener('input', render);
+  $('refreshBtn').addEventListener('click', function(){ loadCsvOnline(loadJsonOnline); });
+  $('exportCsv').addEventListener('click', exportCSV);
+  $('preencherZero').addEventListener('click', function(){
+    if (!confirm('Preencher 0 nos campos vazios?')) return;
+    for (var i=0;i<produtos.length;i++){ if (!produtos[i].estoque) produtos[i].estoque='0'; }
+    render();
+  });
+  $('settingsBtn').addEventListener('click', function(){
+    $('ghOwner').value = cfg.owner||'';
+    $('ghRepo').value = cfg.repo||'';
+    $('ghBranch').value = cfg.branch||'main';
+    $('ghCsvPath').value = cfg.csvPath||'products.csv';
+    $('ghJsonPath').value = cfg.jsonPath||'estoque.json';
+    $('ghToken').value = cfg.token||'';
+    $('ghName').value = cfg.name||'';
+    $('ghEmail').value = cfg.email||'';
+    document.querySelector('dialog').showModal();
+  });
+  $('saveSettings').addEventListener('click', function(){
+    cfg = {
+      owner: $('ghOwner').value.replace(/\s+/g,'') || 'doutorleandromendes',
+      repo: $('ghRepo').value.replace(/\s+/g,'') || 'exames',
+      branch: $('ghBranch').value.trim() || 'main',
+      csvPath: $('ghCsvPath').value.trim() || 'products.csv',
+      jsonPath: $('ghJsonPath').value.trim() || 'estoque.json',
+      token: $('ghToken').value.trim(),
+      name: $('ghName').value.trim(),
+      email: $('ghEmail').value.trim()
+    };
+    saveCfg(cfg);
+    document.querySelector('dialog').close();
+    loadCsvOnline(loadJsonOnline);
+  });
+  $('saveBtn').addEventListener('click', saveJsonOnline);
+  $('location').addEventListener('change', function(e){ locationSel = e.target.value; loadJsonOnline(); });
+
+  // inicial
   loadCsvOnline(loadJsonOnline);
 });
-$('saveBtn').addEventListener('click', saveJsonOnline);
-document.getElementById('location').addEventListener('change', function(e){
-  locationSel = e.target.value;
-  loadJsonOnline();
-});
-
-// --- Start ---
-locationSel = document.getElementById('location').value;
-loadCsvOnline(loadJsonOnline);
 </script>
 </body>
 </html>

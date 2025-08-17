@@ -1,0 +1,383 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Estoque Clínica (GitHub + Persistência)</title>
+<style>
+  :root { --pad: 14px; --gap: 10px; --radius: 12px; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #f7f7f9; color: #111; }
+  header { position: sticky; top: 0; z-index: 10; background: #fff; padding: var(--pad); border-bottom: 1px solid #ececf4; }
+  h1 { margin: 0 0 8px 0; font-size: 18px; }
+  .toolbar { display: grid; grid-template-columns: 1fr auto auto auto; gap: var(--gap); }
+  .search { width: 100%; padding: 10px 12px; border: 1px solid #dcdce6; border-radius: 10px; font-size: 16px; }
+  .btn { border: 0; padding: 10px 14px; border-radius: 10px; font-size: 14px; cursor: pointer; }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: #2d7ef7; color: #fff; }
+  .btn-outline { background: #fff; color: #2d7ef7; border: 1px solid #b8d0ff; }
+  .btn-danger { background: #e53935; color: #fff; }
+  .btn-success { background: #2e7d32; color: #fff; }
+  .wrap { padding: var(--pad); }
+  .card { background: #fff; border: 1px solid #ececf4; border-radius: var(--radius); padding: 12px; margin-bottom: var(--gap); display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+  .nome { font-weight: 600; line-height: 1.2; }
+  .sku { font-size: 12px; color: #666; }
+  .categoria { font-size: 12px; color: #666; }
+  .right { display: grid; grid-auto-flow: column; gap: 8px; align-items: center; }
+  input.qty { width: 88px; padding: 8px 10px; font-size: 16px; border: 1px solid #dcdce6; border-radius: 8px; text-align: center; }
+  .minus, .plus { padding: 10px 12px; border-radius: 10px; font-size: 16px; min-width: 46px; border: none; }
+  .minus { background: #e53935; color: #fff; }
+  .plus { background: #2e7d32; color: #fff; }
+  .small { font-size: 12px; color: #666; }
+  .pill { font-size: 12px; padding: 3px 8px; border-radius: 99px; border: 1px solid #e7e7ef; }
+  .footer { position: sticky; bottom: 0; background: #fff; border-top: 1px solid #ececf4; padding: 8px var(--pad); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--gap); }
+  .low { color: #c62828; font-weight: 700; }
+  dialog { border: 1px solid #e7e7ef; border-radius: 12px; padding: 16px; max-width: 560px; width: calc(100% - 40px); }
+  dialog form { display: grid; gap: 10px; }
+  dialog input { width: 100%; padding: 8px 10px; border: 1px solid #dcdce6; border-radius: 8px; font-size: 14px; }
+  dialog .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .hint { font-size: 12px; color: #666; }
+  .link { color: #2d7ef7; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Estoque Clínica</h1>
+  <div class="toolbar">
+    <input id="q" class="search" placeholder="Buscar por nome ou SKU…" inputmode="search" />
+    <button id="refreshBtn" class="btn btn-outline">Atualizar da Planilha</button>
+    <button id="syncBtn" class="btn btn-primary">Sincronizar GitHub</button>
+    <button id="settingsBtn" class="btn btn-outline">Configurações</button>
+  </div>
+  <div class="small" id="status">Carregando lista do GitHub…</div>
+</header>
+
+<div class="wrap" id="list"></div>
+
+<div class="footer">
+  <button id="limpar" class="btn btn-outline">Limpar campos</button>
+  <button id="preencherZero" class="btn btn-outline">Preencher 0 em branco</button>
+  <button id="exportCsv" class="btn btn-outline">Exportar CSV</button>
+</div>
+
+<dialog id="settings">
+  <form method="dialog" id="settingsForm">
+    <h3>Configurações de Sincronização</h3>
+    <div class="hint">Para sincronizar entre dispositivos, use um token do GitHub e um arquivo JSON no seu repositório.</div>
+    <label>Token GitHub (fine-grained, conteúdo): <input id="ghToken" type="password" placeholder="ghp_..." /></label>
+    <div class="row">
+      <label>Owner/Org: <input id="ghOwner" placeholder="doutorleandromendes" /></label>
+      <label>Repositório: <input id="ghRepo" placeholder="exames" /></label>
+    </div>
+    <label>Caminho do arquivo JSON (ex.: data/estoque.json): <input id="ghPath" placeholder="estoque.json" /></label>
+    <div class="row">
+      <label>Seu nome (commit): <input id="ghName" placeholder="Seu Nome" /></label>
+      <label>Seu e-mail (commit): <input id="ghEmail" placeholder="seuemail@exemplo.com" /></label>
+    </div>
+    <div class="hint">O CSV de origem é carregado de: <code id="csvUrlLabel"></code></div>
+    <menu>
+      <button value="cancel">Cancelar</button>
+      <button id="saveSettings" value="default" class="btn btn-primary">Salvar</button>
+    </menu>
+  </form>
+</dialog>
+
+<script>
+const CSV_URL = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
+const KEY = "estoqueClinicaV2";
+const CFG_KEY = "estoqueClinicaV2_cfg";
+
+function $(id){ return document.getElementById(id); }
+
+// ---------- Helpers ----------
+function escapeHtml(s){
+  return String(s).replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]);
+}
+function slugifySKU(text){
+  const base = (text||"").toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^A-Z0-9\s\-]/g,'')
+    .split(/\s+/).filter(Boolean).map(w=>w[0]).join('');
+  let sku = base.slice(0,8) || (text||"").toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+  return sku || "SKU";
+}
+function categoriaInferida(nome){
+  const n = (nome||"").toLowerCase();
+  if (n.includes('microscopia')) return 'Microscopia';
+  if (n.includes('dosagem') || n.includes('hemoglobina glicada') || n.includes('cistatina c') || n.includes('proteína c reativa')) return 'Dosagem';
+  if (n.includes('antígeno') || n.includes('antigeno')) return 'Antígeno';
+  return 'Sorologia';
+}
+function unifyName(raw){
+  let n = raw.trim();
+  if (/epstein\s*-?\s*barr/i.test(n)) return "Epstein-Barr (VCA/EBNA/Heterófilos)";
+  const g = n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
+  if (g){
+    const base = g[1].trim();
+    return base + " (IgG/IgM)";
+  }
+  return n;
+}
+function parseCSVFirstFieldBeforeSemicolon(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+  const items = [];
+  for (const line of lines){
+    const first = line.split(';')[0].trim();
+    if (first) items.push(first);
+  }
+  return items;
+}
+function dedupeAndMap(rawNames){
+  const map = new Map();
+  rawNames.forEach(name => {
+    const u = unifyName(name);
+    if (!map.has(u)){
+      const sku = slugifySKU(u);
+      map.set(u, {
+        sku,
+        nome: u,
+        categoria: categoriaInferida(u),
+        estoque: "",
+        alerta: (/(hiv|streptococcus pyogenes|covid|sars\-cov2)/i.test(u) ? 10 : 5)
+      });
+    }
+  });
+  return Array.from(map.values());
+}
+function saveLocal(state){
+  localStorage.setItem(KEY, JSON.stringify(state));
+  $('status').textContent = "Salvo localmente • " + new Date().toLocaleString();
+}
+function loadLocal(){
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+function loadCfg(){
+  const raw = localStorage.getItem(CFG_KEY);
+  if (!raw) return {owner:"",repo:"",path:"estoque.json",token:"",name:"",email:""};
+  try { return JSON.parse(raw); } catch { return {owner:"",repo:"",path:"estoque.json",token:"",name:"",email:""}; }
+}
+function saveCfg(cfg){
+  localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+}
+
+// ---------- Estado ----------
+let produtos = [];
+let cfg = loadCfg();
+
+// ---------- UI ----------
+function render(){
+  const root = $('list');
+  root.innerHTML = '';
+  const q = $('q').value.trim().toLowerCase();
+  const items = produtos.filter(p => !q || p.nome.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+
+  items.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const left = document.createElement('div');
+    const right = document.createElement('div'); right.className = 'right';
+
+    const low = (p.estoque !== "" && Number(p.estoque) <= Number(p.alerta));
+
+    left.innerHTML = `
+      <div class="nome">${escapeHtml(p.nome)}</div>
+      <div class="sku">SKU: <b>${escapeHtml(p.sku)}</b> • <span class="categoria">${escapeHtml(p.categoria)}</span> ${low?'<span class="low">• Abaixo do alerta</span>':''}</div>
+    `;
+
+    const minus = document.createElement('button');
+    minus.className = 'minus';
+    minus.textContent = '–1';
+    const plus = document.createElement('button');
+    plus.className = 'plus';
+    plus.textContent = '+1';
+
+    const input = document.createElement('input');
+    input.className = 'qty';
+    input.type = 'number';
+    input.inputMode = 'numeric';
+    input.placeholder = 'Estoque';
+    input.value = p.estoque;
+    input.oninput = e => { p.estoque = e.target.value; saveLocal(produtos); render(); };
+
+    minus.onclick = () => {
+      let n = parseInt(input.value||'0',10);
+      if (isNaN(n)) n = 0;
+      n = Math.max(0, n-1);
+      input.value = n; p.estoque = String(n);
+      saveLocal(produtos); render();
+    };
+    plus.onclick = () => {
+      let n = parseInt(input.value||'0',10);
+      if (isNaN(n)) n = 0;
+      n = n+1;
+      input.value = n; p.estoque = String(n);
+      saveLocal(produtos); render();
+    };
+
+    right.append(minus, input, plus);
+    card.append(left, right);
+    root.append(card);
+  });
+
+  if (!items.length) {
+    root.innerHTML = '<div class="small">Nenhum item encontrado.</div>';
+  }
+}
+
+function exportCSV(){
+  const head = ['sku','nome','categoria','estoque','alerta'];
+  const esc = v => /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g,'""') + '"' : String(v);
+  const lines = [head.join(',')];
+  produtos.forEach(p => lines.push([p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(',')));
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'estoque_preenchido.csv';
+  document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+}
+
+// ---------- GitHub Sync (opcional) ----------
+async function fetchGithubJSON(owner, repo, path, token){
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const res = await fetch(url, {
+    headers: token ? { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json' } : { 'Accept': 'application/vnd.github+json' }
+  });
+  if (res.status === 404) return {exists:false};
+  if (!res.ok) throw new Error('Erro ao ler do GitHub: ' + res.status);
+  const data = await res.json();
+  const content = atob(data.content.replace(/\n/g,''));
+  return {exists:true, sha:data.sha, json: JSON.parse(content)};
+}
+async function putGithubJSON(owner, repo, path, token, json, sha, name, email){
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const msg = 'Atualiza estoque.json (sync via app)';
+  const body = {
+    message: msg,
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(json, null, 2)))),
+    committer: { name: name || "bot", email: email || "bot@example.com" }
+  };
+  if (sha) body.sha = sha;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error('Erro ao salvar no GitHub: ' + res.status + ' ' + (await res.text()));
+  return await res.json();
+}
+async function syncGithub(){
+  const c = loadCfg();
+  if (!c.token || !c.owner || !c.repo || !c.path){
+    alert('Configure token/owner/repo/path em Configurações.');
+    return;
+  }
+  $('status').textContent = 'Sincronizando com GitHub…';
+  try{
+    let remote = await fetchGithubJSON(c.owner, c.repo, c.path, c.token);
+    const mapLocal = new Map(produtos.map(p => [p.sku, String(p.estoque||'')]));
+    if (remote.exists && Array.isArray(remote.json)){
+      remote.json.forEach(r => {
+        if (r && r.sku && mapLocal.has(r.sku)){
+          const loc = mapLocal.get(r.sku);
+          if ((loc === "" || loc == null) && r.estoque !== "" && r.estoque != null){
+            const idx = produtos.findIndex(p => p.sku === r.sku);
+            if (idx >= 0) produtos[idx].estoque = String(r.estoque);
+          }
+        }
+      });
+    }
+    saveLocal(produtos);
+    render();
+    const payload = produtos.map(p => ({sku:p.sku, nome:p.nome, categoria:p.categoria, estoque:p.estoque, alerta:p.alerta}));
+    await putGithubJSON(c.owner, c.repo, c.path, c.token, payload, remote.sha, c.name, c.email);
+    $('status').textContent = 'Sincronizado com GitHub em ' + new Date().toLocaleString();
+    alert('Sincronização concluída!');
+  }catch(e){
+    console.error(e);
+    $('status').textContent = 'Falha ao sincronizar com GitHub.';
+    alert('Erro: ' + e.message);
+  }
+}
+
+// ---------- Fluxo de carregamento ----------
+async function loadFromCSV(){
+  $('status').textContent = 'Carregando do GitHub…';
+  try{
+    const res = await fetch(CSV_URL, {cache:'no-store'});
+    if (!res.ok) throw new Error('Não foi possível ler o CSV ('+res.status+').');
+    const text = await res.text();
+    const rawNames = parseCSVFirstFieldBeforeSemicolon(text);
+    const unified = dedupeAndMap(rawNames);
+    const previous = loadLocal();
+    if (previous && previous.length){
+      const mapPrevBySku = new Map(previous.map(p => [p.sku, p]));
+      const mapPrevByName = new Map(previous.map(p => [p.nome, p]));
+      unified.forEach(u => {
+        if (mapPrevBySku.has(u.sku)){
+          u.estoque = mapPrevBySku.get(u.sku).estoque;
+          u.alerta = mapPrevBySku.get(u.sku).alerta ?? u.alerta;
+        } else if (mapPrevByName.has(u.nome)){
+          u.estoque = mapPrevByName.get(u.nome).estoque;
+          u.alerta = mapPrevByName.get(u.nome).alerta ?? u.alerta;
+        }
+      });
+    }
+    produtos = unified;
+    saveLocal(produtos);
+    $('status').innerHTML = 'Lista carregada de <span class="link" onclick="window.open(\''+CSV_URL+'\',\'_blank\')">products.csv</span> • ' + new Date().toLocaleString();
+    render();
+  }catch(e){
+    console.error(e);
+    $('status').textContent = 'Erro ao carregar CSV: ' + e.message + '. Usando dados locais (se houver).';
+    const previous = loadLocal();
+    if (previous && previous.length){ produtos = previous; } else { produtos = []; }
+    render();
+  }
+}
+
+// ---------- Eventos ----------
+$('q').addEventListener('input', render);
+$('refreshBtn').addEventListener('click', loadFromCSV);
+$('exportCsv').addEventListener('click', exportCSV);
+$('limpar').addEventListener('click', () => {
+  if (!confirm('Limpar todos os campos de estoque?')) return;
+  produtos.forEach(p => p.estoque = '');
+  saveLocal(produtos); render();
+});
+$('preencherZero').addEventListener('click', () => {
+  if (!confirm('Preencher 0 em todos os campos em branco?')) return;
+  produtos.forEach(p => { if (!p.estoque) p.estoque = '0'; });
+  saveLocal(produtos); render();
+});
+$('settingsBtn').addEventListener('click', () => {
+  const c = loadCfg();
+  $('csvUrlLabel').textContent = CSV_URL;
+  $('ghToken').value = c.token || '';
+  $('ghOwner').value = c.owner || '';
+  $('ghRepo').value = c.repo || '';
+  $('ghPath').value = c.path || 'estoque.json';
+  $('ghName').value = c.name || '';
+  $('ghEmail').value = c.email || '';
+  $('settings').showModal();
+});
+$('saveSettings').addEventListener('click', () => {
+  const c = {
+    token: $('ghToken').value.trim(),
+    owner: $('ghOwner').value.trim(),
+    repo: $('ghRepo').value.trim(),
+    path: $('ghPath').value.trim() || 'estoque.json',
+    name: $('ghName').value.trim(),
+    email: $('ghEmail').value.trim()
+  };
+  saveCfg(c);
+  $('settings').close();
+});
+$('syncBtn').addEventListener('click', syncGithub);
+
+// ---------- Start ----------
+loadFromCSV();
+</script>
+</body>
+</html>

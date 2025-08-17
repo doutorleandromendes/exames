@@ -68,7 +68,7 @@
 <dialog id="settings">
   <form method="dialog" id="settingsForm">
     <h3>Configurações (GitHub)</h3>
-    <div class="hint">Este app grava um <code>estoque.json</code> com separação por local: <b>EM_USO</b> e <b>STORAGE</b>.</div>
+    <div class="hint">Grava um único <code>estoque.json</code> com duas localizações: <b>EM_USO</b> e <b>STORAGE</b>.</div>
     <div class="row">
       <label>Owner/Org: <input id="ghOwner" placeholder="doutorleandromendes" /></label>
       <label>Repositório: <input id="ghRepo" placeholder="exames" /></label>
@@ -93,157 +93,184 @@
 <script>
 // --- PWA registration ---
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error));
+  window.addEventListener('load', function(){ navigator.serviceWorker.register('./sw.js').catch(console.error); });
 }
-let deferredPrompt=null;
-window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; const b=document.getElementById('installBtn'); b.style.display='block'; b.onclick=async()=>{ b.style.display='none'; if(deferredPrompt){ deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt=null; } }; });
+var deferredPrompt=null;
+window.addEventListener('beforeinstallprompt', function(e){
+  e.preventDefault();
+  deferredPrompt=e;
+  var b=document.getElementById('installBtn');
+  b.style.display='block';
+  b.onclick=function(){
+    b.style.display='none';
+    if(deferredPrompt){ deferredPrompt.prompt(); deferredPrompt=null; }
+  };
+});
 
 // --- Config ---
-const CFG_KEY="estoqueClinica_cfg";
+var CFG_KEY="estoqueClinica_cfg";
 function $(id){ return document.getElementById(id); }
-function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch{return {};} }
+function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch(e){return {};} }
 function saveCfg(o){ localStorage.setItem(CFG_KEY, JSON.stringify(o)); }
-let cfg=Object.assign({owner:"doutorleandromendes",repo:"exames",branch:"main",csvPath:"products.csv",jsonPath:"estoque.json",token:"",name:"",email:""}, loadCfg());
+var cfg=(function(){ var def={owner:"doutorleandromendes",repo:"exames",branch:"main",csvPath:"products.csv",jsonPath:"estoque.json",token:"",name:"",email:""}; var cur=loadCfg(); for(var k in def){ if(!(k in cur)) cur[k]=def[k]; } return cur; })();
 
 // --- Helpers ---
-function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]); }
+function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; }); }
 function slugifySKU(text){
-  const base=(text||"").toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join('');
-  let sku=base.slice(0,8) || (text||"").toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+  var base=(text||"").toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('');
+  var sku=base.slice(0,8) || (text||"").toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
   return sku || "SKU";
 }
 function categoriaInferida(nome){
-  const n=(nome||"").toLowerCase();
-  if (n.includes('microscopia')) return 'Microscopia';
-  if (n.includes('dosagem') || n.includes('hemoglobina glicada') || n.includes('cistatina c') || n.includes('proteína c reativa')) return 'Dosagem';
-  if (n.includes('antígeno') || n.includes('antigeno')) return 'Antígeno';
+  var n=(nome||"").toLowerCase();
+  if (n.indexOf('microscopia')>=0) return 'Microscopia';
+  if (n.indexOf('dosagem')>=0 || n.indexOf('hemoglobina glicada')>=0 || n.indexOf('cistatina c')>=0 || n.indexOf('proteína c reativa')>=0 || n.indexOf('proteina c reativa')>=0) return 'Dosagem';
+  if (n.indexOf('antígeno')>=0 || n.indexOf('antigeno')>=0) return 'Antígeno';
   return 'Sorologia';
 }
 function unifyName(raw){
-  let n=raw.trim();
+  var n=raw.trim();
   if (/epstein\s*-?\s*barr/i.test(n)) return "Epstein-Barr (VCA/EBNA/Heterófilos)";
-  const g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
-  if (g){ const base=g[1].trim(); return base + " (IgG/IgM)"; }
+  var g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
+  if (g){ var base=g[1].trim(); return base + " (IgG/IgM)"; }
   return n;
 }
 function parseCSVFirstFieldBeforeSemicolon(text){
-  const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
-  const items=[]; for(const line of lines){ const first=line.split(';')[0].trim(); if(first) items.push(first); }
+  var lines=text.split(/\r?\n/).filter(function(l){ return l.trim().length; });
+  var items=[]; for(var i=0;i<lines.length;i++){ var first=lines[i].split(';')[0].trim(); if(first) items.push(first); }
   return items;
 }
 function dedupeAndMap(rawNames){
-  const map=new Map();
-  rawNames.forEach(name=>{ const u=unifyName(name); if(!map.has(u)){ const sku=slugifySKU(u); map.set(u,{sku,nome:u,categoria:categoriaInferida(u),estoque:"",alerta: (/(hiv|streptococcus pyogenes|covid|sars\-cov2)/i.test(u)?10:5)});} });
-  return Array.from(map.values());
+  var map={};
+  for (var i=0;i<rawNames.length;i++){
+    var u=unifyName(rawNames[i]);
+    if (!map[u]){
+      var sku=slugifySKU(u);
+      map[u]={sku:sku,nome:u,categoria:categoriaInferida(u),estoque:"",alerta: (/(hiv|streptococcus pyogenes|covid|sars\-cov2)/i.test(u)?10:5)};
+    }
+  }
+  var arr=[]; for (var k in map){ arr.push(map[k]); }
+  return arr;
 }
 
 // --- GitHub API ---
-async function githubGet(owner,repo,path,token){
-  const url=`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
-  const res=await fetch(url,{ headers: token ? {'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'} : {'Accept':'application/vnd.github+json'} });
-  if(res.status===404) return {exists:false};
-  if(!res.ok) throw new Error('GitHub GET falhou: '+res.status);
-  const data=await res.json(); const content=atob(data.content.replace(/\n/g,''));
-  return {exists:true, sha:data.sha, content, jsonSafe: safeParseJSON(content)};
+function githubGet(owner,repo,path,token, cbSuccess, cbError){
+  var url='https://api.github.com/repos/'+owner+'/'+repo+'/contents/'+encodeURIComponent(path);
+  var headers={'Accept':'application/vnd.github+json'};
+  if(token) headers['Authorization']='Bearer '+token;
+  fetch(url,{ headers: headers }).then(function(res){
+    if(res.status===404){ cbSuccess({exists:false}); return; }
+    if(!res.ok){ cbError(new Error('GitHub GET falhou: '+res.status)); return; }
+    res.json().then(function(data){
+      var content=atob(data.content.replace(/\n/g,''));
+      cbSuccess({exists:true, sha:data.sha, content:content, jsonSafe: safeParseJSON(content)});
+    });
+  }).catch(cbError);
 }
-function safeParseJSON(t){ try{ return JSON.parse(t); }catch{return null;} }
-async function githubPutJSON(owner,repo,path,token,json,sha,name,email){
-  if(!token) throw new Error('Token não configurado.');
-  const url=`https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
-  const body={ message:'Atualiza estoque.json (app de estoque c/ locais)',
-               content: btoa(unescape(encodeURIComponent(JSON.stringify(json,null,2)))),
-               committer:{ name: name||"bot", email: email||"bot@example.com" } };
+function safeParseJSON(t){ try{ return JSON.parse(t); }catch(e){ return null; } }
+function githubPutJSON(owner,repo,path,token,json,sha,name,email, cbSuccess, cbError){
+  if(!token){ cbError(new Error('Token não configurado.')); return; }
+  var url='https://api.github.com/repos/'+owner+'/'+repo+'/contents/'+encodeURIComponent(path);
+  var body={ message:'Atualiza estoque.json (app de estoque c/ locais)',
+             content: btoa(unescape(encodeURIComponent(JSON.stringify(json,null,2)))),
+             committer:{ name: name||"bot", email: email||"bot@example.com" } };
   if(sha) body.sha=sha;
-  const res=await fetch(url,{ method:'PUT', headers:{ 'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json' }, body: JSON.stringify(body) });
-  if(!res.ok) throw new Error('GitHub PUT falhou: '+res.status+' '+(await res.text()));
-  return await res.json();
+  fetch(url,{ method:'PUT', headers:{ 'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json' }, body: JSON.stringify(body) })
+    .then(function(res){ if(!res.ok){ return res.text().then(function(t){ throw new Error('GitHub PUT falhou: '+res.status+' '+t); }); } return res.json(); })
+    .then(cbSuccess).catch(cbError);
 }
 
 // --- Estado ---
-let produtos=[]; let remoteSha=null; let locationSel='EM_USO';
-const LOCATIONS=['EM_USO','STORAGE'];
+var produtos=[]; var remoteSha=null; var locationSel='EM_USO';
 
 // --- UI ---
 function render(){
-  const root=$('list'); root.innerHTML='';
-  const q=$('q').value.trim().toLowerCase();
-  const items=produtos.filter(p=>!q||p.nome.toLowerCase().includes(q)||p.sku.toLowerCase().includes(q));
-  items.forEach(p=>{
-    const card=document.createElement('div'); card.className='card';
-    const left=document.createElement('div'); const right=document.createElement('div'); right.className='right';
-    const low=(p.estoque!=="" && Number(p.estoque)<=Number(p.alerta));
-    left.innerHTML=`<div class="nome">${escapeHtml(p.nome)}</div>
-      <div class="sku">SKU: <b>${escapeHtml(p.sku)}</b> • <span class="categoria">${escapeHtml(p.categoria)}</span> ${low?'<span class="low">• Abaixo do alerta</span>':''}</div>`;
-    const minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
-    const plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
-    const input=document.createElement('input'); input.className='qty'; input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=p.estoque;
-    input.oninput=(e)=>{ p.estoque=e.target.value; };
-    minus.onclick=()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); input.value=n; p.estoque=String(n); };
-    plus.onclick =()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=n+1; input.value=n; p.estoque=String(n); };
-    right.append(minus,input,plus); card.append(left,right); root.append(card);
+  var root=$('list'); root.innerHTML='';
+  var q=$('q').value.trim().toLowerCase();
+  var items=produtos.filter(function(p){ return !q || p.nome.toLowerCase().indexOf(q)>=0 || p.sku.toLowerCase().indexOf(q)>=0; });
+  items.forEach(function(p){
+    var card=document.createElement('div'); card.className='card';
+    var left=document.createElement('div'); var right=document.createElement('div'); right.className='right';
+    var low=(p.estoque!=="" && Number(p.estoque)<=Number(p.alerta));
+    left.innerHTML='<div class="nome">'+escapeHtml(p.nome)+'</div>' +
+      '<div class="sku">SKU: <b>'+escapeHtml(p.sku)+'</b> • <span class="categoria">'+escapeHtml(p.categoria)+'</span> '+(low?'<span class="low">• Abaixo do alerta</span>':'')+'</div>';
+    var minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
+    var plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
+    var input=document.createElement('input'); input.className='qty'; input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=p.estoque;
+    input.oninput=function(e){ p.estoque=e.target.value; };
+    minus.onclick=function(){ var n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); input.value=n; p.estoque=String(n); };
+    plus.onclick=function(){ var n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=n+1; input.value=n; p.estoque=String(n); };
+    right.appendChild(minus); right.appendChild(input); right.appendChild(plus); card.appendChild(left); card.appendChild(right); root.appendChild(card);
   });
   if(!items.length) root.innerHTML='<div class="small">Nenhum item encontrado.</div>';
 }
 
 function exportCSV(){
-  const head=['local','sku','nome','categoria','estoque','alerta'];
-  const esc=v=> /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g,'""') + '"' : String(v);
-  const lines=[head.join(',')];
-  produtos.forEach(p=>lines.push(['"'+locationSel+'"',p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(',')));
-  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+  var head=['local','sku','nome','categoria','estoque','alerta'];
+  function esc(v){ v=String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+  var lines=[head.join(',')];
+  produtos.forEach(function(p){ lines.push([locationSel,p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(',')); });
+  var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
 }
 
 // --- Carga CSV ---
-async function loadCsvOnline(){
+function loadCsvOnline(cb){
   $('status').textContent='Carregando lista...';
-  let text="";
-  try{
-    const rawUrl=`https://raw.githubusercontent.com/${cfg.owner}/${cfg.repo}/${cfg.branch}/${cfg.csvPath}`;
-    const res=await fetch(rawUrl,{cache:'no-store'});
+  var rawUrl='https://raw.githubusercontent.com/'+cfg.owner+'/'+cfg.repo+'/'+cfg.branch+'/'+cfg.csvPath;
+  fetch(rawUrl,{cache:'no-store'}).then(function(res){
     if(!res.ok) throw new Error('RAW falhou ('+res.status+')');
-    text=await res.text();
-  }catch(e){
-    try{
-      const file=await githubGet(cfg.owner,cfg.repo,cfg.csvPath,cfg.token);
-      if(!file.exists||!file.content) throw new Error('CSV não encontrado via API.');
-      text=file.content;
-    }catch(err){ $('status').textContent='Erro ao carregar CSV: '+err.message; throw err; }
-  }
-  const rawNames=parseCSVFirstFieldBeforeSemicolon(text);
-  const all=dedupeAndMap(rawNames);
-  produtos=all.map(p=>({ ...p, estoque: "" }));
-  $('status').textContent='Lista carregada.';
-  render();
+    return res.text();
+  }).then(function(text){
+    var rawNames=parseCSVFirstFieldBeforeSemicolon(text);
+    produtos=dedupeAndMap(rawNames);
+    $('status').textContent='Lista carregada.';
+    render(); cb && cb();
+  }).catch(function(){
+    // tenta via API (repo privado)
+    githubGet(cfg.owner,cfg.repo,cfg.csvPath,cfg.token, function(file){
+      if(!file.exists||!file.content){ $('status').textContent='Erro ao carregar CSV pela API.'; return; }
+      var rawNames=parseCSVFirstFieldBeforeSemicolon(file.content);
+      produtos=dedupeAndMap(rawNames);
+      $('status').textContent='Lista carregada (API).';
+      render(); cb && cb();
+    }, function(err){ $('status').textContent='Erro ao carregar CSV: '+err.message; });
+  });
 }
 
 // --- Carga/Saída JSON (com locais) ---
 function emptyPayloadFrom(prodList){
-  return {
-    meta: { updated: new Date().toISOString() },
-    locations: {
-      EM_USO: prodList.map(p => ({ sku:p.sku, estoque: p.estoque||"", alerta:p.alerta })),
-      STORAGE: prodList.map(p => ({ sku:p.sku, estoque: "", alerta:p.alerta }))
-    }
-  };
+  var emUso=[], storage=[];
+  for (var i=0;i<prodList.length;i++){
+    var p=prodList[i];
+    emUso.push({ sku:p.sku, estoque:"", alerta:p.alerta });
+    storage.push({ sku:p.sku, estoque:"", alerta:p.alerta });
+  }
+  return { meta:{ updated: new Date().toISOString() }, locations:{ EM_USO: emUso, STORAGE: storage } };
 }
 function applyLocationData(payload){
-  const loc = payload?.locations?.[locationSel] || [];
-  const bySku = new Map(loc.map(x=>[x.sku, x]));
-  produtos.forEach(p => { if (bySku.has(p.sku)) { const row=bySku.get(p.sku); p.estoque = String(row.estoque ?? ''); p.alerta = row.alerta ?? p.alerta; } });
+  var loc = payload && payload.locations ? payload.locations[locationSel] : null;
+  if (!loc) return;
+  var bySku={}; for (var i=0;i<loc.length;i++){ bySku[loc[i].sku]=loc[i]; }
+  for (var j=0;j<produtos.length;j++){
+    var p=produtos[j];
+    if (bySku[p.sku]){
+      var row=bySku[p.sku];
+      p.estoque = String(row.estoque || '');
+      if (typeof row.alerta !== 'undefined') p.alerta = row.alerta;
+    }
+  }
 }
 function buildPayloadFromUI(existingPayload){
-  const base = existingPayload && existingPayload.locations ? existingPayload : emptyPayloadFrom(produtos);
-  // Atualiza a localização selecionada com os estoques da UI
-  const list = produtos.map(p => ({ sku:p.sku, estoque: p.estoque||"", alerta:p.alerta }));
+  var base = (existingPayload && existingPayload.locations) ? existingPayload : emptyPayloadFrom(produtos);
+  var list=[]; for (var i=0;i<produtos.length;i++){ var p=produtos[i]; list.push({ sku:p.sku, estoque:p.estoque||"", alerta:p.alerta }); }
   base.locations[locationSel] = list;
   base.meta = { updated: new Date().toISOString() };
   return base;
 }
 
-async function loadJsonOnline(){
-  try{
-    const file=await githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token);
+function loadJsonOnline(){
+  githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token, function(file){
     remoteSha=file.sha||null;
     if(file.exists && file.jsonSafe){
       applyLocationData(file.jsonSafe);
@@ -252,58 +279,57 @@ async function loadJsonOnline(){
     } else {
       $('status').textContent='Sem estoque remoto ainda. Você pode salvar para criar.';
     }
-  }catch(e){ console.warn('Falha ao carregar estoque.json', e); }
+  }, function(e){ console.warn('Falha ao carregar estoque.json', e); });
 }
 
-async function saveJsonOnline(){
-  try{
-    $('status').textContent='Salvando no GitHub...';
-    // Busca o payload existente para preservar a outra localização
-    let current = null; let sha = remoteSha;
-    try{
-      const file = await githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token);
-      if (file.exists){ current = file.jsonSafe; sha = file.sha; }
-    }catch{}
-    const payload = buildPayloadFromUI(current);
-    const res=await githubPutJSON(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token,payload,sha,cfg.name,cfg.email);
-    remoteSha = (res.content && res.content.sha) ? res.content.sha : sha;
-    $('status').textContent='Salvo ('+locationSel+') no GitHub.';
-    alert('Estoque de '+locationSel+' salvo no GitHub!');
-  }catch(e){
-    console.error(e);
+function saveJsonOnline(){
+  $('status').textContent='Salvando no GitHub...';
+  // primeiro puxa o existente para preservar a outra localização
+  githubGet(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token, function(file){
+    var current = file.exists ? file.jsonSafe : null;
+    var sha = file.exists ? file.sha : null;
+    var payload = buildPayloadFromUI(current);
+    githubPutJSON(cfg.owner,cfg.repo,cfg.jsonPath,cfg.token,payload,sha,cfg.name,cfg.email, function(res){
+      remoteSha = (res.content && res.content.sha) ? res.content.sha : sha;
+      $('status').textContent='Salvo ('+locationSel+') no GitHub.';
+      alert('Estoque de '+locationSel+' salvo no GitHub!');
+    }, function(err){
+      $('status').textContent='Falha ao salvar.';
+      alert('Erro ao salvar no GitHub: '+err.message);
+    });
+  }, function(err){
     $('status').textContent='Falha ao salvar.';
-    alert('Erro ao salvar no GitHub: '+e.message);
-  }
+    alert('Erro ao ler estoque.json antes de salvar: '+err.message);
+  });
 }
 
 // --- Eventos ---
 $('q').addEventListener('input', render);
-$('refreshBtn').addEventListener('click', async()=>{ await loadCsvOnline(); await loadJsonOnline(); });
+$('refreshBtn').addEventListener('click', function(){ loadCsvOnline(loadJsonOnline); });
 $('exportCsv').addEventListener('click', exportCSV);
-$('preencherZero').addEventListener('click', ()=>{ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(p=>{ if(!p.estoque) p.estoque='0'; }); render(); });
-$('settingsBtn').addEventListener('click', ()=>{
+$('preencherZero').addEventListener('click', function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(function(p){ if(!p.estoque) p.estoque='0'; }); render(); });
+$('settingsBtn').addEventListener('click', function(){
   $('ghOwner').value=cfg.owner||''; $('ghRepo').value=cfg.repo||''; $('ghBranch').value=cfg.branch||'main';
   $('ghCsvPath').value=cfg.csvPath||'products.csv'; $('ghJsonPath').value=cfg.jsonPath||'estoque.json';
   $('ghToken').value=cfg.token||''; $('ghName').value=cfg.name||''; $('ghEmail').value=cfg.email||'';
   document.querySelector('dialog').showModal();
 });
-$('saveSettings').addEventListener('click', ()=>{
+$('saveSettings').addEventListener('click', function(){
   cfg={ owner:$('ghOwner').value.trim()||'doutorleandromendes', repo:$('ghRepo').value.trim()||'exames', branch:$('ghBranch').value.trim()||'main',
         csvPath:$('ghCsvPath').value.trim()||'products.csv', jsonPath:$('ghJsonPath').value.trim()||'estoque.json',
         token:$('ghToken').value.trim(), name:$('ghName').value.trim(), email:$('ghEmail').value.trim() };
   saveCfg(cfg); document.querySelector('dialog').close();
-  loadCsvOnline().then(loadJsonOnline);
+  loadCsvOnline(loadJsonOnline);
 });
 $('saveBtn').addEventListener('click', saveJsonOnline);
-$('location').addEventListener('change', async (e)=>{
+document.getElementById('location').addEventListener('change', function(e){
   locationSel = e.target.value;
-  // Quando troca o local, recarrega os dados daquela localização
-  await loadJsonOnline(); render();
+  loadJsonOnline();
 });
 
 // --- Start ---
-let locationSel = document.getElementById('location').value;
-loadCsvOnline().then(loadJsonOnline);
+locationSel = document.getElementById('location').value;
+loadCsvOnline(loadJsonOnline);
 </script>
 </body>
 </html>

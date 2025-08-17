@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-17T22:57:20.128Z"
+    "updated": "2025-08-17T22:58:51.134Z"
   },
   "locations": {
     "EM_USO": [
@@ -433,32 +433,32 @@
       },
       {
         "sku": "SC-A",
-        "estoque": "",
+        "estoque": "14",
         "alerta": 10
       },
       {
         "sku": "IA-A",
-        "estoque": "",
+        "estoque": "4",
         "alerta": 5
       },
       {
         "sku": "IB-A",
-        "estoque": "",
+        "estoque": "4",
         "alerta": 5
       },
       {
         "sku": "VP-A",
-        "estoque": "",
+        "estoque": "14",
         "alerta": 5
       },
       {
         "sku": "VM-A",
-        "estoque": "",
+        "estoque": "16",
         "alerta": 5
       },
       {
         "sku": "VSR-A",
-        "estoque": "",
+        "estoque": "23",
         "alerta": 5
       },
       {
@@ -483,7 +483,7 @@
       },
       {
         "sku": "SP-A",
-        "estoque": "",
+        "estoque": "17",
         "alerta": 10
       },
       {

@@ -1,0 +1,581 @@
+{
+  "meta": {
+    "updated": "2025-08-17T20:15:57.106Z"
+  },
+  "locations": {
+    "EM_USO": [
+      {
+        "sku": "DI",
+        "estoque": "15",
+        "alerta": 5
+      },
+      {
+        "sku": "D-AN",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "ZI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "CI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "FAI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "LI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VWNI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "H-3G",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "H-4G",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "HAI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-ADS",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-AA",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-AH",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-AA",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HC-AT",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HEI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "S-AT",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "C-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "G-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "MI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "CI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "TI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "RI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "EV",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SC-A",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "IA-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "IB-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VP-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VM-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VSR-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "A-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SP-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "L-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SP-A",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "DSDP",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "C-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "LI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "LD-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-ADPV",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-ADPF",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-AG",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDG",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDG",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDK",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDL",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-K",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDN",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "CCDS",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "PCRDS",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HGD",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "DDCTC-AT",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HL-A",
+        "estoque": "",
+        "alerta": 5
+      }
+    ],
+    "STORAGE": [
+      {
+        "sku": "DI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "D-AN",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "ZI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "CI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "FAI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "LI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VWNI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "H-3G",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "H-4G",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "HAI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-ADS",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-AA",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-AH",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HB-AA",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HC-AT",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HEI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "S-AT",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "C-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "G-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "MI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "CI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "TI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "RI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "EV",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SC-A",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "IA-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "IB-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VP-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VM-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "VSR-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "A-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SP-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "L-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "SP-A",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "DSDP",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "C-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "LI",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "LD-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-ADPV",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-ADPF",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-AG",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDG",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDG",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDK",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDL",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-K",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "M-CDN",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "CCDS",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "PCRDS",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HGD",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "DDCTC-AT",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HL-A",
+        "estoque": "",
+        "alerta": 5
+      }
+    ]
+  }
+}

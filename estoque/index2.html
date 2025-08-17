@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -92,10 +91,10 @@
 </dialog>
 
 <script>
-// ======== PWA (sem sintaxe moderna) ========
+// ======== PWA (básico) ========
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    navigator.serviceWorker.register('./sw.js')['catch'](function(e){ console.log('SW fail', e); });
+    navigator.serviceWorker.register('./sw.js').catch(function(e){ console.log('SW fail', e); });
   });
 }
 var deferredPrompt = null;
@@ -119,10 +118,9 @@ var remoteSha = null;
 var locationSel = 'EM_USO';
 
 // ======== Utils ========
-function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; }); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(m){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]; }); }
 function slugifySKU(text){
-  var base=(text||'').toUpperCase().split('').map(function(ch){ return ch.normalize ? ch.normalize('NFD') : ch; }).join('');
-  base = (text||'').toUpperCase().replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('');
+  var base=(text||'').toUpperCase().replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('');
   var sku = base.slice(0,8) || (text||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
   return sku || 'SKU';
 }
@@ -165,7 +163,7 @@ function dedupeAndMap(rawNames){
   return arr;
 }
 
-// ======== GitHub API (callbacks, sem vírgulas finais) ========
+// ======== GitHub API ========
 function githubGet(path, onOk, onErr){
   var url = 'https://api.github.com/repos/'+cfg.owner+'/'+cfg.repo+'/contents/'+encodeURIComponent(path);
   var headers = {'Accept':'application/vnd.github+json'};
@@ -181,7 +179,7 @@ function githubGet(path, onOk, onErr){
         onOk({exists:true, sha:data.sha, content:content, jsonSafe: jsonSafe});
       }catch(e){ onErr(e); }
     }, onErr);
-  })['catch'](onErr);
+  }).catch(onErr);
 }
 function githubPutJSON(path, json, sha, onOk, onErr){
   if (!cfg.token){ onErr(new Error('Token não configurado.')); return; }
@@ -194,7 +192,7 @@ function githubPutJSON(path, json, sha, onOk, onErr){
   if (sha) body.sha = sha;
   fetch(url, {method:'PUT', headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json'}, body: JSON.stringify(body)})
     .then(function(res){ if(!res.ok){ return res.text().then(function(t){ throw new Error('GitHub PUT: '+res.status+' '+t); }); } return res.json(); })
-    .then(onOk)['catch'](onErr);
+    .then(onOk).catch(onErr);
 }
 
 // ======== UI ========
@@ -202,6 +200,9 @@ function render(){
   var root = $('list'); root.innerHTML='';
   var q = $('q').value.trim().toLowerCase();
   var items = produtos.filter(function(p){ return !q || p.nome.toLowerCase().indexOf(q)>=0 || p.sku.toLowerCase().indexOf(q)>=0; });
+  // 🔽 ORDENAR A–Z POR NOME (com acentos)
+  items.sort(function(a,b){ return a.nome.localeCompare(b.nome, 'pt', {sensitivity:'base'}); });
+
   for (var i=0;i<items.length;i++){
     var p = items[i];
     var card = document.createElement('div'); card.className='card';
@@ -315,20 +316,13 @@ function saveJsonOnline(){
   }, function(err){ $('status').textContent='Falha ao ler JSON.'; alert('Erro ao ler estoque.json: '+err.message); });
 }
 
-// ======== Eventos (garantidos) ========
+// ======== Eventos ========
 document.addEventListener('DOMContentLoaded', function(){
-  // preencher dropdown padrão
-  var locEl = $('location');
-  if (locEl && locEl.value){ locationSel = locEl.value; }
-
+  var locEl = $('location'); if (locEl && locEl.value){ locationSel = locEl.value; }
   $('q').addEventListener('input', render);
   $('refreshBtn').addEventListener('click', function(){ loadCsvOnline(loadJsonOnline); });
   $('exportCsv').addEventListener('click', exportCSV);
-  $('preencherZero').addEventListener('click', function(){
-    if (!confirm('Preencher 0 nos campos vazios?')) return;
-    for (var i=0;i<produtos.length;i++){ if (!produtos[i].estoque) produtos[i].estoque='0'; }
-    render();
-  });
+  $('preencherZero').addEventListener('click', function(){ if (!confirm('Preencher 0 nos campos vazios?')) return; for (var i=0;i<produtos.length;i++){ if (!produtos[i].estoque) produtos[i].estoque='0'; } render(); });
   $('settingsBtn').addEventListener('click', function(){
     $('ghOwner').value = cfg.owner||'';
     $('ghRepo').value = cfg.repo||'';
@@ -358,7 +352,6 @@ document.addEventListener('DOMContentLoaded', function(){
   $('saveBtn').addEventListener('click', saveJsonOnline);
   $('location').addEventListener('change', function(e){ locationSel = e.target.value; loadJsonOnline(); });
 
-  // inicial
   loadCsvOnline(loadJsonOnline);
 });
 </script>

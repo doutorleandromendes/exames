@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-18T16:36:11.134Z"
+    "updated": "2025-08-18T16:37:57.727Z"
   },
   "locations": {
     "EM_USO": [
@@ -428,7 +428,7 @@
       },
       {
         "sku": "TI",
-        "estoque": "35",
+        "estoque": "34",
         "alerta": 5
       },
       {

@@ -1,182 +1,348 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
   <title>Controle de Estoque</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background:#fafafa; }
-    header { background:#1976d2; color:#fff; padding:1rem; text-align:center; }
-    #status { padding:0.5rem; font-size:0.9rem; text-align:center; }
-    #controls { display:flex; gap:0.5rem; justify-content:center; margin:0.5rem; flex-wrap:wrap; }
-    button { padding:0.5rem 0.75rem; border:none; border-radius:6px; cursor:pointer; font-size:0.9rem; }
-    button.minus { background:#e53935; color:#fff; }
-    button.plus { background:#43a047; color:#fff; }
-    button.action { background:#1976d2; color:#fff; }
-    #q { flex:1; padding:0.5rem; font-size:1rem; border-radius:6px; border:1px solid #ccc; }
-    .card { background:#fff; border:1px solid #ddd; border-radius:8px; margin:0.5rem; padding:0.5rem; display:flex; justify-content:space-between; align-items:center; }
-    .nome { font-weight:600; margin-bottom:0.25rem; }
-    .sku { font-size:0.8rem; color:#555; }
-    .right { display:flex; gap:0.25rem; align-items:center; }
-    .qty { width:60px; text-align:center; padding:0.25rem; border:1px solid #ccc; border-radius:6px; font-size:1rem; }
-    .low { color: #c62828; font-weight: 700; }
-    .low-card { background: #fff8e1; border-color: #f7c948; }
-    .low-input { background: #fff59d; }
-    select { padding:0.4rem; border-radius:6px; }
+    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial, sans-serif; margin:0; background:#fafafa; color:#111; }
+    header { background:#1976d2; color:#fff; padding:12px; }
+    header h2 { margin:0 0 6px 0; font-size:18px; }
+    #topbar { display:grid; grid-template-columns:auto 1fr auto auto auto; gap:6px; align-items:center; }
+    select, input[type="text"] { padding:8px 10px; border:1px solid #ccc; border-radius:6px; font-size:14px; }
+    button { padding:8px 12px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
+    .action { background:#1976d2; color:#fff; }
+    .minus { background:#e53935; color:#fff; }
+    .plus { background:#2e7d32; color:#fff; }
+    #status { padding:8px; font-size:12px; text-align:center; }
+    #list { padding:8px; }
+    .card { background:#fff; border:1px solid #ddd; border-radius:10px; margin:6px 0; padding:10px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }
+    .low-card { background:#fff8e1; border-color:#f7c948; }
+    .nome { font-weight:600; margin-bottom:4px; }
+    .sku { font-size:12px; color:#555; }
+    .low { color:#c62828; font-weight:700; }
+    .right { display:grid; grid-auto-flow:column; gap:6px; align-items:center; }
+    .qty { width:70px; text-align:center; padding:6px 8px; border:1px solid #ccc; border-radius:6px; font-size:16px; }
+    .low-input { background:#fff59d; }
+    .footer { position:sticky; bottom:0; background:#fff; border-top:1px solid #eaeaea; display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; padding:8px; }
+    dialog { border:1px solid #e7e7ef; border-radius:12px; padding:16px; max-width:640px; width:calc(100% - 32px); }
+    dialog form { display:grid; gap:10px; }
+    dialog .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    dialog input { width:100%; padding:8px 10px; border:1px solid #ccc; border-radius:8px; font-size:14px; }
+    dialog menu { display:flex; gap:8px; justify-content:flex-end; margin:0; padding:0; }
   </style>
 </head>
 <body>
   <header>
     <h2>Controle de Estoque</h2>
-    <select id="locationSel">
-      <option value="EM_USO">EM USO</option>
-      <option value="STORAGE">STORAGE</option>
-    </select>
+    <div id="topbar">
+      <select id="locationSel" title="Local">
+        <option value="EM_USO">EM USO</option>
+        <option value="STORAGE">STORAGE</option>
+      </select>
+      <input type="text" id="q" placeholder="Buscar por nome/SKU…">
+      <button class="action" id="refreshBtn">Recarregar CSV</button>
+      <button class="action" id="saveBtn">Salvar no GitHub</button>
+      <button class="action" id="settingsBtn">Configurações</button>
+    </div>
   </header>
-  <div id="status">Carregando lista...</div>
-  <div id="controls">
-    <input type="text" id="q" placeholder="Buscar..." />
-    <button class="action" onclick="loadCSV()">Recarregar CSV</button>
-    <button class="action" onclick="saveToGitHub()">Salvar no GitHub</button>
-    <button class="action" onclick="exportCSV()">Exportar CSV</button>
-  </div>
+
+  <div id="status">Carregando lista…</div>
   <div id="list"></div>
 
+  <div class="footer">
+    <button id="preencherZero">Preencher 0 em branco</button>
+    <button id="exportCsv">Exportar CSV</button>
+    <button id="installBtn" style="display:none">Instalar App</button>
+  </div>
+
+  <!-- Diálogo de Configurações -->
+  <dialog id="cfgDialog">
+    <form method="dialog" id="cfgForm">
+      <h3 style="margin:0">Configurações do GitHub</h3>
+      <small>Essas opções permitem ler o <code>products.csv</code> e salvar/ler o <code>estoque.json</code> no seu repositório.</small>
+      <div class="grid">
+        <label>Owner/Org
+          <input id="ghOwner" placeholder="doutorleandromendes">
+        </label>
+        <label>Repositório
+          <input id="ghRepo" placeholder="exames">
+        </label>
+        <label>Branch
+          <input id="ghBranch" placeholder="main">
+        </label>
+        <label>CSV (caminho)
+          <input id="ghCsvPath" placeholder="products.csv">
+        </label>
+        <label>JSON (caminho)
+          <input id="ghJsonPath" placeholder="estoque.json">
+        </label>
+        <label>Token (github_pat_…)
+          <input id="ghToken" type="password" placeholder="github_pat_...">
+        </label>
+        <label>Seu nome (commit)
+          <input id="ghName" placeholder="Seu Nome">
+        </label>
+        <label>Seu e-mail (commit)
+          <input id="ghEmail" placeholder="seuemail@exemplo.com">
+        </label>
+      </div>
+      <menu>
+        <button value="cancel">Cancelar</button>
+        <button id="saveCfgBtn" value="default" class="action">Salvar</button>
+      </menu>
+    </form>
+  </dialog>
+
 <script>
-let produtos = [];
-window.locationSel = 'EM_USO';
+/* ====== Estado/Config ====== */
+var CFG_KEY = 'estoque_cfg_v3';
+function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch(e){ return {}; } }
+function saveCfg(o){ localStorage.setItem(CFG_KEY, JSON.stringify(o)); }
+var cfg = Object.assign({
+  owner:'doutorleandromendes',
+  repo:'exames',
+  branch:'main',
+  csvPath:'products.csv',
+  jsonPath:'estoque.json',
+  token:'',
+  name:'',
+  email:''
+}, loadCfg());
 
-document.getElementById('locationSel').addEventListener('change', function(){
-  window.locationSel = this.value;
-  render();
-});
+var produtos = [];      // [{sku,nome,categoria,estoque,alerta}]
+var remoteSha = null;   // SHA do estoque.json remoto (para PUT)
+var locationSel = 'EM_USO';
 
+/* ====== Utilitários ====== */
+function $(id){ return document.getElementById(id); }
 function escapeHtml(s){
-  return String(s||'').replace(/[&<>"]'/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\'':'&#39;'}[c]));
+  return String(s||'')
+    .replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; })
+    .replace(/'/g,'&#39;');
 }
-
-async function loadCSV(){
-  try {
-    const resp = await fetch('https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv');
-    const text = await resp.text();
-    const lines = text.split(/\r?\n/);
-    const rawNames = lines.map(l => l.split(';')[0].trim()).filter(Boolean);
-    produtos = dedupeAndMap(rawNames);
-    render();
-  } catch(e){
-    document.getElementById('status').textContent = 'Erro ao carregar CSV: ' + e.message;
+function slugifySKU(text){
+  var t=(text||'').toUpperCase().normalize ? (text||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') : (text||'').toUpperCase();
+  var base=t.replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(function(w){return w[0];}).join('');
+  var sku=base.slice(0,8) || t.replace(/[^A-Z0-9]/g,'').slice(0,8);
+  return sku || 'SKU';
+}
+function categoriaInferida(nome){
+  var n=(nome||'').toLowerCase();
+  if (n.indexOf('microscopia')>=0) return 'Microscopia';
+  if (n.indexOf('dosagem')>=0 || n.indexOf('hemoglobina glicada')>=0 || n.indexOf('cistatina c')>=0 || n.indexOf('proteína c reativa')>=0 || n.indexOf('proteina c reativa')>=0) return 'Dosagem';
+  if (n.indexOf('antígeno')>=0 || n.indexOf('antigeno')>=0) return 'Antígeno';
+  return 'Sorologia';
+}
+function unifyName(raw){
+  var n=String(raw||'').trim();
+  if (/epstein\s*-?\s*barr/i.test(n)) return 'Epstein-Barr (VCA/EBNA/Heterófilos)';
+  var g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i);
+  if (g){ var base=g[1].trim(); return base + ' (IgG/IgM)'; }
+  // nomes genéricos para dedupe de IgG/IgM separados
+  if (/\b(igg|igm)\b/i.test(n)) return n.replace(/\s*-\s*(IgG|IgM).*/i,' (IgG/IgM)');
+  return n;
+}
+function dedupeAndMap(rawNames){
+  var map={};
+  for (var i=0;i<rawNames.length;i++){
+    var u=unifyName(rawNames[i]);
+    if(!map[u]){
+      var sku=slugifySKU(u);
+      map[u]={sku:sku, nome:u, categoria:categoriaInferida(u), estoque:'', alerta:5};
+    }
   }
+  var arr=[]; for (var k in map){ arr.push(map[k]); }
+  return arr;
 }
 
-function dedupeAndMap(names){
-  let map = {};
-  names.forEach(n => {
-    let key = n.toLowerCase();
-    if(key.includes('igg') || key.includes('igm')) key = 'anticorpos';
-    if(key.includes('epstein')) key = 'epstein-barr';
-    if(!map[key]) map[key] = {nome:n, sku:key, categoria:'', estoque:'', alerta:5};
-  });
-  return Object.values(map);
+/* ====== GitHub API ====== */
+function githubGet(path, onOk, onErr){
+  var url='https://api.github.com/repos/'+cfg.owner+'/'+cfg.repo+'/contents/'+encodeURIComponent(path);
+  var headers={'Accept':'application/vnd.github+json'};
+  if (cfg.token) headers['Authorization']='Bearer '+cfg.token;
+  fetch(url,{headers:headers}).then(function(res){
+    if(res.status===404){ onOk({exists:false}); return; }
+    if(!res.ok){ onErr(new Error('GitHub GET '+res.status)); return; }
+    res.json().then(function(data){
+      var content=atob(String(data.content||'').replace(/\n/g,''));
+      var jsonSafe=null; try{ jsonSafe=JSON.parse(content); }catch(_e){ jsonSafe=null; }
+      onOk({exists:true, sha:data.sha, content:content, jsonSafe:jsonSafe});
+    }, onErr);
+  })['catch'](onErr);
+}
+function githubPutJSON(path, json, sha, onOk, onErr){
+  if(!cfg.token){ onErr(new Error('Token não configurado.')); return; }
+  var url='https://api.github.com/repos/'+cfg.owner+'/'+cfg.repo+'/contents/'+encodeURIComponent(path);
+  var body={
+    message:'Atualiza estoque.json (app c/ locais)',
+    content:btoa(unescape(encodeURIComponent(JSON.stringify(json,null,2)))),
+    committer:{ name: cfg.name||'bot', email: cfg.email||'bot@example.com' }
+  };
+  if(sha) body.sha=sha;
+  fetch(url,{ method:'PUT', headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json'}, body:JSON.stringify(body) })
+    .then(function(res){ if(!res.ok){ return res.text().then(function(t){ throw new Error('GitHub PUT '+res.status+' '+t); }); } return res.json(); })
+    .then(onOk)['catch'](onErr);
 }
 
+/* ====== Renderização ====== */
 function render(){
-  try {
-    var root = document.getElementById('list');
-    var statusEl = document.getElementById('status');
-    if (!root) return;
-
-    var q = (document.getElementById('q') && document.getElementById('q').value || '').trim().toLowerCase();
-
-    var items = (Array.isArray(produtos) ? produtos.slice() : []).filter(function(p){
-      if (!p) return false;
-      var n = (p.nome || '').toLowerCase();
-      var s = (p.sku  || '').toLowerCase();
-      return !q || n.indexOf(q) >= 0 || s.indexOf(q) >= 0;
+  try{
+    var root=$('list'), statusEl=$('status');
+    var q=($('q') && $('q').value || '').trim().toLowerCase();
+    var items=(Array.isArray(produtos)? produtos.slice(): []).filter(function(p){
+      if(!p) return false; var n=(p.nome||'').toLowerCase(); var s=(p.sku||'').toLowerCase();
+      return !q || n.indexOf(q)>=0 || s.indexOf(q)>=0;
     });
+    // Ordena A–Z com acentos
+    items.sort(function(a,b){ return String(a&&a.nome||'').localeCompare(String(b&&b.nome||''), 'pt', {sensitivity:'base'}); });
 
-    items.sort(function(a,b){
-      return String(a && a.nome || '').localeCompare(String(b && b.nome || ''), 'pt', {sensitivity:'base'});
-    });
+    var threshold=(locationSel==='STORAGE')? 10 : 5;
 
-    var threshold = (window.locationSel === 'STORAGE') ? 10 : 5;
-
-    root.innerHTML = '';
+    root.innerHTML='';
     for (var i=0;i<items.length;i++){
-      var p = items[i] || {};
-      // agora só considera abaixo do alerta se for MENOR que o threshold
-      var low = (p.estoque !== '' && !isNaN(Number(p.estoque)) && Number(p.estoque) < threshold);
+      var p=items[i]||{};
+      var low=(p.estoque!=='' && !isNaN(Number(p.estoque)) && Number(p.estoque) < threshold); // MENOR que o alerta
 
-      var card = document.createElement('div');
-      card.className = 'card' + (low ? ' low-card' : '');
+      var card=document.createElement('div'); card.className='card'+(low?' low-card':'');
+      var left=document.createElement('div'); var right=document.createElement('div'); right.className='right';
 
-      var left = document.createElement('div');
-      var right = document.createElement('div');
-      right.className = 'right';
+      left.innerHTML='<div class="nome">'+escapeHtml(p.nome||'')+'</div>'+
+                     '<div class="sku">SKU: <b>'+escapeHtml(p.sku||'')+'</b> '+(low?'<span class="low">• Abaixo do alerta</span>':'')+'</div>';
 
-      left.innerHTML =
-        '<div class="nome">'+ (p.nome ? escapeHtml(p.nome) : '') +'</div>' +
-        '<div class="sku">SKU: <b>'+ (p.sku ? escapeHtml(p.sku) : '') +
-        '</b> ' + (low ? '<span class="low">• Abaixo do alerta</span>' : '') + '</div>';
-
-      var minus = document.createElement('button');
-      minus.className = 'minus';
-      minus.textContent = '–1';
-
-      var plus = document.createElement('button');
-      plus.className = 'plus';
-      plus.textContent = '+1';
-
-      var input = document.createElement('input');
-      input.className = 'qty' + (low ? ' low-input' : '');
-      input.type = 'number';
-      input.inputMode = 'numeric';
-      input.placeholder = 'Estoque';
-      input.value = (p.estoque === 0 ? '0' : (p.estoque || ''));
+      var minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
+      var plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
+      var input=document.createElement('input'); input.className='qty'+(low?' low-input':''); input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=(p.estoque===0?'0':(p.estoque||''));
 
       (function(pp, inp){
-        inp.oninput = function(){ pp.esto = inp.value; };
-        minus.onclick = function(){
-          var n = parseInt(inp.value || '0', 10); if (isNaN(n)) n = 0;
-          n = Math.max(0, n - 1); inp.value = n; pp.estoque = String(n);
-          render();
-        };
-        plus.onclick = function(){
-          var n = parseInt(inp.value || '0', 10); if (isNaN(n)) n = 0;
-          n = n + 1; inp.value = n; pp.estoque = String(n);
-          render();
-        };
+        inp.oninput=function(){ pp.estoque=inp.value; };
+        minus.onclick=function(){ var n=parseInt(inp.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); inp.value=n; pp.estoque=String(n); render(); };
+        plus.onclick=function(){ var n=parseInt(inp.value||'0',10); if(isNaN(n)) n=0; n=n+1; inp.value=n; pp.estoque=String(n); render(); };
       })(p, input);
 
-      right.appendChild(minus);
-      right.appendChild(input);
-      right.appendChild(plus);
-      card.appendChild(left);
-      card.appendChild(right);
-      root.appendChild(card);
+      right.appendChild(minus); right.appendChild(input); right.appendChild(plus);
+      card.appendChild(left); card.appendChild(right); root.appendChild(card);
     }
-
-    if (!items.length){
-      root.innerHTML = '<div class="small">Nenhum item encontrado.</div>';
-    }
-
-    if (statusEl && produtos && produtos.length){
-      statusEl.textContent = 'Lista carregada (' + (window.locationSel || 'EM_USO') + ').';
-    }
-  } catch (e){
-    console.error(e);
-    var statusEl2 = document.getElementById('status');
-    if (statusEl2) statusEl2.textContent = 'Falha ao renderizar: ' + e.message;
+    if(!items.length) root.innerHTML='<div class="sku">Nenhum item encontrado.</div>';
+    if(statusEl && produtos && produtos.length) statusEl.textContent='Lista carregada ('+locationSel+').';
+  }catch(e){
+    console.error(e); var s=$('status'); if(s) s.textContent='Falha ao renderizar: '+e.message;
   }
 }
 
-function saveToGitHub(){
-  alert('Aqui entra a lógica de salvar com token.');
-}
-function exportCSV(){
-  alert('Export CSV ainda não implementado.');
+/* ====== CSV (com fallbacks) ====== */
+async function loadCSV(){
+  try{
+    var owner=cfg.owner, repo=cfg.repo, branch=cfg.branch, csv=cfg.csvPath;
+    var candidates=[
+      'https://raw.githubusercontent.com/'+owner+'/'+repo+'/'+branch+'/'+csv,
+      'https://raw.githubusercontent.com/'+owner+'/'+repo+'/main/'+csv,
+      'https://raw.githubusercontent.com/'+owner+'/'+repo+'/gh-pages/'+csv
+    ];
+    var text=null, lastErr=null;
+    for (var i=0;i<candidates.length;i++){
+      try{
+        var r=await fetch(candidates[i],{cache:'no-store'});
+        if(!r.ok) throw new Error('RAW '+r.status);
+        text=await r.text(); $('status').textContent='CSV carregado de: '+candidates[i]; break;
+      }catch(e){ console.warn('Falha CSV em',candidates[i],e); lastErr=e; }
+    }
+    if(text===null){
+      // via API (repo privado ou caminho alternativo)
+      var api='https://api.github.com/repos/'+owner+'/'+repo+'/contents/'+encodeURIComponent(csv)+'?ref='+encodeURIComponent(branch);
+      var headers={'Accept':'application/vnd.github+json'}; if(cfg.token) headers['Authorization']='Bearer '+cfg.token;
+      var res=await fetch(api,{headers:headers}); if(!res.ok) throw new Error('API '+res.status);
+      var data=await res.json(); text=atob(String(data.content||'').replace(/\n/g,'')); $('status').textContent='CSV carregado via API do GitHub.';
+    }
+    var rawNames=String(text).split(/\r?\n/).map(function(l){ return (l.split(';')[0]||'').trim(); }).filter(Boolean);
+    produtos=dedupeAndMap(rawNames);
+    render();
+    await loadJSON(); // tenta carregar estoques após montar a lista
+  }catch(e){
+    $('status').textContent='Erro ao carregar CSV: '+e.message+' — verifique Configurações.';
+  }
 }
 
-// inicializa
+/* ====== JSON remoto por local ====== */
+function emptyPayloadFrom(){
+  var em=[], st=[];
+  for (var i=0;i<produtos.length;i++){
+    var p=produtos[i]; em.push({sku:p.sku, estoque:'', alerta:p.alerta}); st.push({sku:p.sku, estoque:'', alerta:p.alerta});
+  }
+  return { meta:{updated:new Date().toISOString()}, locations:{ EM_USO: em, STORAGE: st } };
+}
+function applyLocationData(payload){
+  if(!payload||!payload.locations) return;
+  var loc=payload.locations[locationSel]||[]; var bySku={}; for(var i=0;i<loc.length;i++){ bySku[loc[i].sku]=loc[i]; }
+  for (var j=0;j<produtos.length;j++){
+    var p=produtos[j]; if(bySku[p.sku]){ var row=bySku[p.sku]; p.estoque=(row.estoque===0||row.estoque==='0')?'0':String(row.estoque||''); if(typeof row.alerta!=='undefined') p.alerta=row.alerta; }
+  }
+}
+function buildPayloadFromUI(existing){
+  var base=(existing&&existing.locations)? existing : emptyPayloadFrom();
+  var list=[]; for(var i=0;i<produtos.length;i++){ var p=produtos[i]; list.push({sku:p.sku, estoque:p.estoque||'', alerta:p.alerta}); }
+  base.locations[locationSel]=list; base.meta={updated:new Date().toISOString()}; return base;
+}
+function loadJSON(){
+  return new Promise(function(resolve){
+    githubGet(cfg.jsonPath, function(file){
+      remoteSha=file.sha||null;
+      if(file.exists && file.jsonSafe){ applyLocationData(file.jsonSafe); $('status').textContent+=' • Estoques carregados ('+locationSel+').'; render(); }
+      resolve();
+    }, function(_e){ resolve(); });
+  });
+}
+function saveJSON(){
+  $('status').textContent='Salvando no GitHub...';
+  githubGet(cfg.jsonPath, function(file){
+    var current=file.exists? file.jsonSafe : null; var sha=file.exists? file.sha : null;
+    var payload=buildPayloadFromUI(current);
+    githubPutJSON(cfg.jsonPath, payload, sha, function(res){
+      remoteSha=(res.content&&res.content.sha)? res.content.sha : sha;
+      $('status').textContent='Salvo ('+locationSel+') no GitHub.'; alert('Estoque salvo!');
+    }, function(err){ $('status').textContent='Falha ao salvar.'; alert('Erro ao salvar: '+err.message); });
+  }, function(err){ $('status').textContent='Falha ao ler JSON.'; alert('Erro ao ler estoque.json: '+err.message); });
+}
+
+/* ====== Export ====== */
+function exportCSV(){
+  var head=['local','sku','nome','categoria','estoque','alerta'];
+  function esc(v){ v=String(v==null?'':v); return /[",\n]/.test(v)? '"'+v.replace(/"/g,'""')+'"' : v; }
+  var lines=[head.join(',')];
+  for (var i=0;i<produtos.length;i++){
+    var p=produtos[i]; lines.push([locationSel,p.sku,p.nome,p.categoria,p.estoque||'',p.alerta].map(esc).join(','));
+  }
+  var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'}); var url=URL.createObjectURL(blob);
+  var a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+}
+
+/* ====== Eventos ====== */
+$('locationSel').addEventListener('change', function(){ locationSel=this.value; loadJSON(); });
+$('q').addEventListener('input', render);
+$('refreshBtn').addEventListener('click', function(){ loadCSV(); });
+$('saveBtn').addEventListener('click', saveJSON);
+$('preencherZero').addEventListener('click', function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; for(var i=0;i<produtos.length;i++){ if(!produtos[i].estoque) produtos[i].estoque='0'; } render(); });
+$('exportCsv').addEventListener('click', exportCSV);
+$('settingsBtn').addEventListener('click', function(){
+  $('ghOwner').value=cfg.owner; $('ghRepo').value=cfg.repo; $('ghBranch').value=cfg.branch; $('ghCsvPath').value=cfg.csvPath; $('ghJsonPath').value=cfg.jsonPath;
+  $('ghToken').value=cfg.token; $('ghName').value=cfg.name; $('ghEmail').value=cfg.email; $('cfgDialog').showModal();
+});
+$('saveCfgBtn').addEventListener('click', function(){
+  cfg={
+    owner:($('ghOwner').value||'').trim()||'doutorleandromendes',
+    repo:($('ghRepo').value||'').trim()||'exames',
+    branch:($('ghBranch').value||'').trim()||'main',
+    csvPath:($('ghCsvPath').value||'').trim()||'products.csv',
+    jsonPath:($('ghJsonPath').value||'').trim()||'estoque.json',
+    token:($('ghToken').value||'').trim(),
+    name:($('ghName').value||'').trim(),
+    email:($('ghEmail').value||'').trim()
+  };
+  saveCfg(cfg); $('cfgDialog').close(); loadCSV();
+});
+
+/* ====== Init ====== */
+window.locationSel=$('locationSel').value;
 loadCSV();
 </script>
 </body>

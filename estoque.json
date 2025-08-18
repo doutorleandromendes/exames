@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-18T00:19:43.068Z"
+    "updated": "2025-08-18T00:41:22.827Z"
   },
   "locations": {
     "EM_USO": [
@@ -21,7 +21,7 @@
       },
       {
         "sku": "CI",
-        "estoque": "",
+        "estoque": "5",
         "alerta": 5
       },
       {
@@ -286,6 +286,21 @@
       },
       {
         "sku": "HL-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "HP-A",
+        "estoque": "",
+        "alerta": 5
+      },
+      {
+        "sku": "PRSC-A",
+        "estoque": "",
+        "alerta": 10
+      },
+      {
+        "sku": "DC-AA",
         "estoque": "",
         "alerta": 5
       }

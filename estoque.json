@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-18T20:57:38.865Z"
+    "updated": "2025-08-18T20:58:08.055Z"
   },
   "locations": {
     "EM_USO": [
@@ -21,7 +21,7 @@
       },
       {
         "sku": "CI",
-        "estoque": "1",
+        "estoque": "2",
         "alerta": 5
       },
       {
@@ -91,7 +91,7 @@
       },
       {
         "sku": "C-A",
-        "estoque": "",
+        "estoque": "1",
         "alerta": 5
       },
       {

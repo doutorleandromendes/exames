@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Controle de Estoque</title>
+<title>Controle de Estoque — Consolidado</title>
 <style>
   :root { --blue:#1976d2; --red:#e53935; --green:#2e7d32; --warn:#f7c948; }
   body{font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#fafafa;color:#111}
   header{background:var(--blue);color:#fff;padding:12px}
   h2{margin:0 0 6px 0;font-size:18px}
-  #topbar{display:grid;grid-template-columns:auto 1fr auto auto auto auto auto;gap:6px;align-items:center}
+  #topbar{display:grid;grid-template-columns:auto 1fr auto auto auto auto;gap:6px;align-items:center}
   select,input[type=text]{padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:14px}
   button{padding:8px 12px;border:none;border-radius:6px;cursor:pointer;font-size:14px}
   .action{background:var(--blue);color:#fff}
@@ -23,47 +23,50 @@
   .sku{font-size:12px;color:#555}
   .low{color:#c62828;font-weight:700}
   .right{display:grid;grid-auto-flow:column;gap:6px;align-items:center}
-  .qty{width:70px;text-align:center;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:16px}
+  .qty{width:72px;text-align:center;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:16px}
   .low-input{background:#fff59d}
-  .footer{position:sticky;bottom:0;background:#fff;border-top:1px solid #eaeaea;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;padding:8px}
+  .footer{position:sticky;bottom:0;background:#fff;border-top:1px solid #eaeaea;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:8px}
   dialog{border:1px solid #e7e7ef;border-radius:12px;padding:16px;max-width:720px;width:calc(100% - 32px)}
   dialog form{display:grid;gap:10px}
   dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   dialog input{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
   dialog menu{display:flex;gap:8px;justify-content:flex-end;margin:0;padding:0}
-  #err{white-space:pre-wrap;background:#fff3cd;color:#663c00;border:1px solid #ffeeba;border-radius:8px;padding:8px;margin:8px;display:none}
+  #err{white-space:pre-wrap;background:#fdecea;color:#611a15;border:1px solid #f5c6cb;border-radius:8px;padding:8px;margin:8px;display:none}
+  #hint{white-space:pre-wrap;background:#fff3cd;color:#663c00;border:1px solid #ffeeba;border-radius:8px;padding:8px;margin:8px;display:none}
 </style>
 </head>
 <body>
 <header>
-  <h2>Controle de Estoque</h2>
+  <h2>Controle de Estoque — Consolidado</h2>
   <div id="topbar">
     <select id="locationSel">
       <option value="EM_USO">EM USO</option>
       <option value="STORAGE">STORAGE</option>
     </select>
-    <input type="text" id="q" placeholder="Buscar por nome/SKU…" />
+    <input type="text" id="q" placeholder="Buscar por nome/SKU…">
     <button class="action" id="refreshBtn">Recarregar CSV</button>
     <button class="action" id="saveBtn">Salvar no GitHub</button>
-    <button class="action" id="testGhBtn">Testar GitHub</button>
     <button class="action" id="settingsBtn">Configurações</button>
     <button class="action" id="diagBtn">Diagnóstico</button>
   </div>
 </header>
+
 <div id="err"></div>
+<div id="hint"></div>
 <div id="status">Carregando…</div>
 <div id="list"></div>
+
 <div class="footer">
   <button id="preencherZero">Preencher 0 em branco</button>
   <button id="exportCsv">Exportar CSV</button>
-  <button id="syncBtn">Sincronizar</button>
   <span id="csvStatus"></span>
 </div>
 
+<!-- Configurações -->
 <dialog id="cfgDialog">
   <form method="dialog">
     <h3 style="margin:0">Configurações</h3>
-    <small>Repo fixo: <b>doutorleandromendes/exames</b> — Branch: <b>main</b> — CSV: <b>products.csv</b> — JSON: <b>estoque.json</b></small>
+    <small>Repo: <b>doutorleandromendes/exames</b> (branch <b>main</b>) — CSV: <b>products.csv</b> — JSON: <b>estoque.json</b></small>
     <div class="grid">
       <label>Token (github_pat_…)
         <input id="ghToken" type="password" placeholder="github_pat_...">
@@ -82,6 +85,7 @@
   </form>
 </dialog>
 
+<!-- Diagnóstico -->
 <dialog id="diagDialog">
   <form method="dialog">
     <h3 style="margin:0 0 8px 0">Diagnóstico</h3>
@@ -94,79 +98,100 @@
 
 <script>
 (function(){
-  // ===== CONFIG =====
-  const CFG = { owner:'doutorleandromendes', repo:'exames', branch:'main', csvPath:'products.csv', jsonPath:'estoque.json' };
-  const LS_KEY = 'estoque_cfg_token_v1';
-  let token = localStorage.getItem(LS_KEY) || '';
+  // ===== Fixos do repo =====
+  const RAW_CSV_URL = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/products.csv';
+  const API_JSON_URL = 'https://api.github.com/repos/doutorleandromendes/exames/contents/estoque.json';
+  const BRANCH = 'main';
 
-  let produtos = []; // {sku,nome,categoria,estoque,alerta}
+  // ===== Estado =====
+  let token = localStorage.getItem('gh_token_v1') || '';
+  let author = { name: localStorage.getItem('gh_name')||'', email: localStorage.getItem('gh_email')||'' };
+  let produtos = []; // {sku, nome, categoria, estoque, alerta}
   let locationSel = 'EM_USO';
 
-  function $(id){ return document.getElementById(id); }
-  function setStatus(msg){ const el=$('status'); if(el) el.textContent = msg; }
-  function showErr(msg){ const el=$('err'); el.style.display='block'; el.textContent = msg; }
-
-  // ===== UTIL =====
-  function escapeHtml(s){ return String(s||'').replace(/[&<>\"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'})[c]).replace(/'/g,'&#39;'); }
+  // ===== Helpers =====
+  const $ = (id)=>document.getElementById(id);
+  const log = (t)=>{ const el=$('status'); if(el) el.textContent=t; };
+  const showErr = (m)=>{ const el=$('err'); el.style.display='block'; el.textContent=m; };
+  const showHint = (m)=>{ const el=$('hint'); el.style.display='block'; el.textContent=m; };
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/'/g,'&#39;'); }
   function slugifySKU(text){ const t=(text||'').toUpperCase(); const base=t.replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join(''); return (base.slice(0,8) || t.replace(/[^A-Z0-9]/g,'').slice(0,8) || 'SKU'); }
   function unifyName(n){ n=String(n||'').trim(); if(/epstein\s*-?\s*barr/i.test(n)) return 'Epstein-Barr (VCA/EBNA/Heterófilos)'; const g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i); if(g){return g[1].trim()+' (IgG/IgM)';} if(/\b(igg|igm)\b/i.test(n)) return n.replace(/\s*-\s*(IgG|IgM).*/i,' (IgG/IgM)'); return n; }
-  function nameKey(s){ return unifyName(String(s||'')) .toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim(); }
-  function dedupeAndMap(rawNames){ const map={}; for(const r of rawNames){ const u=unifyName(r); if(!map[u]) map[u]={sku:slugifySKU(u), nome:u, categoria:'', estoque:'', alerta:5}; } return Object.values(map); }
+  function nameKey(s){ return unifyName(String(s||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim(); }
 
   // ===== CSV =====
-  async function fetchCsvText(){
-    const raw = `https://raw.githubusercontent.com/${CFG.owner}/${CFG.repo}/${encodeURIComponent(CFG.branch)}/${CFG.csvPath}`;
-    const r = await fetch(raw, {cache:'no-store'});
-    if(!r.ok) throw new Error('CSV '+r.status+' em '+raw);
-    return await r.text();
+  async function loadCSV(){
+    try{
+      log('Carregando CSV…');
+      const r = await fetch(RAW_CSV_URL+'?_ts='+Date.now(), {cache:'reload'});
+      if(!r.ok) throw new Error('CSV '+r.status);
+      const text = await r.text();
+      const rawNames = String(text).split(/\r?\n/).map(l => (l.split(';')[0]||'').trim()).filter(Boolean);
+      const map={};
+      rawNames.forEach((n)=>{
+        const u = unifyName(n);
+        if(!map[u]) map[u] = { sku: slugifySKU(u), nome: u, categoria:'', estoque:'', alerta: (u.toLowerCase().includes('antígeno')||u.toLowerCase().includes('antigeno'))?10:5 };
+      });
+      produtos = Object.values(map).sort((a,b)=> a.nome.localeCompare(b.nome, 'pt', {sensitivity:'base'}));
+      render();
+      log('Lista carregada ('+locationSel+').');
+      await loadJSON();
+    }catch(e){ showErr('Erro ao carregar CSV: '+(e&&e.message?e.message:e)); log('Falha ao carregar CSV'); }
   }
 
-  // ===== GITHUB API =====
-  function authHeaders(){ const h=new Headers(); h.set('Accept','application/vnd.github+json'); h.set('X-GitHub-Api-Version','2022-11-28'); if(token) h.set('Authorization','Bearer '+token.trim()); return h; }
-  async function githubGet(path){
-    const url=`https://api.github.com/repos/${CFG.owner}/${CFG.repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(CFG.branch)}&_ts=${Date.now()}`;
-    const r=await fetch(url,{headers:authHeaders(),mode:'cors',redirect:'follow'});
-    if(r.status===404) return {exists:false};
-    if(!r.ok) throw new Error('GET '+r.status+' '+url);
-    const data=await r.json(); const content=atob(String(data.content||'').replace(/\n/g,''));
-    let jsonSafe=null; try{ jsonSafe=JSON.parse(content); }catch(_e){}
-    return {exists:true, sha:data.sha, content, jsonSafe};
+  // ===== GitHub API =====
+  function authHeaders(){
+    const h = new Headers();
+    h.set('Accept','application/vnd.github+json');
+    h.set('X-GitHub-Api-Version','2022-11-28');
+    if(token) h.set('Authorization','Bearer '+token.trim());
+    return h;
   }
-  async function ghPutJSON(path,json){
-    if(!token) throw new Error('Token não configurado (abra Configurações).');
-    // pega SHA se já existir
-    let sha=null; try{ const cur=await githubGet(path); if(cur.exists) sha=cur.sha; }catch(_e){}
-    const url=`https://api.github.com/repos/${CFG.owner}/${CFG.repo}/contents/${encodeURIComponent(path)}`;
-    const body={
-      message:`Atualiza ${path} (${CFG.branch})`,
-      content:btoa(unescape(encodeURIComponent(JSON.stringify(json,null,2)))),
-      branch:CFG.branch,
-      committer:{ name: $('ghName')?.value || 'web', email: $('ghEmail')?.value || 'web@example.com' }
+  async function githubGetJSON(){
+    const url = API_JSON_URL + '?ref='+encodeURIComponent(BRANCH)+'&_ts='+Date.now();
+    const r = await fetch(url,{headers:authHeaders(),mode:'cors'});
+    if(r.status===404) return {exists:false};
+    const txt = await r.text();
+    if(!r.ok){ showErr('GET '+r.status+' – corpo: '+txt.slice(0,180)); throw new Error('GET '+r.status); }
+    let data=null; try{ data = JSON.parse(txt); }catch(e){ showErr('GET OK mas JSON inválido da API. Corpo: '+txt.slice(0,180)); throw e; }
+    const content = atob(String(data.content||'').replace(/\n/g,''));
+    let json=null; try{ json=JSON.parse(content); }catch(_e){ json=null; }
+    return {exists:true, sha:data.sha, json, rawApiPreview: txt.slice(0,200) };
+  }
+  async function githubPutJSON(payload){
+    if(!token) throw new Error('Token não configurado. Abra Configurações.');
+    let sha=null; try{ const cur=await githubGetJSON(); if(cur.exists) sha=cur.sha; }catch(_e){}
+    const body = {
+      message:`Atualiza estoque.json (${BRANCH})`,
+      content:btoa(unescape(encodeURIComponent(JSON.stringify(payload,null,2)))),
+      branch:BRANCH,
+      committer:{ name: author.name||'web', email: author.email||'web@example.com' }
     };
     if(sha) body.sha=sha;
-    const r=await fetch(url,{method:'PUT',headers:new Headers([...authHeaders(), ['Content-Type','application/json']]), body:JSON.stringify(body), mode:'cors', redirect:'follow'});
-    const txt=await r.text();
-    if(!r.ok) throw new Error('PUT '+r.status+' – '+txt);
-    try { return JSON.parse(txt); } catch { return {ok:true, raw:txt}; }
+    const r = await fetch(API_JSON_URL, {
+      method:'PUT',
+      headers: new Headers([...authHeaders(), ['Content-Type','application/json']]),
+      body: JSON.stringify(body),
+      mode:'cors'
+    });
+    const txt = await r.text();
+    if(!r.ok){ showErr('PUT '+r.status+' – '+txt.slice(0,200)); throw new Error('PUT '+r.status); }
+    return JSON.parse(txt);
   }
 
-  // ===== ESTOQUE JSON =====
-  function isLegacyPayload(obj){ return obj && Array.isArray(obj.produtos); }
-  function migrateLegacyToNew(obj){
-    // Converte formato legado {produtos:[{sku,nome,estoque,alerta?}]} para {locations:{EM_USO, STORAGE}}
-    var em = (obj.produtos||[]).map(function(p){
-      return { sku:p.sku, nome:p.nome||'', estoque: (p.estoque===0||p.estoque==='0')?'0':String(p.estoque||''), alerta: (typeof p.alerta!=='undefined'? p.alerta : 5) };
-    });
-    var st = (obj.produtos||[]).map(function(p){
-      return { sku:p.sku, nome:p.nome||'', estoque: '', alerta: (typeof p.alerta!=='undefined'? p.alerta : 5) };
-    });
-    return { meta:{updated:new Date().toISOString(), migrated:true, from:'legacy_v1'}, locations:{ EM_USO: em, STORAGE: st } };
+  // ===== JSON <-> UI =====
+  function ensureSchema(obj){
+    if(obj && obj.locations) return obj;
+    if(obj && Array.isArray(obj.produtos)){
+      const em = obj.produtos.map(p=>({sku:p.sku, nome:p.nome, estoque:(p.estoque===0||p.estoque==='0')?0:Number(p.estoque)||0, alerta:(typeof p.alerta!=='undefined'?p.alerta:5)}));
+      const st = obj.produtos.map(p=>({sku:p.sku, nome:p.nome, estoque:'', alerta:(typeof p.alerta!=='undefined'?p.alerta:5)}));
+      return { meta:{updated:new Date().toISOString(), migrated:true}, locations:{ EM_USO: em, STORAGE: st } };
+    }
+    return { meta:{updated:new Date().toISOString()}, locations:{ EM_USO: [], STORAGE: [] } };
   }
 
-  // ===== ESTOQUE JSON =====
-  function applyLocationData(payload){
-    if(!payload || !payload.locations) return;
-    const loc = payload.locations[locationSel] || [];
+  function applyLocation(payload){
+    const loc = (payload.locations||{})[locationSel] || [];
     const bySku=Object.create(null), byName=Object.create(null);
     produtos.forEach((p,i)=>{ if(p&&p.sku) bySku[p.sku]=i; const nk=nameKey(p&&p.nome); if(nk) byName[nk]=i; });
     produtos.forEach(p=>{ p.estoque=''; });
@@ -175,49 +200,58 @@
       let idx=-1;
       if(row && row.sku && (row.sku in bySku)) idx=bySku[row.sku];
       if(idx<0 && row && row.nome){ const nk=nameKey(row.nome); if(nk in byName) idx=byName[nk]; }
-      if(idx>=0){ produtos[idx].estoque=(row.estoque===0||row.estoque==='0')?'0':String(row.estoque||''); applied++; }
+      if(idx>=0){
+        const val = (row.estoque===0 || row.estoque==='0') ? '0' : (typeof row.estoque==='number' ? String(row.estoque) : String(row.estoque||''));
+        produtos[idx].estoque = val;
+        applied++;
+      }
     }
-    setStatus(($('status').textContent||'')+` • Estoques aplicados (${applied}/${loc.length}).`);
+    log('Lista carregada ('+locationSel+'). • Estoques aplicados: '+applied+'/'+loc.length);
     render();
   }
-  async function loadJSON(){
-    try{
-      const file=await githubGet(CFG.jsonPath);
-      if(file.exists){
-        let payload = file.jsonSafe;
-        if (!payload){
-          showErr('O arquivo \'"+CFG.jsonPath+"\' existe, mas não é JSON válido.');
-          return;
-        }
-        if (isLegacyPayload(payload)){
-          // migra e salva de volta para padronizar
-          const migrated = migrateLegacyToNew(payload);
-          try{ await ghPutJSON(CFG.jsonPath, migrated); }catch(_e){}
-          payload = migrated;
-        }
-        applyLocationData(payload);
+
+  function syncFromDOM(){
+    const inputs = document.querySelectorAll('input.qty');
+    const bySku = Object.create(null); produtos.forEach((p,i)=>{ bySku[p.sku]=i; });
+    inputs.forEach(inp=>{ const sku = inp.dataset.sku; if(bySku[sku]!=null){ produtos[bySku[sku]].estoque = inp.value; } });
+  }
+
+  // MERGE: só atualiza itens com valor preenchido; se vazio, preserva anterior. Sempre salva NÚMERO.
+  function buildMergedPayload(base){
+    const payload = ensureSchema(base||{});
+    const old = (payload.locations||{})[locationSel] || [];
+    const oldBySku = Object.create(null), oldByName = Object.create(null);
+    old.forEach((r)=>{ if(r && r.sku) oldBySku[r.sku]=r; const nk=nameKey(r && (r.nome||'')); if(nk) oldByName[nk]=r; });
+
+    syncFromDOM();
+
+    const newList = produtos.map(p=>{
+      const prev = oldBySku[p.sku] || oldByName[nameKey(p.nome)] || null;
+      const raw = (p.estoque===0 || p.estoque==='0') ? '0' : String(p.estoque||'');
+      let final;
+      if(raw===''){
+        // preserva
+        final = prev ? (typeof prev.estoque==='number'? prev.estoque : (prev.estoque===''? '' : Number(prev.estoque)||0)) : '';
       } else {
-        setStatus(($('status').textContent||'')+` • Sem estoque remoto para ${locationSel}.`);
+        // converte para número (0 se NaN)
+        final = Number(raw); if(!isFinite(final)) final = 0;
       }
-    }catch(e){ showErr('Erro ao ler JSON: '+(e&&e.message?e.message:e)); }
-  }
-      else { setStatus(($('status').textContent||'')+` • Sem estoque remoto para ${locationSel}.`); }
-    }catch(e){ showErr('Erro ao ler JSON: '+(e&&e.message?e.message:e)); }
-  }
-  function buildPayloadFromUI(base){
-    const payload = (base && base.locations) ? base : {meta:{},locations:{EM_USO:[],STORAGE:[]}};
-    const list = produtos.map(p=>({sku:p.sku,nome:p.nome,estoque:p.estoque||'',alerta:p.alerta}));
-    payload.locations[locationSel]=list; payload.meta.updated=new Date().toISOString();
+      return { sku:p.sku, nome:p.nome, estoque: final, alerta:p.alerta };
+    });
+
+    payload.locations[locationSel] = newList;
+    payload.meta.updated = new Date().toISOString();
     return payload;
   }
 
-  // ===== RENDER =====
+  // ===== Render =====
   function render(){
     const root=$('list'); const statusEl=$('status');
     const q=($('q').value||'').trim().toLowerCase();
     const items=produtos.filter(p=>{ const n=(p.nome||'').toLowerCase(), s=(p.sku||'').toLowerCase(); return !q || n.includes(q) || s.includes(q); });
     items.sort((a,b)=> String(a.nome||'').localeCompare(String(b.nome||''), 'pt', {sensitivity:'base'}));
     const threshold=(locationSel==='STORAGE')?10:5;
+
     root.innerHTML='';
     for(const p of items){
       const low=(p.estoque!=='' && !isNaN(Number(p.estoque)) && Number(p.estoque)<threshold);
@@ -227,6 +261,7 @@
       const minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
       const plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
       const input=document.createElement('input'); input.className='qty'+(low?' low-input':''); input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=(p.estoque===0?'0':(p.estoque||''));
+      input.dataset.sku = p.sku;
       input.oninput=()=>{ p.estoque=input.value; };
       minus.onclick=()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); input.value=n; p.estoque=String(n); render(); };
       plus.onclick =()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=n+1; input.value=n; p.estoque=String(n); render(); };
@@ -237,69 +272,68 @@
     statusEl.textContent='Lista '+(produtos.length? 'carregada':'vazia')+' ('+locationSel+').';
   }
 
-  // ===== FLUXO =====
-  async function loadCSV(){
+  // ===== Ações =====
+  async function onSave(){
+    const btn = $('saveBtn'); const hint=$('hint'); hint.style.display='none';
     try{
-      setStatus('Carregando CSV…');
-      const text=await fetchCsvText();
-      const rawNames=String(text).split(/\r?\n/).map(l=> (l.split(';')[0]||'').trim()).filter(Boolean);
-      produtos=dedupeAndMap(rawNames);
-      render();
-      await loadJSON();
-      $('csvStatus').textContent='CSV via RAW';
-    }catch(e){ showErr('Erro ao carregar CSV: '+(e&&e.message?e.message:e)); setStatus('Falha ao carregar CSV'); }
-  }
+      if(btn){ btn.disabled=true; btn.textContent='Salvando…'; }
+      log('Preparando dados…');
 
-  async function saveJSON(){
-    try{
-      // lê arquivo atual para preservar o outro local
-      let cur=null; try{ const f=await githubGet(CFG.jsonPath); cur=(f&&f.exists)? f.jsonSafe: null; }catch(_e){}
-      if (isLegacyPayload(cur)) cur = migrateLegacyToNew(cur);
-      const payload=buildPayloadFromUI(cur);
-      await ghPutJSON(CFG.jsonPath, payload);
-      alert('Estoque salvo com sucesso!
-'+CFG.owner+'/'+CFG.repo+' → '+CFG.jsonPath+' ('+locationSel+')');
-      await loadJSON();
-    }catch(e){ showErr('Falha ao salvar: '+(e&&e.message?e.message:e)); }
-  }catch(_e){}
-      const payload=buildPayloadFromUI(cur);
-      await ghPutJSON(CFG.jsonPath, payload);
-      alert('Estoque salvo com sucesso!\n'+CFG.owner+'/'+CFG.repo+' → '+CFG.jsonPath+' ('+locationSel+')');
-      await loadJSON();
-    }catch(e){ showErr('Falha ao salvar: '+(e&&e.message?e.message:e)); }
-  }
+      const cur = await githubGetJSON().catch(()=>({exists:false}));
+      const payload = buildMergedPayload(cur && cur.json);
 
-  async function testGitHub(){
-    try{
-      const testPath = 'estoque.ping.'+Date.now()+'.json';
-      await ghPutJSON(testPath, {ping:true, ts:new Date().toISOString()});
-      alert('Teste OK! Escreveu: '+testPath);
-    }catch(e){ showErr('Falha no Teste GitHub: '+(e&&e.message?e.message:e)); }
+      // quantos campos não-vazios você está enviando agora?
+      let sendingCount = 0; produtos.forEach(p=>{ const v = (p.estoque===0 || p.estoque==='0') ? '0' : String(p.estoque||''); if(v !== '') sendingCount++; });
+      log('Gravando no GitHub… (enviando valores não-vazios: '+sendingCount+')');
+
+      await githubPutJSON(payload);
+
+      // Verifica lendo do remoto
+      log('Salvo. Conferindo no remoto…');
+      const after = await githubGetJSON();
+      const applied = ensureSchema(after.json);
+      const loc = (applied.locations||{})[locationSel] || [];
+      const notEmpty = loc.filter(x=> String(x.estoque) !== '' && !(typeof x.estoque==='number' && isNaN(x.estoque))).slice(0,3);
+      const totalNotEmpty = loc.filter(x=> String(x.estoque) !== '' && !(typeof x.estoque==='number' && isNaN(x.estoque))).length;
+
+      if(totalNotEmpty===0){
+        showErr('ATENÇÃO: o JSON remoto continua sem valores para '+locationSel+'. Prévia da resposta da API (200 chars):\n'+(after.rawApiPreview||'sem corpo'));
+      }else{
+        const ex = notEmpty.map(x=> `• ${x.sku || x.nome}: ${x.estoque}`).join('\n');
+        showHint(`OK: ${totalNotEmpty} itens com estoque registrado em ${locationSel}. Exemplos:\n${ex}`);
+      }
+
+      // aplica na interface
+      applyLocation(applied);
+      log('Pronto.');
+    }catch(e){ showErr('Falha ao salvar: '+(e&&e.message?e.message:e)); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='Salvar no GitHub'; } }
   }
 
   function exportCSV(){
     const head=['local','sku','nome','categoria','estoque','alerta'];
-    const esc=v=>{v=String(v==null?'':v); return /[",\n]/.test(v)? '"'+v.replace(/"/g,'""')+'"': v;};
+    const esc=v=>{v=String(v==null?'':v); return /[",\n]/.test(v)? '"'+v.replace(/"/g,'""')+'"' : v;};
     const lines=[head.join(',')];
     for(const p of produtos){ lines.push([locationSel,p.sku,p.nome,p.categoria||'',p.estoque||'',p.alerta].map(esc).join(',')); }
     const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
   }
 
-  // ===== EVENTOS =====
+  // ===== Eventos =====
   $('refreshBtn').onclick=loadCSV;
-  $('saveBtn').onclick=saveJSON;
-  $('testGhBtn').onclick=testGitHub;
-  $('settingsBtn').onclick=function(){ $('ghToken').value=token; $('ghName').value=''; $('ghEmail').value=''; $('cfgDialog').showModal(); };
-  $('saveCfgBtn').onclick=function(){ token=($('ghToken').value||'').trim(); localStorage.setItem(LS_KEY, token); $('cfgDialog').close(); };
-  $('diagBtn').onclick=async function(){ let extra=''; try{ const f=await githubGet(CFG.jsonPath); extra='Remoto: '+(f.exists?'existe':'não existe')+(f.exists? ('; JSON='+!!f.jsonSafe):''); }catch(e){ extra='Falha remoto: '+(e&&e.message?e.message:e); } $('diagPre').textContent=[`Owner/Repo: ${CFG.owner}/${CFG.repo}`, `Branch: ${CFG.branch}`, `CSV: ${CFG.csvPath}`, `JSON: ${CFG.jsonPath}`, `Itens: ${produtos.length}`, `Local: ${locationSel}`, extra].join('\n'); $('diagDialog').showModal(); };
+  $('saveBtn').onclick=onSave;
+  $('settingsBtn').onclick=function(){ $('ghToken').value=token; $('ghName').value=author.name; $('ghEmail').value=author.email; $('cfgDialog').showModal(); };
+  $('saveCfgBtn').onclick=function(){ token=($('ghToken').value||'').trim(); author.name=($('ghName').value||'').trim(); author.email=($('ghEmail').value||'').trim(); localStorage.setItem('gh_token_v1', token); localStorage.setItem('gh_name', author.name); localStorage.setItem('gh_email', author.email); $('cfgDialog').close(); };
+  $('diagBtn').onclick=async function(){ let extra=''; try{ const r=await githubGetJSON(); extra='Remoto: '+(r.exists?'existe':'não existe')+(r.exists? ('; JSON='+!!r.json):''); }catch(e){ extra='Falha remoto: '+(e&&e.message?e.message:e); } $('diagPre').textContent=[ 'Owner/Repo: doutorleandromendes/exames', 'Branch: main', 'CSV: products.csv', 'JSON: estoque.json', 'Itens: '+produtos.length, 'Local: '+locationSel, extra ].join('\n'); $('diagDialog').showModal(); };
   $('locationSel').onchange=function(){ locationSel=this.value; loadJSON(); };
   $('q').oninput=render;
   $('preencherZero').onclick=function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(p=>{ if(!p.estoque) p.estoque='0';}); render(); };
   $('exportCsv').onclick=exportCSV;
-  $('syncBtn').onclick=loadJSON;
 
-  // ===== START =====
+  // ===== Start =====
+  async function loadJSON(){ // (re)declara aqui para garantir existência antes de usar
+    try{ const got = await githubGetJSON(); if(!got.exists){ log('Sem estoque remoto.'); return; } if(!got.json){ showErr('estoque.json inválido (não é JSON).'); return; } const payload = ensureSchema(got.json); applyLocation(payload); }catch(e){ showErr('Erro ao ler estoque.json: '+(e&&e.message?e.message:e)); }
+  }
   loadCSV();
 })();
 </script>

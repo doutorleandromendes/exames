@@ -35,7 +35,7 @@
         "alerta": 5
       },
       {
-        "sku": "C-A",
+        "sku": "CRYP",
         "nome": "Cryptococcus - AntÃ­geno",
         "estoque": 4,
         "alerta": 10
@@ -397,7 +397,7 @@
         "alerta": 5
       },
       {
-        "sku": "C-A",
+        "sku": "CRYP",
         "nome": "Cryptococcus - Antígeno",
         "estoque": 23,
         "alerta": 10

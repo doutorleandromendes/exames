@@ -11,7 +11,7 @@
         "alerta": 10
       },
       {
-        "sku": "CI",
+        "sku": "CHKV",
         "nome": "Chikungunya (IgG/IgM)",
         "estoque": 4,
         "alerta": 5
@@ -29,7 +29,7 @@
         "alerta": 10
       },
       {
-        "sku": "CI",
+        "sku": "CMV",
         "nome": "CMV (IgG/IgM)",
         "estoque": 4,
         "alerta": 5
@@ -113,25 +113,25 @@
         "alerta": 5
       },
       {
-        "sku": "HB-AA",
+        "sku": "HB-ABC",
         "nome": "Hepatite B - Anticorpo AntiHBc",
         "estoque": 4,
         "alerta": 5
       },
       {
-        "sku": "HB-AA",
+        "sku": "HB-ABS",
         "nome": "Hepatite B - Anticorpo AntiHBs",
         "estoque": 3,
         "alerta": 5
       },
       {
-        "sku": "HB-ADS",
+        "sku": "HB-AGS",
         "nome": "Hepatite B - AntÃ­geno de SuperfÃ­cie",
         "estoque": 3,
         "alerta": 10
       },
       {
-        "sku": "HB-AH",
+        "sku": "HB-AGE",
         "nome": "Hepatite B - AntÃ­geno Hbe",
         "estoque": 4,
         "alerta": 10
@@ -161,13 +161,13 @@
         "alerta": 5
       },
       {
-        "sku": "HI",
+        "sku": "HSV1",
         "nome": "HSV1 (IgG/IgM)",
         "estoque": 0,
         "alerta": 5
       },
       {
-        "sku": "HI",
+        "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
         "estoque": 3,
         "alerta": 5
@@ -197,13 +197,13 @@
         "alerta": 10
       },
       {
-        "sku": "LI",
+        "sku": "LPT",
         "nome": "Leptospirose (IgG/IgM)",
         "estoque": 5,
         "alerta": 5
       },
       {
-        "sku": "LI",
+        "sku": "LYM",
         "nome": "Lyme (IgG/IgM)",
         "estoque": 5,
         "alerta": 5
@@ -317,7 +317,7 @@
         "alerta": 5
       },
       {
-        "sku": "SP-A",
+        "sku": "SP-P",
         "nome": "Streptococcus pneumoniae - AntÃ­geno",
         "estoque": 4,
         "alerta": 10
@@ -373,7 +373,7 @@
         "alerta": 10
       },
       {
-        "sku": "CI",
+        "sku": "CHKV",
         "nome": "Chikungunya (IgG/IgM)",
         "estoque": 28,
         "alerta": 5
@@ -391,7 +391,7 @@
         "alerta": 10
       },
       {
-        "sku": "CI",
+        "sku": "CMV",
         "nome": "CMV (IgG/IgM)",
         "estoque": 9,
         "alerta": 5
@@ -475,25 +475,25 @@
         "alerta": 5
       },
       {
-        "sku": "HB-AA",
+        "sku": "HB-ABC",
         "nome": "Hepatite B - Anticorpo AntiHBc",
         "estoque": 15,
         "alerta": 5
       },
       {
-        "sku": "HB-AA",
+        "sku": "HB-ABS",
         "nome": "Hepatite B - Anticorpo AntiHBs",
         "estoque": 33,
         "alerta": 5
       },
       {
-        "sku": "HB-ADS",
+        "sku": "HB-AGS",
         "nome": "Hepatite B - Antígeno de Superfície",
         "estoque": 24,
         "alerta": 10
       },
       {
-        "sku": "HB-AH",
+        "sku": "HB-AGE",
         "nome": "Hepatite B - Antígeno Hbe",
         "estoque": 15,
         "alerta": 10
@@ -523,13 +523,13 @@
         "alerta": 5
       },
       {
-        "sku": "HI",
+        "sku": "HSV1",
         "nome": "HSV1 (IgG/IgM)",
         "estoque": 16,
         "alerta": 5
       },
       {
-        "sku": "HI",
+        "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
         "estoque": 16,
         "alerta": 5
@@ -559,13 +559,13 @@
         "alerta": 10
       },
       {
-        "sku": "LI",
+        "sku": "LPT",
         "nome": "Leptospirose (IgG/IgM)",
         "estoque": 61,
         "alerta": 5
       },
       {
-        "sku": "LI",
+        "sku": "LYM",
         "nome": "Lyme (IgG/IgM)",
         "estoque": 5,
         "alerta": 5
@@ -679,7 +679,7 @@
         "alerta": 5
       },
       {
-        "sku": "SP-A",
+        "sku": "SP-P",
         "nome": "Streptococcus pneumoniae - Antígeno",
         "estoque": 30,
         "alerta": 10

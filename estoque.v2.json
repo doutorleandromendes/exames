@@ -1,6 +1,6 @@
 {
   "meta": {
-    "updated": "2025-08-19T14:09:04.703Z"
+    "updated": "2025-08-19T14:36:34.055Z"
   },
   "locations": {
     "EM_USO": [
@@ -13,7 +13,7 @@
       {
         "sku": "CI",
         "nome": "Chikungunya (IgG/IgM)",
-        "estoque": "",
+        "estoque": 2,
         "alerta": 5
       },
       {
@@ -25,7 +25,7 @@
       {
         "sku": "C-A",
         "nome": "Clamídia - Antígeno",
-        "estoque": 2,
+        "estoque": 3,
         "alerta": 10
       },
       {

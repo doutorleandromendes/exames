@@ -1,306 +1,366 @@
 {
   "meta": {
-    "updated": "2025-08-18T22:40:03.286Z"
+    "updated": "2025-08-19T00:23:43.618Z"
   },
   "locations": {
     "EM_USO": [
       {
         "sku": "DI",
+        "nome": "Dengue (IgG/IgM)",
         "estoque": "15",
         "alerta": 5
       },
       {
         "sku": "D-AN",
+        "nome": "Dengue - Antígeno NS1",
         "estoque": "5",
         "alerta": 5
       },
       {
         "sku": "ZI",
+        "nome": "Zika (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "CI",
+        "nome": "Chikungunya (IgG/IgM)",
         "estoque": "1",
         "alerta": 5
       },
       {
         "sku": "FAI",
+        "nome": "Febre Amarela (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "LI",
+        "nome": "Leptospirose (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "VWNI",
+        "nome": "Vírus West Nile (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "H-3G",
+        "nome": "HIV - 3a geração",
         "estoque": "",
         "alerta": 10
       },
       {
         "sku": "H-4G",
+        "nome": "HIV - 4a geração",
         "estoque": "",
         "alerta": 10
       },
       {
         "sku": "HAI",
+        "nome": "Hepatite A (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HB-ADS",
+        "nome": "Hepatite B - Antígeno de Superfície",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HB-AA",
+        "nome": "Hepatite B - Anticorpo AntiHBc",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HB-AH",
+        "nome": "Hepatite B - Antígeno Hbe",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HB-AA",
+        "nome": "Hepatite B - Anticorpo AntiHBs",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HC-AT",
+        "nome": "Hepatite C - Anticorpos Totais",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HEI",
+        "nome": "Hepatite E (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "S-AT",
+        "nome": "Sífilis - Anticorpos Totais",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "C-A",
+        "nome": "Clamídia - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "G-A",
+        "nome": "Gonorreia - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-A",
+        "nome": "MPOX - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "MI",
+        "nome": "MPOX (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HI",
+        "nome": "HSV1 (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HI",
+        "nome": "HSV2 (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "CI",
+        "nome": "CMV (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "TI",
+        "nome": "Toxoplasmose (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "RI",
+        "nome": "Rubeola (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "SI",
+        "nome": "Sarampo (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "EV",
+        "nome": "Epstein-Barr (VCA/EBNA/Heterófilos)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "SC-A",
+        "nome": "SARS-CoV2 (Covid) - Antígeno",
         "estoque": "",
         "alerta": 10
       },
       {
         "sku": "IA-A",
+        "nome": "Influenza A - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "IB-A",
+        "nome": "Influenza B - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "VP-A",
+        "nome": "Vírus Parainfluenza - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "VM-A",
+        "nome": "Vírus Metapneumovírus - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "VSR-A",
+        "nome": "Vírus Sincicial Respiratório - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "A-A",
+        "nome": "Adenovírus - Antígeno",
         "estoque": "5",
         "alerta": 5
       },
       {
         "sku": "SP-A",
+        "nome": "Streptococcus pneumoniae - Antígeno",
         "estoque": "",
-        "alerta": 10
+        "alerta": 5
       },
       {
         "sku": "L-A",
+        "nome": "Legionella - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-A",
+        "nome": "Mycoplasma - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "SP-A",
+        "nome": "Streptococcus pyogenes - Antígeno",
         "estoque": "",
         "alerta": 10
       },
       {
         "sku": "DSDP",
+        "nome": "Dosagem sérica de Procalcitonina",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "C-A",
+        "nome": "Cryptococcus - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "LI",
+        "nome": "Lyme (IgG/IgM)",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "LD-A",
+        "nome": "Leishmania donovani - Antigeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-ADPV",
+        "nome": "Malária - Antígeno de P vivax",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-ADPF",
+        "nome": "Malária - Antígeno de P falciparum",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-AG",
+        "nome": "Malária - Antígeno Geral",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-CDG",
+        "nome": "Microscopia - Coloração de Gram",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-CDG",
+        "nome": "Microscopia - Coloração de Giemsa",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-CDK",
+        "nome": "Microscopia - Coloração de Kinyoun",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-CDL",
+        "nome": "Microscopia - Coloração de Leishmann",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-K",
+        "nome": "Microscopia - KOH",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "M-CDN",
+        "nome": "Microscopia - Coloração de Nanquim",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "CCDS",
+        "nome": "Cistatina C – Dosagem sérica",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "PCRDS",
+        "nome": "Proteína C Reativa – Dosagem sérica",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HGD",
+        "nome": "Hemoglobina Glicada – Dosagem",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "DDCTC-AT",
+        "nome": "Doença de Chagas (Trypanossoma cruzi) - Anticorpos Totais",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HL-A",
+        "nome": "Hanseníase (Lepra) - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "HP-A",
+        "nome": "Helicobacter pylori - Antígeno",
         "estoque": "",
         "alerta": 5
       },
       {
         "sku": "PRSC-A",
+        "nome": "Painel Respiratório Simples (COVID19/InfluenzaA/InfluenzaB/VSR) - Antígenos",
         "estoque": "",
         "alerta": 10
       },
       {
         "sku": "DC-AA",
+        "nome": "Dengue (Combo) - Antígeno + Anticorpos",
         "estoque": "",
         "alerta": 5
       }

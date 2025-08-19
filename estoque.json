@@ -1,19 +1,19 @@
 {
   "meta": {
-    "updated": "2025-08-19T00:25:00.826Z"
+    "updated": "2025-08-19T10:44:02.381Z"
   },
   "locations": {
     "EM_USO": [
       {
         "sku": "DI",
         "nome": "Dengue (IgG/IgM)",
-        "estoque": "15",
+        "estoque": "",
         "alerta": 5
       },
       {
         "sku": "D-AN",
         "nome": "Dengue - Antígeno NS1",
-        "estoque": "5",
+        "estoque": "",
         "alerta": 5
       },
       {
@@ -50,13 +50,13 @@
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
         "estoque": "",
-        "alerta": 10
+        "alerta": 5
       },
       {
         "sku": "H-4G",
         "nome": "HIV - 4a geração",
         "estoque": "",
-        "alerta": 10
+        "alerta": 5
       },
       {
         "sku": "HAI",
@@ -176,7 +176,7 @@
         "sku": "SC-A",
         "nome": "SARS-CoV2 (Covid) - Antígeno",
         "estoque": "",
-        "alerta": 10
+        "alerta": 5
       },
       {
         "sku": "IA-A",
@@ -211,7 +211,7 @@
       {
         "sku": "A-A",
         "nome": "Adenovírus - Antígeno",
-        "estoque": "5",
+        "estoque": "",
         "alerta": 5
       },
       {
@@ -236,7 +236,7 @@
         "sku": "SP-A",
         "nome": "Streptococcus pyogenes - Antígeno",
         "estoque": "",
-        "alerta": 10
+        "alerta": 5
       },
       {
         "sku": "DSDP",
@@ -356,314 +356,12 @@
         "sku": "PRSC-A",
         "nome": "Painel Respiratório Simples (COVID19/InfluenzaA/InfluenzaB/VSR) - Antígenos",
         "estoque": "",
-        "alerta": 10
+        "alerta": 5
       },
       {
         "sku": "DC-AA",
         "nome": "Dengue (Combo) - Antígeno + Anticorpos",
         "estoque": "",
-        "alerta": 5
-      }
-    ],
-    "STORAGE": [
-      {
-        "sku": "DI",
-        "estoque": "16",
-        "alerta": 5
-      },
-      {
-        "sku": "D-AN",
-        "estoque": "22",
-        "alerta": 5
-      },
-      {
-        "sku": "ZI",
-        "estoque": "12",
-        "alerta": 5
-      },
-      {
-        "sku": "CI",
-        "estoque": "9",
-        "alerta": 5
-      },
-      {
-        "sku": "FAI",
-        "estoque": "25",
-        "alerta": 5
-      },
-      {
-        "sku": "LI",
-        "estoque": "5",
-        "alerta": 5
-      },
-      {
-        "sku": "VWNI",
-        "estoque": "8",
-        "alerta": 5
-      },
-      {
-        "sku": "H-3G",
-        "estoque": "21",
-        "alerta": 10
-      },
-      {
-        "sku": "H-4G",
-        "estoque": "34",
-        "alerta": 10
-      },
-      {
-        "sku": "HAI",
-        "estoque": "37",
-        "alerta": 5
-      },
-      {
-        "sku": "HB-ADS",
-        "estoque": "24",
-        "alerta": 5
-      },
-      {
-        "sku": "HB-AA",
-        "estoque": "33",
-        "alerta": 5
-      },
-      {
-        "sku": "HB-AH",
-        "estoque": "15",
-        "alerta": 5
-      },
-      {
-        "sku": "HB-AA",
-        "estoque": "33",
-        "alerta": 5
-      },
-      {
-        "sku": "HC-AT",
-        "estoque": "18",
-        "alerta": 5
-      },
-      {
-        "sku": "HEI",
-        "estoque": "14",
-        "alerta": 5
-      },
-      {
-        "sku": "S-AT",
-        "estoque": "29",
-        "alerta": 5
-      },
-      {
-        "sku": "C-A",
-        "estoque": "24",
-        "alerta": 5
-      },
-      {
-        "sku": "G-A",
-        "estoque": "16",
-        "alerta": 5
-      },
-      {
-        "sku": "M-A",
-        "estoque": "27",
-        "alerta": 5
-      },
-      {
-        "sku": "MI",
-        "estoque": "3",
-        "alerta": 5
-      },
-      {
-        "sku": "HI",
-        "estoque": "16",
-        "alerta": 5
-      },
-      {
-        "sku": "HI",
-        "estoque": "16",
-        "alerta": 5
-      },
-      {
-        "sku": "CI",
-        "estoque": "9",
-        "alerta": 5
-      },
-      {
-        "sku": "TI",
-        "estoque": "34",
-        "alerta": 5
-      },
-      {
-        "sku": "RI",
-        "estoque": "18",
-        "alerta": 5
-      },
-      {
-        "sku": "SI",
-        "estoque": "15",
-        "alerta": 5
-      },
-      {
-        "sku": "EV",
-        "estoque": "36",
-        "alerta": 5
-      },
-      {
-        "sku": "SC-A",
-        "estoque": "14",
-        "alerta": 10
-      },
-      {
-        "sku": "IA-A",
-        "estoque": "4",
-        "alerta": 5
-      },
-      {
-        "sku": "IB-A",
-        "estoque": "4",
-        "alerta": 5
-      },
-      {
-        "sku": "VP-A",
-        "estoque": "14",
-        "alerta": 5
-      },
-      {
-        "sku": "VM-A",
-        "estoque": "16",
-        "alerta": 5
-      },
-      {
-        "sku": "VSR-A",
-        "estoque": "23",
-        "alerta": 5
-      },
-      {
-        "sku": "A-A",
-        "estoque": "19",
-        "alerta": 5
-      },
-      {
-        "sku": "SP-A",
-        "estoque": "17",
-        "alerta": 10
-      },
-      {
-        "sku": "L-A",
-        "estoque": "12",
-        "alerta": 5
-      },
-      {
-        "sku": "M-A",
-        "estoque": "27",
-        "alerta": 5
-      },
-      {
-        "sku": "SP-A",
-        "estoque": "17",
-        "alerta": 10
-      },
-      {
-        "sku": "DSDP",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "C-A",
-        "estoque": "23",
-        "alerta": 5
-      },
-      {
-        "sku": "LI",
-        "estoque": "5",
-        "alerta": 5
-      },
-      {
-        "sku": "LD-A",
-        "estoque": "10",
-        "alerta": 5
-      },
-      {
-        "sku": "M-ADPV",
-        "estoque": "29",
-        "alerta": 5
-      },
-      {
-        "sku": "M-ADPF",
-        "estoque": "13",
-        "alerta": 5
-      },
-      {
-        "sku": "M-AG",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "M-CDG",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "M-CDG",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "M-CDK",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "M-CDL",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "M-K",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "M-CDN",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "CCDS",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "PCRDS",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "HGD",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "DDCTC-AT",
-        "estoque": "15",
-        "alerta": 5
-      },
-      {
-        "sku": "HL-A",
-        "estoque": "",
-        "alerta": 5
-      },
-      {
-        "sku": "HP-A",
-        "estoque": "11",
-        "alerta": 5
-      },
-      {
-        "sku": "PRSC-A",
-        "estoque": "17",
-        "alerta": 10
-      },
-      {
-        "sku": "DC-AA",
-        "estoque": "29",
         "alerta": 5
       }
     ]

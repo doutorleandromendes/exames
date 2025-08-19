@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Controle de Estoque — Consolidado</title>
+<title>Controle de Estoque — v2.3 (UI imediata + recheck)</title>
 <style>
   :root { --blue:#1976d2; --red:#e53935; --green:#2e7d32; --warn:#f7c948; }
   body{font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#fafafa;color:#111}
@@ -37,7 +37,7 @@
 </head>
 <body>
 <header>
-  <h2>Controle de Estoque — Consolidado</h2>
+  <h2>Controle de Estoque — v2.3 (UI imediata + recheck)</h2>
   <div id="topbar">
     <select id="locationSel">
       <option value="EM_USO">EM USO</option>
@@ -66,7 +66,7 @@
 <dialog id="cfgDialog">
   <form method="dialog">
     <h3 style="margin:0">Configurações</h3>
-    <small>Repo: <b>doutorleandromendes/exames</b> (branch <b>main</b>) — CSV: <b>products.csv</b> — JSON: <b>estoque.json</b></small>
+    <small>Repo: <b>doutorleandromendes/exames</b> (branch <b>main</b>) — CSV: <b>products.csv</b> — JSON: <b>estoque.v2.json</b></small>
     <div class="grid">
       <label>Token (github_pat_…)
         <input id="ghToken" type="password" placeholder="github_pat_...">
@@ -98,18 +98,15 @@
 
 <script>
 (function(){
-  // ===== Fixos do repo =====
   const RAW_CSV_URL = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/products.csv';
-  const API_JSON_URL = 'https://api.github.com/repos/doutorleandromendes/exames/contents/estoque.json';
+  const API_JSON_URL = 'https://api.github.com/repos/doutorleandromendes/exames/contents/estoque.v2.json';
   const BRANCH = 'main';
 
-  // ===== Estado =====
   let token = localStorage.getItem('gh_token_v1') || '';
   let author = { name: localStorage.getItem('gh_name')||'', email: localStorage.getItem('gh_email')||'' };
-  let produtos = []; // {sku, nome, categoria, estoque, alerta}
+  let produtos = []; // {sku, nome, categoria, estoque(string), alerta}
   let locationSel = 'EM_USO';
 
-  // ===== Helpers =====
   const $ = (id)=>document.getElementById(id);
   const log = (t)=>{ const el=$('status'); if(el) el.textContent=t; };
   const showErr = (m)=>{ const el=$('err'); el.style.display='block'; el.textContent=m; };
@@ -119,7 +116,6 @@
   function unifyName(n){ n=String(n||'').trim(); if(/epstein\s*-?\s*barr/i.test(n)) return 'Epstein-Barr (VCA/EBNA/Heterófilos)'; const g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i); if(g){return g[1].trim()+' (IgG/IgM)';} if(/\b(igg|igm)\b/i.test(n)) return n.replace(/\s*-\s*(IgG|IgM).*/i,' (IgG/IgM)'); return n; }
   function nameKey(s){ return unifyName(String(s||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim(); }
 
-  // ===== CSV =====
   async function loadCSV(){
     try{
       log('Carregando CSV…');
@@ -139,7 +135,6 @@
     }catch(e){ showErr('Erro ao carregar CSV: '+(e&&e.message?e.message:e)); log('Falha ao carregar CSV'); }
   }
 
-  // ===== GitHub API =====
   function authHeaders(){
     const h = new Headers();
     h.set('Accept','application/vnd.github+json');
@@ -162,7 +157,7 @@
     if(!token) throw new Error('Token não configurado. Abra Configurações.');
     let sha=null; try{ const cur=await githubGetJSON(); if(cur.exists) sha=cur.sha; }catch(_e){}
     const body = {
-      message:`Atualiza estoque.json (${BRANCH})`,
+      message:`Atualiza estoque.v2.json (${BRANCH})`,
       content:btoa(unescape(encodeURIComponent(JSON.stringify(payload,null,2)))),
       branch:BRANCH,
       committer:{ name: author.name||'web', email: author.email||'web@example.com' }
@@ -179,7 +174,6 @@
     return JSON.parse(txt);
   }
 
-  // ===== JSON <-> UI =====
   function ensureSchema(obj){
     if(obj && obj.locations) return obj;
     if(obj && Array.isArray(obj.produtos)){
@@ -194,19 +188,22 @@
     const loc = (payload.locations||{})[locationSel] || [];
     const bySku=Object.create(null), byName=Object.create(null);
     produtos.forEach((p,i)=>{ if(p&&p.sku) bySku[p.sku]=i; const nk=nameKey(p&&p.nome); if(nk) byName[nk]=i; });
-    produtos.forEach(p=>{ p.estoque=''; });
+    // NÃO limpamos tudo antes — preserva o que já está na tela
     let applied=0;
     for(const row of loc){
       let idx=-1;
       if(row && row.sku && (row.sku in bySku)) idx=bySku[row.sku];
       if(idx<0 && row && row.nome){ const nk=nameKey(row.nome); if(nk in byName) idx=byName[nk]; }
       if(idx>=0){
-        const val = (row.estoque===0 || row.estoque==='0') ? '0' : (typeof row.estoque==='number' ? String(row.estoque) : String(row.estoque||''));
-        produtos[idx].estoque = val;
+        let v = row.estoque;
+        if (v === 0 || v === '0') v = '0';
+        else if (v === '' || v == null) v = '';
+        else v = String(v);
+        produtos[idx].estoque = v;
         applied++;
       }
     }
-    log('Lista carregada ('+locationSel+'). • Estoques aplicados: '+applied+'/'+loc.length);
+    log('Aplicados neste local: '+applied+'/'+loc.length);
     render();
   }
 
@@ -216,37 +213,30 @@
     inputs.forEach(inp=>{ const sku = inp.dataset.sku; if(bySku[sku]!=null){ produtos[bySku[sku]].estoque = inp.value; } });
   }
 
-  // MERGE: só atualiza itens com valor preenchido; se vazio, preserva anterior. Sempre salva NÚMERO.
   function buildMergedPayload(base){
     const payload = ensureSchema(base||{});
     const old = (payload.locations||{})[locationSel] || [];
     const oldBySku = Object.create(null), oldByName = Object.create(null);
     old.forEach((r)=>{ if(r && r.sku) oldBySku[r.sku]=r; const nk=nameKey(r && (r.nome||'')); if(nk) oldByName[nk]=r; });
-
     syncFromDOM();
-
     const newList = produtos.map(p=>{
       const prev = oldBySku[p.sku] || oldByName[nameKey(p.nome)] || null;
       const raw = (p.estoque===0 || p.estoque==='0') ? '0' : String(p.estoque||'');
       let final;
       if(raw===''){
-        // preserva
         final = prev ? (typeof prev.estoque==='number'? prev.estoque : (prev.estoque===''? '' : Number(prev.estoque)||0)) : '';
       } else {
-        // converte para número (0 se NaN)
         final = Number(raw); if(!isFinite(final)) final = 0;
       }
       return { sku:p.sku, nome:p.nome, estoque: final, alerta:p.alerta };
     });
-
     payload.locations[locationSel] = newList;
     payload.meta.updated = new Date().toISOString();
     return payload;
   }
 
-  // ===== Render =====
   function render(){
-    const root=$('list'); const statusEl=$('status');
+    const root=$('list'), statusEl=$('status');
     const q=($('q').value||'').trim().toLowerCase();
     const items=produtos.filter(p=>{ const n=(p.nome||'').toLowerCase(), s=(p.sku||'').toLowerCase(); return !q || n.includes(q) || s.includes(q); });
     items.sort((a,b)=> String(a.nome||'').localeCompare(String(b.nome||''), 'pt', {sensitivity:'base'}));
@@ -272,7 +262,18 @@
     statusEl.textContent='Lista '+(produtos.length? 'carregada':'vazia')+' ('+locationSel+').';
   }
 
-  // ===== Ações =====
+  async function githubGetJSONFresh(){
+    const rand = crypto.getRandomValues(new Uint32Array(1))[0];
+    const url = API_JSON_URL + '?ref=' + encodeURIComponent(BRANCH) + '&_ts=' + Date.now() + '&_bust=' + rand;
+    const r = await fetch(url, { headers: authHeaders(), mode: 'cors', cache: 'no-store' });
+    if (r.status === 404) return { exists:false };
+    const txt = await r.text();
+    if(!r.ok) throw new Error('GET '+r.status+' – '+txt.slice(0,200));
+    const data = JSON.parse(txt);
+    const content = atob(String(data.content||'').replace(/\n/g,''));
+    return { exists:true, sha:data.sha, json: JSON.parse(content) };
+  }
+
   async function onSave(){
     const btn = $('saveBtn'); const hint=$('hint'); hint.style.display='none';
     try{
@@ -282,33 +283,70 @@
       const cur = await githubGetJSON().catch(()=>({exists:false}));
       const payload = buildMergedPayload(cur && cur.json);
 
-      // quantos campos não-vazios você está enviando agora?
+      // >>> APLICA IMEDIATAMENTE NA UI (sem esperar GitHub)
+      applyLocation(payload);
+      showHint('Pré-visualização aplicada localmente. Gravando no GitHub…');
+
       let sendingCount = 0; produtos.forEach(p=>{ const v = (p.estoque===0 || p.estoque==='0') ? '0' : String(p.estoque||''); if(v !== '') sendingCount++; });
-      log('Gravando no GitHub… (enviando valores não-vazios: '+sendingCount+')');
+      log('Gravando no GitHub… (enviando não-vazios: '+sendingCount+')');
 
-      await githubPutJSON(payload);
+      const putRes = await githubPutJSON(payload);
+      const commitSha = (putRes && putRes.commit && putRes.commit.sha) ? putRes.commit.sha : '(sem sha)';
+      showHint('Gravado com sucesso. Commit SHA: ' + commitSha +
+        '\nAbra: https://github.com/doutorleandromendes/exames/blob/main/estoque.v2.json');
 
-      // Verifica lendo do remoto
-      log('Salvo. Conferindo no remoto…');
-      const after = await githubGetJSON();
+      await new Promise(r=>setTimeout(r, 1500));
+      log('Conferindo no remoto (fresh)…');
+
+      const after = await githubGetJSONFresh();
       const applied = ensureSchema(after.json);
       const loc = (applied.locations||{})[locationSel] || [];
-      const notEmpty = loc.filter(x=> String(x.estoque) !== '' && !(typeof x.estoque==='number' && isNaN(x.estoque))).slice(0,3);
-      const totalNotEmpty = loc.filter(x=> String(x.estoque) !== '' && !(typeof x.estoque==='number' && isNaN(x.estoque))).length;
+      const totalNotEmpty = loc.filter(x => String(x.estoque||'') !== '').length;
 
-      if(totalNotEmpty===0){
-        showErr('ATENÇÃO: o JSON remoto continua sem valores para '+locationSel+'. Prévia da resposta da API (200 chars):\n'+(after.rawApiPreview||'sem corpo'));
-      }else{
-        const ex = notEmpty.map(x=> `• ${x.sku || x.nome}: ${x.estoque}`).join('\n');
-        showHint(`OK: ${totalNotEmpty} itens com estoque registrado em ${locationSel}. Exemplos:\n${ex}`);
-      }
+      showHint('Remoto atualizado: ' + totalNotEmpty + ' itens não-vazios em ' + locationSel);
 
-      // aplica na interface
+      // >>> APLICA DE NOVO, AGORA COM O REMOTO
       applyLocation(applied);
       log('Pronto.');
     }catch(e){ showErr('Falha ao salvar: '+(e&&e.message?e.message:e)); }
     finally{ if(btn){ btn.disabled=false; btn.textContent='Salvar no GitHub'; } }
   }
+
+  $('refreshBtn').onclick=loadCSV;
+  $('saveBtn').onclick=onSave;
+  $('settingsBtn').onclick=function(){ 
+    const t = localStorage.getItem('gh_token_v1')||''; 
+    $('ghToken').value=t; 
+    $('ghName').value=localStorage.getItem('gh_name')||''; 
+    $('ghEmail').value=localStorage.getItem('gh_email')||''; 
+    $('cfgDialog').showModal(); 
+  };
+  $('saveCfgBtn').onclick=function(){ 
+    const t = ($('ghToken').value||'').trim(); 
+    const n = ($('ghName').value||'').trim(); 
+    const e = ($('ghEmail').value||'').trim(); 
+    localStorage.setItem('gh_token_v1', t); 
+    localStorage.setItem('gh_name', n); 
+    localStorage.setItem('gh_email', e); 
+    token=t; author.name=n; author.email=e; 
+    $('cfgDialog').close(); 
+  };
+  $('diagBtn').onclick=async function(){
+    let extra='';
+    try{ const r=await githubGetJSON(); extra='Remoto: '+(r.exists?'existe':'não existe')+(r.exists? ('; JSON='+!!r.json):''); }catch(e){ extra='Falha remoto: '+(e&&e.message?e.message:e); }
+    $('diagPre').textContent=[
+      'Owner/Repo: doutorleandromendes/exames',
+      'Branch: main',
+      'CSV: products.csv',
+      'JSON: estoque.v2.json',
+      'Itens: '+produtos.length,
+      'Local: '+locationSel,
+      extra
+    ].join('\n');
+    $('diagDialog').showModal();
+  };
+  $('locationSel').onchange=function(){ locationSel=this.value; loadJSON(); };
+  $('q').oninput=render;
 
   function exportCSV(){
     const head=['local','sku','nome','categoria','estoque','alerta'];
@@ -318,22 +356,19 @@
     const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
   }
-
-  // ===== Eventos =====
-  $('refreshBtn').onclick=loadCSV;
-  $('saveBtn').onclick=onSave;
-  $('settingsBtn').onclick=function(){ $('ghToken').value=token; $('ghName').value=author.name; $('ghEmail').value=author.email; $('cfgDialog').showModal(); };
-  $('saveCfgBtn').onclick=function(){ token=($('ghToken').value||'').trim(); author.name=($('ghName').value||'').trim(); author.email=($('ghEmail').value||'').trim(); localStorage.setItem('gh_token_v1', token); localStorage.setItem('gh_name', author.name); localStorage.setItem('gh_email', author.email); $('cfgDialog').close(); };
-  $('diagBtn').onclick=async function(){ let extra=''; try{ const r=await githubGetJSON(); extra='Remoto: '+(r.exists?'existe':'não existe')+(r.exists? ('; JSON='+!!r.json):''); }catch(e){ extra='Falha remoto: '+(e&&e.message?e.message:e); } $('diagPre').textContent=[ 'Owner/Repo: doutorleandromendes/exames', 'Branch: main', 'CSV: products.csv', 'JSON: estoque.json', 'Itens: '+produtos.length, 'Local: '+locationSel, extra ].join('\n'); $('diagDialog').showModal(); };
-  $('locationSel').onchange=function(){ locationSel=this.value; loadJSON(); };
-  $('q').oninput=render;
-  $('preencherZero').onclick=function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(p=>{ if(!p.estoque) p.estoque='0';}); render(); };
   $('exportCsv').onclick=exportCSV;
+  $('preencherZero').onclick=function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(p=>{ if(!p.estoque) p.estoque='0';}); render(); };
 
-  // ===== Start =====
-  async function loadJSON(){ // (re)declara aqui para garantir existência antes de usar
-    try{ const got = await githubGetJSON(); if(!got.exists){ log('Sem estoque remoto.'); return; } if(!got.json){ showErr('estoque.json inválido (não é JSON).'); return; } const payload = ensureSchema(got.json); applyLocation(payload); }catch(e){ showErr('Erro ao ler estoque.json: '+(e&&e.message?e.message:e)); }
+  async function loadJSON(){
+    try{
+      const got = await githubGetJSON();
+      if(!got.exists){ log('Sem estoque remoto.'); render(); return; }
+      if(!got.json){ showErr('estoque.v2.json inválido (não é JSON).'); return; }
+      const payload = ensureSchema(got.json);
+      applyLocation(payload);
+    }catch(e){ showErr('Erro ao ler estoque.v2.json: '+(e&&e.message?e.message:e)); }
   }
+
   loadCSV();
 })();
 </script>

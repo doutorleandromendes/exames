@@ -114,7 +114,7 @@
   function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/'/g,'&#39;'); }
   function slugifySKU(text){ const t=(text||'').toUpperCase(); const base=t.replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join(''); return (base.slice(0,8) || t.replace(/[^A-Z0-9]/g,'').slice(0,8) || 'SKU'); }
   function unifyName(n){ n=String(n||'').trim(); if(/epstein\s*-?\s*barr/i.test(n)) return 'Epstein-Barr (VCA/EBNA/Heterófilos)'; const g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i); if(g){return g[1].trim()+' (IgG/IgM)';} if(/\b(igg|igm)\b/i.test(n)) return n.replace(/\s*-\s*(IgG|IgM).*/i,' (IgG/IgM)'); return n; }
-  function nameKey(s){ return unifyName(String(s||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim(); }
+  
 
   async function loadCSV(){
     try{

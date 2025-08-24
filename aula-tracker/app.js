@@ -249,7 +249,7 @@ app.get('/admin/relatorio/:videoId.csv', authRequired, (req, res) => {
     if (err) return res.status(500).send('erro');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
 
-    // 100% seguro contra quebra de aspas no GitHub:
+    // Evita aspas “curvas” e quebras de linha acidentais
     const header = ['full_name','email','session','type','video_time','client_ts'].join(',') + '\n';
     const body = rows.map(r =>
       `${(r.full_name||'').replace(/,/g,' ')},${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`
@@ -258,7 +258,6 @@ app.get('/admin/relatorio/:videoId.csv', authRequired, (req, res) => {
     res.send(header + body);
   });
 });
-
 
 // ====== Relatório (HTML) ======
 app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {

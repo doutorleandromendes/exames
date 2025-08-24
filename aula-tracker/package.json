@@ -1,0 +1,14 @@
+{
+"name": "aula-tracker",
+"version": "1.0.0",
+"type": "module",
+"main": "app.js",
+"scripts": { "start": "node app.js" },
+"dependencies": {
+"bcrypt": "^5.1.1",
+"body-parser": "^1.20.2",
+"cookie-parser": "^1.4.6",
+"express": "^4.19.2",
+"sqlite3": "^5.1.6"
+}
+}

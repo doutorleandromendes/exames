@@ -38,10 +38,11 @@ db.serialize(() => {
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS videos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT,
-    duration INTEGER
-  )`);
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT,
+  url TEXT,
+  duration INTEGER
+)`);
 
   db.run(`CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,50 +190,53 @@ app.get('/logout', (req,res)=>{ res.clearCookie('uid'); res.redirect('/'); });
 
 app.get('/aula/:videoId', authRequired, (req,res)=>{
   const { videoId } = req.params;
-  db.run('INSERT INTO sessions(user_id, video_id) VALUES(?,?)',[req.userId, videoId], function(){
-    const sessionId = this.lastID;
-    const body = `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-        <h1 style="margin:0">Aula</h1>
-        <div><a href="/logout">Sair</a></div>
-      </div>
-      <p class="mut">Seu progresso é registrado automaticamente.</p>
-      <div class="video">
-        <video id="player" controls playsinline preload="metadata" style="width:100%;height:100%">
-          <source src="${VIDEO_URL}" type="video/mp4" />
-        </video>
-      </div>
-    </div>
-    <script>
-      (function(){
-        const video = document.getElementById('player');
-        const sessionId = ${sessionId};
-        function now(){ return new Date().toISOString(); }
-        let last = 0;
-        function send(payload){
-          const b = new Blob([JSON.stringify(payload)],{type:'application/json'});
-          if(!(navigator.sendBeacon && navigator.sendBeacon('/track', b))){
-            fetch('/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-          }
-        }
-        function ping(type){
-          const t = Math.floor(video.currentTime||0);
-          const ms = Date.now();
-          if(type==='progress' && (ms-last)<5000) return; // a cada 5s
-          last = ms;
-          send({ sessionId, type, videoTime:t, clientTs: now() });
-        }
-        video.addEventListener('play', ()=> ping('play'));
-        video.addEventListener('pause', ()=> ping('pause'));
-        video.addEventListener('ended', ()=> ping('ended'));
-        video.addEventListener('timeupdate', ()=> ping('progress'));
-        window.addEventListener('beforeunload', ()=> ping('progress'));
-      })();
-    </script>`;
-    res.send(renderPage('Aula', body));
+  db.get('SELECT * FROM videos WHERE id = ?', [videoId], (err, videoRow) => {
+    if (err || !videoRow) return res.status(404).send('Aula não encontrada');
+    db.run('INSERT INTO sessions(user_id, video_id) VALUES(?,?)',[req.userId, videoId], function(){
+      const sessionId = this.lastID;
+      const body = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <h1>${videoRow.title}</h1>
+            <a href="/logout">Sair</a>
+          </div>
+          <div class="video">
+            <video id="player" controls playsinline preload="metadata" style="width:100%;height:100%">
+              <source src="${videoRow.url}" type="video/mp4" />
+            </video>
+          </div>
+        </div>
+        <script>
+          (function(){
+            const video = document.getElementById('player');
+            const sessionId = ${sessionId};
+            function now(){ return new Date().toISOString(); }
+            let last = 0;
+            function send(payload){
+              const b = new Blob([JSON.stringify(payload)],{type:'application/json'});
+              if(!(navigator.sendBeacon && navigator.sendBeacon('/track', b))){
+                fetch('/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+              }
+            }
+            function ping(type){
+              const t = Math.floor(video.currentTime||0);
+              const ms = Date.now();
+              if(type==='progress' && (ms-last)<5000) return;
+              last = ms;
+              send({ sessionId, type, videoTime:t, clientTs: now() });
+            }
+            video.addEventListener('play', ()=> ping('play'));
+            video.addEventListener('pause', ()=> ping('pause'));
+            video.addEventListener('ended', ()=> ping('ended'));
+            video.addEventListener('timeupdate', ()=> ping('progress'));
+            window.addEventListener('beforeunload', ()=> ping('progress'));
+          })();
+        </script>`;
+      res.send(renderPage('Aula', body));
+    });
   });
 });
+
 
 // ====== Relatório (CSV) ======
 app.get('/admin/relatorio/:videoId.csv', authRequired, (req, res) => {
@@ -301,6 +305,34 @@ app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {
     res.send(renderPage('Relatório', body));
   });
 });
+
+// ====== Admin: cadastro de vídeos ======
+app.get('/admin/videos', authRequired, (req,res)=>{
+  const form = `
+    <div class="card">
+      <h1>Cadastro de Aulas</h1>
+      <form method="POST" action="/admin/videos" class="mt2">
+        <label>Título</label>
+        <input name="title" type="text" required>
+        <label>URL do vídeo (MP4/HLS público)</label>
+        <input name="url" type="url" required>
+        <label>ADMIN_SECRET</label>
+        <input name="secret" type="password" required>
+        <button class="mt">Salvar</button>
+      </form>
+    </div>`;
+  res.send(renderPage('Cadastro de Aulas', form));
+});
+
+app.post('/admin/videos', authRequired, (req,res)=>{
+  const { title, url, secret } = req.body || {};
+  if (!ADMIN_SECRET || secret !== ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
+  db.run('INSERT INTO videos(title,url) VALUES(?,?)', [title, url], (err)=>{
+    if (err) return res.status(500).send('Falha ao salvar');
+    res.redirect('/aulas');
+  });
+});
+
 
 // ====== APIs ======
 app.post('/api/register', async (req,res)=>{

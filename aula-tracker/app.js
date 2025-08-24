@@ -243,13 +243,12 @@ app.get('/admin/relatorio/:videoId.csv', authRequired, (req, res) => {
   db.all(sql, [videoId], (err, rows) => {
     if (err) return res.status(500).send('erro');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    const header = 'email,session,type,video_time,client_ts
-';
-    const body = rows.map(r => `${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`).join('
-');
+    const header = 'email,session,type,video_time,client_ts\n';
+    const body = rows.map(r => `${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`).join('\n');
     res.send(header + body);
   });
 });
+
 
 // ====== Relatório (HTML) ======
 app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {

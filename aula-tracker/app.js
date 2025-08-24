@@ -1,6 +1,6 @@
 // Aula Tracker — app único (Express + SQLite) com páginas de Login/Registro, Player, Relatório
-// Agora com: expiração por semestre, filtro de e-mail institucional e código de turma.
-// Deploy no Render/Railway. Defina as variáveis: VIDEO_URL, SEMESTER_END, ALLOWED_EMAIL_DOMAIN, CLASS_CODE (opcional), ADMIN_SECRET (opcional)
+// Agora com: expiração por semestre, filtro de e-mail institucional, código de turma, e NOME COMPLETO no relatório.
+// Variáveis necessárias no Render: VIDEO_URL, SEMESTER_END, (opcionais) ALLOWED_EMAIL_DOMAIN, CLASS_CODE, ADMIN_SECRET
 
 import express from 'express';
 import sqlite3 from 'sqlite3';
@@ -32,6 +32,7 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
     password_hash TEXT,
+    full_name TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     expires_at TEXT
   )`);
@@ -57,10 +58,13 @@ db.serialize(() => {
     client_ts TEXT
   )`);
 
-  // Garante coluna expires_at se o schema antigo existir
+  // Migrações leves
   db.all(`PRAGMA table_info(users)`, (err, cols) => {
     if (cols && !cols.some(c => c.name === 'expires_at')) {
       db.run(`ALTER TABLE users ADD COLUMN expires_at TEXT`, () => console.log('users.expires_at adicionada'));
+    }
+    if (cols && !cols.some(c => c.name === 'full_name')) {
+      db.run(`ALTER TABLE users ADD COLUMN full_name TEXT`, () => console.log('users.full_name adicionada'));
     }
   });
 
@@ -142,6 +146,8 @@ app.get('/', (req, res) => {
     <div class="card">
       <h2>Registrar</h2>
       <form id="regForm" class="mt2">
+        <label>Nome completo</label>
+        <input name="fullName" type="text" required>
         <label>E-mail</label>
         <input name="email" type="email" required>
         <label>Senha</label>
@@ -154,8 +160,7 @@ app.get('/', (req, res) => {
   <script>
     async function postJSON(url, data){
       const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-      const text = await r.text();
-      let j; try{ j = JSON.parse(text); }catch{ j = {}; }
+      const text = await r.text(); let j; try{ j = JSON.parse(text); }catch{ j = {}; }
       if(!r.ok){ throw new Error(j.error || text || 'Erro'); }
       return j;
     }
@@ -163,7 +168,7 @@ app.get('/', (req, res) => {
       e.preventDefault();
       const f = new FormData(e.target);
       try {
-        await postJSON('/api/register',{ email:f.get('email'), password:f.get('password'), classCode:f.get('classCode')||null });
+        await postJSON('/api/register',{ fullName:f.get('fullName'), email:f.get('email'), password:f.get('password'), classCode:f.get('classCode')||null });
         alert('Conta criada. Agora faça login.');
       } catch(err){ alert(err.message); }
     });
@@ -233,40 +238,41 @@ app.get('/aula/:videoId', authRequired, (req,res)=>{
 app.get('/admin/relatorio/:videoId.csv', authRequired, (req, res) => {
   const { videoId } = req.params;
   const sql = `
-    SELECT u.email, s.id as session, e.type, e.video_time, e.client_ts
+    SELECT u.full_name, u.email, s.id as session, e.type, e.video_time, e.client_ts
     FROM events e
     JOIN sessions s ON s.id = e.session_id
     JOIN users u ON u.id = s.user_id
     WHERE s.video_id = ?
-    ORDER BY u.email, e.client_ts
+    ORDER BY u.full_name, u.email, e.client_ts
   `;
   db.all(sql, [videoId], (err, rows) => {
     if (err) return res.status(500).send('erro');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    const header = 'email,session,type,video_time,client_ts\n';
-    const body = rows.map(r => `${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`).join('\n');
+    const header = 'full_name,email,session,type,video_time,client_ts
+';
+    const body = rows.map(r => `${(r.full_name||'').replace(/,/g,' ')},${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`).join('
+');
     res.send(header + body);
   });
 });
-
 
 // ====== Relatório (HTML) ======
 app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {
   const { videoId } = req.params;
   const sql = `
-    SELECT u.email, s.id as session, e.type, e.video_time, e.client_ts
+    SELECT u.full_name, u.email, s.id as session, e.type, e.video_time, e.client_ts
     FROM events e
     JOIN sessions s ON s.id = e.session_id
     JOIN users u ON u.id = s.user_id
     WHERE s.video_id = ?
-    ORDER BY u.email, e.client_ts
+    ORDER BY u.full_name, u.email, e.client_ts
   `;
   db.all(sql, [videoId], (err, rows) => {
     if (err) return res.status(500).send('erro');
     const byUser = new Map();
     for (const r of rows){
-      if(!byUser.has(r.email)) byUser.set(r.email, []);
-      byUser.get(r.email).push(r);
+      const key = r.email; if(!byUser.has(key)) byUser.set(key, []);
+      byUser.get(key).push(r);
     }
     const lines = [];
     byUser.forEach((events,email)=>{
@@ -274,7 +280,8 @@ app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {
       for (const ev of events){ if(ev.type==='progress' || ev.type==='ended') watched.add(ev.video_time); }
       const maxSec = Math.max(...Array.from(watched), 0) + 1;
       const percent = '≈ ' + Math.min(100, Math.round((watched.size / (maxSec || 1)) * 100)) + '%';
-      lines.push(`<tr><td>${email}</td><td>${events[0]?.client_ts||''}</td><td>${events[events.length-1]?.client_ts||''}</td><td>${percent}</td></tr>`);
+      const name = events[0]?.full_name || '';
+      lines.push(`<tr><td>${(name||email)}</td><td>${events[0]?.client_ts||''}</td><td>${events[events.length-1]?.client_ts||''}</td><td>${percent}</td></tr>`);
     });
     const body = `
       <div class="card">
@@ -283,7 +290,7 @@ app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {
           <a href="/admin/relatorio/${videoId}.csv">Baixar CSV</a>
         </div>
         <table>
-          <thead><tr><th>Aluno (e-mail)</th><th>Primeiro acesso</th><th>Último evento</th><th>Percentual (aprox.)</th></tr></thead>
+          <thead><tr><th>Aluno</th><th>Primeiro acesso</th><th>Último evento</th><th>Percentual (aprox.)</th></tr></thead>
           <tbody>${lines.join('')}</tbody>
         </table>
         <p class="mut">Dica: o CSV tem todos os eventos. Para % precisa, consolide intervalos no backend.</p>
@@ -295,8 +302,8 @@ app.get('/admin/relatorio/:videoId', authRequired, (req, res) => {
 // ====== APIs ======
 app.post('/api/register', async (req,res)=>{
   try{
-    const { email, password, classCode } = req.body || {};
-    if(!email || !password) return res.status(400).json({error:'Dados obrigatórios'});
+    const { fullName, email, password, classCode } = req.body || {};
+    if(!fullName || !email || !password) return res.status(400).json({error:'Dados obrigatórios'});
 
     if (ALLOWED_EMAIL_DOMAIN && !email.toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) {
       return res.status(400).json({error:`Use seu e-mail institucional (@${ALLOWED_EMAIL_DOMAIN}).`});
@@ -307,7 +314,7 @@ app.post('/api/register', async (req,res)=>{
 
     const hash = await bcrypt.hash(password, 10);
     const expiresAt = SEMESTER_END || null;
-    db.run('INSERT INTO users(email,password_hash,expires_at) VALUES(?,?,?)',[email, hash, expiresAt], function(err){
+    db.run('INSERT INTO users(full_name,email,password_hash,expires_at) VALUES(?,?,?,?)',[fullName, email, hash, expiresAt], function(err){
       if(err) return res.status(400).json({error:'E-mail já cadastrado'});
       res.json({ok:true});
     });
@@ -357,7 +364,7 @@ app.listen(PORT, ()=> console.log(`Aula Tracker rodando na porta ${PORT}`));
 ==================== package.json (crie este arquivo no repositório) ====================
 {
   "name": "aula-tracker",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "main": "app.js",
   "scripts": { "start": "node app.js" },
@@ -370,14 +377,8 @@ app.listen(PORT, ()=> console.log(`Aula Tracker rodando na porta ${PORT}`));
   }
 }
 ========================================================================================
-
 INSTRUÇÕES (Render):
-1) Environment → Add vars:
-   - VIDEO_URL = (link público do MP4/HLS)
-   - SEMESTER_END = 2025-12-20T23:59:59-03:00 (exemplo)
-   - ALLOWED_EMAIL_DOMAIN = suauniversidade.br (opcional)
-   - CLASS_CODE = INFECTO2025 (opcional)
-   - ADMIN_SECRET = alguma_senha_forte (opcional, para rota /admin/set-expiration)
-2) Manual Deploy → Clear build cache & deploy
-3) Fluxo: registrar → login → /aula/1 → relatório em /admin/relatorio/1 (CSV em /admin/relatorio/1.csv)
+- Environment vars: VIDEO_URL, SEMESTER_END, (opcionais) ALLOWED_EMAIL_DOMAIN, CLASS_CODE, ADMIN_SECRET
+- Manual Deploy → Clear build cache & deploy
+- Teste: registrar (com nome), login, /aula/1, relatório em /admin/relatorio/1 e CSV em /admin/relatorio/1.csv
 */

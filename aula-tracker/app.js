@@ -1,9 +1,9 @@
-// Aula Tracker — Express + SQLite (com UI)
-// - Login/Registro (nome completo) + expiração opcional
-// - /aulas (lista) e /admin/videos (cadastro via ADMIN_SECRET)
-// - /aula/:id com URL ASSINADA (R2) + controlsList="nodownload" + bloqueio clique direito + watermark
-// - Tracking play/pause/progress/ended
-// - Relatório CSV (cabeçalho corrigido)
+// Aula Tracker — Express + SQLite — com áreas separadas (aluno vs admin)
+// - Login & Registro (aluno pode criar conta)
+// - Lista de aulas (/aulas)
+// - Cadastro de aulas (/admin/videos) — só visível e acessível em modo admin
+// - Relatório CSV (/admin/relatorio/:id.csv) — só admin
+// - Player /aula/:id com URL assinada (Cloudflare R2, sem botão de download) e watermark
 
 import express from 'express';
 import sqlite3 from 'sqlite3';
@@ -20,17 +20,17 @@ const db = new sqlite3.Database('db.sqlite');
 const PORT = process.env.PORT || 3000;
 
 // ====== CONFIG ======
-const SEMESTER_END = process.env.SEMESTER_END || null;
-const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null;
-const CLASS_CODE = process.env.CLASS_CODE || null;
-const ADMIN_SECRET = process.env.ADMIN_SECRET || null;
+const SEMESTER_END = process.env.SEMESTER_END || null; // Ex.: 2025-12-20T23:59:59-03:00
+const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null; // opcional (exigir domínio)
+const CLASS_CODE = process.env.CLASS_CODE || null; // opcional (código da turma)
+const ADMIN_SECRET = process.env.ADMIN_SECRET || null; // obrigatório para modo admin
 
-// R2
-const R2_BUCKET = process.env.R2_BUCKET;
-const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex: https://xxxxx.r2.cloudflarestorage.com
+// Cloudflare R2 (S3-compat) — assinatura HMAC (sem SDK)
+const R2_BUCKET = process.env.R2_BUCKET; // ex.: aulas-videos
+const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex.: https://<account>.r2.cloudflarestorage.com
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const VIDEO_KEY = process.env.VIDEO_KEY || null; // opcional (seed inicial)
+const VIDEO_KEY = process.env.VIDEO_KEY || null; // opcional: seed inicial
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -76,7 +76,7 @@ db.serialize(() => {
   });
 });
 
-// ====== UI helper ======
+// ====== Helpers ======
 function renderShell(title, body) {
   return `<!doctype html>
   <html lang="pt-br">
@@ -85,7 +85,7 @@ function renderShell(title, body) {
     <meta name="viewport" content="width=device-width,initial-scale=1"/>
     <title>${title}</title>
     <style>
-      :root{--bg:#0b0c10;--card:#15171c;--txt:#e7e9ee;--mut:#a7adbb;--pri:#4f8cff;}
+      :root{--bg:#0b0c10;--card:#15171c;--txt:#e7e9ee;--mut:#a7adbb;--pri:#4f8cff}
       *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Arial;background:var(--bg);color:var(--txt)}
       .wrap{max-width:960px;margin:40px auto;padding:0 16px}
       .card{background:var(--card);border:1px solid #20242b;border-radius:16px;padding:24px;box-shadow:0 8px 24px rgba(0,0,0,.2)}
@@ -112,15 +112,18 @@ function authRequired(req, res, next) {
     if (err || !user) return res.redirect('/');
     const exp = parseISO(user.expires_at);
     if (exp && new Date() > exp) {
-      return res.send(renderShell('Acesso expirado',
-        `<div class="card"><h1>Acesso expirado</h1><p class="mut">Seu acesso expirou em <b>${exp.toLocaleString('pt-BR')}</b>.</p><a href="/">Voltar</a></div>`));
+      return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><p class="mut">Seu acesso expirou.</p><a href="/">Voltar</a></div>`));
     }
-    req.user = user;
+    req.user = user; // {id,email,full_name}
     next();
   });
 }
 
-// ====== Signed URL (R2) ======
+// ====== Admin helpers (modo admin por cookie) ======
+function isAdmin(req){ return req.cookies?.adm === '1'; }
+function adminRequired(req,res,next){ if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado'); if(!isAdmin(req)) return res.redirect('/admin'); next(); }
+
+// ====== R2 Signed URL ======
 function generateSignedUrlForKey(key) {
   if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
   const expiresIn = 60 * 5; // 5 min
@@ -132,10 +135,8 @@ function generateSignedUrlForKey(key) {
 
 // ====== Páginas ======
 app.get('/', (req, res) => {
+  const domainMsg = ALLOWED_EMAIL_DOMAIN ? `Use seu e-mail institucional (@${ALLOWED_EMAIL_DOMAIN}).` : 'Use seu e-mail.';
   const showCode = !!CLASS_CODE;
-  const domainMsg = ALLOWED_EMAIL_DOMAIN
-    ? `Use seu e-mail institucional (@${ALLOWED_EMAIL_DOMAIN}).`
-    : 'Use seu e-mail.';
   const html = `
     <div class="row">
       <div class="card">
@@ -156,6 +157,7 @@ app.get('/', (req, res) => {
           <button class="mt">Criar conta</button>
         </form>
         <p class="mut mt">${domainMsg}</p>
+        <p class="mut mt"><a href="/admin">Sou admin</a></p>
       </div>
     </div>
     <script>
@@ -166,42 +168,71 @@ app.get('/', (req, res) => {
         return j;
       }
       document.getElementById('regForm').addEventListener('submit', async (e)=>{
-        e.preventDefault();
-        const f = new FormData(e.target);
-        try {
-          await postJSON('/api/register',{
-            fullName: f.get('fullName'),
-            email: f.get('email'),
-            password: f.get('password'),
-            classCode: f.get('classCode') || null
-          });
+        e.preventDefault(); const f = new FormData(e.target);
+        try{
+          await postJSON('/api/register',{ fullName:f.get('fullName'), email:f.get('email'), password:f.get('password'), classCode:f.get('classCode')||null });
           alert('Conta criada. Agora faça login.');
-        } catch(err){ alert(err.message); }
+        }catch(err){ alert(err.message); }
       });
       document.getElementById('loginForm').addEventListener('submit', async (e)=>{
-        e.preventDefault();
-        const f = new FormData(e.target);
-        try {
+        e.preventDefault(); const f = new FormData(e.target);
+        try{
           await postJSON('/api/login',{ email:f.get('email'), password:f.get('password') });
           location.href = '/aulas';
-        } catch(err){ alert(err.message); }
+        }catch(err){ alert(err.message); }
       });
     </script>`;
   res.send(renderShell('Acesso', html));
 });
 
-app.get('/logout', (req,res)=>{ res.clearCookie('uid'); res.redirect('/'); });
+app.get('/logout', (req,res)=>{ res.clearCookie('uid'); res.clearCookie('adm'); res.redirect('/'); });
 
-// Lista de aulas
+// ====== Admin: entrar/sair do modo admin ======
+app.get('/admin', authRequired, (req,res)=>{
+  if(!ADMIN_SECRET) return res.send(renderShell('Admin', `<div class="card"><h1>Admin</h1><p class="mut">Defina ADMIN_SECRET no Render.</p></div>`));
+  const html = `
+    <div class="card">
+      <h1>Admin</h1>
+      <form method="POST" action="/admin">
+        <label>ADMIN_SECRET</label>
+        <input name="secret" type="password" required>
+        <button>Entrar no modo admin</button>
+      </form>
+      <p class="mut">Após entrar, verá botões de cadastro e relatórios.</p>
+    </div>`;
+  res.send(renderShell('Admin', html));
+});
+
+app.post('/admin', authRequired, (req,res)=>{
+  const { secret } = req.body || {};
+  if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado');
+  if(secret !== ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
+  res.cookie('adm','1',{ httpOnly:true, sameSite:'lax' });
+  res.redirect('/aulas');
+});
+
+app.get('/admin/logout', authRequired, (req,res)=>{ res.clearCookie('adm'); res.redirect('/aulas'); });
+
+// ====== Lista de aulas (links de admin só quando em modo admin) ======
 app.get('/aulas', authRequired, (req,res)=>{
+  const admin = isAdmin(req);
   db.all('SELECT id,title FROM videos ORDER BY id DESC', (err,rows)=>{
     if(err) return res.status(500).send('erro');
-    const items = rows.map(v=>`<li><a href="/aula/${v.id}">${v.title}</a> — <span class="mut">/aula/${v.id}</span> — <a href="/admin/relatorio/${v.id}.csv">relatório</a></li>`).join('');
+    const items = rows.map(v=>{
+      const base = `<li><a href="/aula/${v.id}">${v.title}</a> — <span class="mut">/aula/${v.id}</span>`;
+      const extra = admin ? ` — <a href="/admin/relatorio/${v.id}.csv">relatório</a>` : '';
+      return `${base}${extra}</li>`;
+    }).join('');
+
+    const actions = admin
+      ? `<a href="/admin/videos">Cadastrar nova</a> · <a href="/admin/logout">Sair do modo admin</a> · <a href="/logout">Sair</a>`
+      : `<a href="/admin">Sou admin</a> · <a href="/logout">Sair</a>`;
+
     const body = `
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h1>Aulas</h1>
-          <div><a href="/admin/videos">Cadastrar nova</a> · <a href="/logout">Sair</a></div>
+          <div>${actions}</div>
         </div>
         <ul>${items || '<li class="mut">Nenhuma aula cadastrada ainda.</li>'}</ul>
       </div>`;
@@ -209,41 +240,37 @@ app.get('/aulas', authRequired, (req,res)=>{
   });
 });
 
-// Cadastro de aulas (admin)
-app.get('/admin/videos', authRequired, (req,res)=>{
-  if(!ADMIN_SECRET) {
-    return res.send(renderShell('Cadastro', `<div class="card"><h1>Cadastro de Aulas</h1><p class="mut">Defina ADMIN_SECRET nas variáveis de ambiente do Render.</p></div>`));
-  }
-  const html = `
+// ====== Cadastro de aulas (somente admin) ======
+app.get('/admin/videos', adminRequired, (req,res)=>{
+  const form = `
     <div class="card">
       <h1>Cadastro de Aulas</h1>
       <form method="POST" action="/admin/videos" class="mt2">
         <label>Título</label><input name="title" required>
         <label>R2 Key (ex.: pasta/arquivo.mp4)</label><input name="r2_key" required>
-        <label>ADMIN_SECRET</label><input name="secret" type="password" required>
         <button class="mt">Salvar</button>
       </form>
-      <p class="mut mt">A "R2 key" é o caminho do objeto dentro do bucket (não é a URL completa).</p>
+      <p class="mut mt">A "R2 key" é o caminho do objeto dentro do bucket (não a URL completa).</p>
     </div>`;
-  res.send(renderShell('Cadastro', html));
+  res.send(renderShell('Cadastro', form));
 });
 
-app.post('/admin/videos', authRequired, (req,res)=>{
-  const { title, r2_key, secret } = req.body || {};
-  if(secret!==ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
+app.post('/admin/videos', adminRequired, (req,res)=>{
+  const { title, r2_key } = req.body || {};
+  if(!title || !r2_key) return res.status(400).send('Dados obrigatórios');
   db.run('INSERT INTO videos(title,r2_key) VALUES(?,?)',[title,r2_key], (err)=>{
     if(err) return res.status(500).send('Falha ao salvar');
     res.redirect('/aulas');
   });
 });
 
-// Player por ID
+// ====== Player por ID ======
 app.get('/aula/:id', authRequired, (req,res)=>{
   const videoId = parseInt(req.params.id,10);
   db.get('SELECT id,title,r2_key FROM videos WHERE id=?',[videoId], (err, v)=>{
     if(err||!v) return res.status(404).send(renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`));
     const signedUrl = generateSignedUrlForKey(v.r2_key);
-    db.run('INSERT INTO sessions(user_id,video_id) VALUES(?,?)',[req.user.id, videoId], function(){
+    db.run('INSERT INTO sessions(user_id, video_id) VALUES(?,?)',[req.user.id, videoId], function(){
       const sessionId = this.lastID;
       const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const body = `
@@ -254,8 +281,7 @@ app.get('/aula/:id', authRequired, (req,res)=>{
           </div>
           <p class="mut">Seu progresso é registrado automaticamente.</p>
           <div class="video">
-            <video id="player" controls playsinline preload="metadata" controlsList="nodownload"
-                   oncontextmenu="return false" style="width:100%;height:100%">
+            <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
               ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
             </video>
             <div class="wm">${wm}</div>
@@ -266,12 +292,9 @@ app.get('/aula/:id', authRequired, (req,res)=>{
             const video = document.getElementById('player');
             const sessionId = ${sessionId};
             function send(type){
-              fetch('/track',{method:'POST',headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({sessionId,type,videoTime:Math.floor(video.currentTime||0),clientTs:new Date().toISOString()})});
+              fetch('/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,type,videoTime:Math.floor(video.currentTime||0),clientTs:new Date().toISOString()})});
             }
-            if(!${JSON.stringify(!!signedUrl)}){
-              alert('Vídeo não configurado (R2_* ausente ou key inválida).');
-            }
+            if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2_* ausente ou key inválida).');
             video.addEventListener('play', ()=>send('play'));
             video.addEventListener('pause',()=>send('pause'));
             video.addEventListener('ended',()=>send('ended'));
@@ -283,8 +306,8 @@ app.get('/aula/:id', authRequired, (req,res)=>{
   });
 });
 
-// ====== Relatório CSV (cabeçalho corrigido) ======
-app.get('/admin/relatorio/:videoId.csv', authRequired, (req,res)=>{
+// ====== Relatório CSV (somente admin) — cabeçalho corrigido ======
+app.get('/admin/relatorio/:videoId.csv', adminRequired, (req,res)=>{
   const { videoId } = req.params;
   const sql = `
     SELECT u.full_name, u.email, s.id as session, e.type, e.video_time, e.client_ts
@@ -292,15 +315,12 @@ app.get('/admin/relatorio/:videoId.csv', authRequired, (req,res)=>{
     JOIN sessions s ON s.id = e.session_id
     JOIN users u ON u.id = s.user_id
     WHERE s.video_id = ?
-    ORDER BY u.full_name, u.email, e.client_ts
-  `;
+    ORDER BY u.full_name, u.email, e.client_ts`;
   db.all(sql, [videoId], (err, rows)=>{
     if(err) return res.status(500).send('erro');
     res.setHeader('Content-Type','text/csv; charset=utf-8');
     const header = ['full_name','email','session','type','video_time','client_ts'].join(',') + '\n';
-    const body = rows.map(r =>
-      `${(r.full_name||'').replace(/,/g,' ')},${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`
-    ).join('\n');
+    const body = rows.map(r => `${(r.full_name||'').replace(/,/g,' ')},${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`).join('\n');
     res.send(header+body);
   });
 });

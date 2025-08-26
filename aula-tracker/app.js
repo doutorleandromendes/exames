@@ -141,7 +141,6 @@ function generateSignedUrlForKey(key) {
   return `${R2_ENDPOINT}${resource}?${qs}&AWSAccessKeyId=${encodeURIComponent(R2_ACCESS_KEY_ID)}&Expires=${expiration}&Signature=${encodeURIComponent(signature)}`;
 }
 
-
 // ====== Páginas ======
 app.get('/', (req, res) => {
   const domainMsg = ALLOWED_EMAIL_DOMAIN ? `Use seu e-mail institucional (@${ALLOWED_EMAIL_DOMAIN}).` : 'Use seu e-mail.';
@@ -249,6 +248,7 @@ app.get('/aulas', authRequired, (req,res)=>{
   });
 });
 
+// ====== Debug: exibir URL assinada pra uma aula (requer login) ======
 app.get('/debug/signed/:id', authRequired, (req, res) => {
   const id = parseInt(req.params.id, 10);
   db.get('SELECT r2_key FROM videos WHERE id=?', [id], (err, row) => {
@@ -286,11 +286,19 @@ app.post('/admin/videos', adminRequired, (req,res)=>{
 app.get('/aula/:id', authRequired, (req,res)=>{
   const videoId = parseInt(req.params.id,10);
   db.get('SELECT id,title,r2_key FROM videos WHERE id=?',[videoId], (err, v)=>{
-    if(err||!v) return res.status(404).send(renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`));
+    if(err||!v) {
+      return res.status(404).send(
+        renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`)
+      );
+    }
+
     const signedUrl = generateSignedUrlForKey(v.r2_key);
+
     db.run('INSERT INTO sessions(user_id, video_id) VALUES(?,?)',[req.user.id, videoId], function(){
       const sessionId = this.lastID;
-      const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const wm = (req.user.full_name || req.user.email || '')
+        .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
       const body = `
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
@@ -299,7 +307,8 @@ app.get('/aula/:id', authRequired, (req,res)=>{
           </div>
           <p class="mut">Seu progresso é registrado automaticamente.</p>
           <div class="video">
-            <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
+            <video id="player" controls playsinline preload="metadata" controlsList="nodownload"
+                   oncontextmenu="return false" style="width:100%;height:100%">
               ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
             </video>
             <div class="wm">${wm}</div>
@@ -309,29 +318,40 @@ app.get('/aula/:id', authRequired, (req,res)=>{
           (function(){
             const video = document.getElementById('player');
             const sessionId = ${sessionId};
-            function send(type){
-              fetch('/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId,type,videoTime:Math.floor(video.currentTime||0),clientTs:new Date().toISOString()})});
-            }
-            if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2_* ausente ou key inválida).');
-            video.addEventListener('play', ()=>send('play'));
-            video.addEventListener('pause',()=>send('pause'));
-            video.addEventListener('ended',()=>send('ended'));
-            setInterval(()=>send('progress'),5000);
-          })();
-        </script>`;
-      res.send(renderShell(v.title, body));
-      <script>
-  (function(){
-    const video = document.getElementById('player');
-    // ... (resto já existe)
-    video.addEventListener('error', () => {
-      const err = video.error;
-      alert('Erro no player (veja Console/Network). Code: ' + (err && err.code));
-      console.error('HTMLMediaError', err);
-    });
-  })();
-</script>
 
+            function send(type){
+              fetch('/track',{
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({
+                  sessionId,
+                  type,
+                  videoTime: Math.floor(video.currentTime || 0),
+                  clientTs: new Date().toISOString()
+                })
+              });
+            }
+
+            if(!${JSON.stringify(!!signedUrl)}){
+              alert('Vídeo não configurado (R2_* ausente ou key inválida).');
+            }
+
+            // tracking
+            video.addEventListener('play',  ()=>send('play'));
+            video.addEventListener('pause', ()=>send('pause'));
+            video.addEventListener('ended', ()=>send('ended'));
+            setInterval(()=>send('progress'), 5000);
+
+            // debug: mostra erro do player (se ocorrer)
+            video.addEventListener('error', ()=>{
+              const err = video.error;
+              console.error('HTMLMediaError', err);
+              alert('Erro no player (veja Console/Network).');
+            });
+          })();
+        </script>
+      `;
+      res.send(renderShell(v.title, body));
     });
   });
 });

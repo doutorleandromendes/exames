@@ -3,7 +3,7 @@
 // - Lista de aulas (/aulas)
 // - Cadastro de aulas (/admin/videos) — só visível e acessível em modo admin
 // - Relatório CSV (/admin/relatorio/:id.csv) — só admin
-// - Player /aula/:id com URL assinada (Cloudflare R2, sem botão de download) e watermark
+// - Player /aula/:id com URL assinada (Cloudflare R2, SigV4) e watermark
 
 import express from 'express';
 import sqlite3 from 'sqlite3';
@@ -25,7 +25,7 @@ const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null; // opcion
 const CLASS_CODE = process.env.CLASS_CODE || null; // opcional (código da turma)
 const ADMIN_SECRET = process.env.ADMIN_SECRET || null; // obrigatório para modo admin
 
-// Cloudflare R2 (S3-compat) — assinatura HMAC (sem SDK)
+// Cloudflare R2 (S3-compat) — SigV4
 const R2_BUCKET = process.env.R2_BUCKET; // ex.: aulas-videos
 const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex.: https://<account>.r2.cloudflarestorage.com
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -76,7 +76,7 @@ db.serialize(() => {
   });
 });
 
-// ====== Helpers ======
+// ====== UI helpers ======
 function renderShell(title, body) {
   return `<!doctype html>
   <html lang="pt-br">
@@ -123,23 +123,83 @@ function authRequired(req, res, next) {
 function isAdmin(req){ return req.cookies?.adm === '1'; }
 function adminRequired(req,res,next){ if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado'); if(!isAdmin(req)) return res.redirect('/admin'); next(); }
 
-// ====== R2 Signed URL ======
+// ====== R2 Signed URL (AWS Signature V4, presign) ======
+function hmac(key, msg) {
+  return crypto.createHmac('sha256', key).update(msg).digest();
+}
+function sha256Hex(msg) {
+  return crypto.createHash('sha256').update(msg).digest('hex');
+}
+function getV4SigningKey(secretKey, dateStamp, region, service) {
+  const kDate = hmac('AWS4' + secretKey, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  const kSigning = hmac(kService, 'aws4_request');
+  return kSigning;
+}
+/**
+ * Gera URL pré-assinada (GET) para Cloudflare R2 usando SigV4 em querystring (X-Amz-*)
+ * Região do R2 é "auto". Assinamos somente com header "host" (sem x-amz-content-sha256 em query).
+ */
 function generateSignedUrlForKey(key) {
   if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
-  const expiresIn = 60 * 10; // 10 min
-  const expiration = Math.floor(Date.now() / 1000) + expiresIn;
 
-  const resource = `/${R2_BUCKET}/${key}`;
-  // Signature V2 simples (sem sub-recursos na query)
-  const stringToSign = `GET\n\n\n${expiration}\n${resource}`;
+  const method = 'GET';
+  const service = 's3';
+  const region = 'auto'; // Cloudflare R2
+  const host = R2_ENDPOINT.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${key.split('/').map(encodeURIComponent).join('/')}`;
 
-  const signature = crypto.createHmac('sha1', R2_SECRET_ACCESS_KEY)
-    .update(stringToSign)
-    .digest('base64');
+  // Datas no formato SigV4
+  const now = new Date();
+  const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g, ''); // YYYYMMDDTHHMMSSZ
+  const datestamp = amzdate.substring(0, 8); // YYYYMMDD
+  const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
 
-  return `${R2_ENDPOINT}${resource}?AWSAccessKeyId=${encodeURIComponent(R2_ACCESS_KEY_ID)}&Expires=${expiration}&Signature=${encodeURIComponent(signature)}`;
+  // Presign por 10 minutos
+  const expires = 600;
+
+  // Query canônica (ordem lexicográfica)
+  const queryParams = [
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${R2_ACCESS_KEY_ID}/${credentialScope}`],
+    ['X-Amz-Date', amzdate],
+    ['X-Amz-Expires', String(expires)],
+    ['X-Amz-SignedHeaders', 'host'],
+  ];
+
+  const canonicalQuerystring = queryParams
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
+
+  const canonicalHeaders = `host:${host}\n`;
+  const signedHeaders = 'host';
+
+  // Para presigned URL, o payload é "UNSIGNED-PAYLOAD"
+  const payloadHash = 'UNSIGNED-PAYLOAD';
+
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQuerystring,
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join('\n');
+
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzdate,
+    credentialScope,
+    sha256Hex(canonicalRequest)
+  ].join('\n');
+
+  const signingKey = getV4SigningKey(R2_SECRET_ACCESS_KEY, datestamp, region, service);
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+  const presignedUrl = `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
+  return presignedUrl;
 }
-
 
 // ====== Páginas ======
 app.get('/', (req, res) => {

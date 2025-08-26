@@ -249,6 +249,15 @@ app.get('/aulas', authRequired, (req,res)=>{
   });
 });
 
+app.get('/debug/signed/:id', authRequired, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  db.get('SELECT r2_key FROM videos WHERE id=?', [id], (err, row) => {
+    if (err || !row) return res.status(404).send('Aula não encontrada');
+    const url = generateSignedUrlForKey(row.r2_key);
+    res.type('text/plain').send(url || 'ERRO: URL não pôde ser gerada (ver R2_* env vars).');
+  });
+});
+
 // ====== Cadastro de aulas (somente admin) ======
 app.get('/admin/videos', adminRequired, (req,res)=>{
   const form = `
@@ -311,6 +320,18 @@ app.get('/aula/:id', authRequired, (req,res)=>{
           })();
         </script>`;
       res.send(renderShell(v.title, body));
+      <script>
+  (function(){
+    const video = document.getElementById('player');
+    // ... (resto já existe)
+    video.addEventListener('error', () => {
+      const err = video.error;
+      alert('Erro no player (veja Console/Network). Code: ' + (err && err.code));
+      console.error('HTMLMediaError', err);
+    });
+  })();
+</script>
+
     });
   });
 });

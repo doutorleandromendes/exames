@@ -126,12 +126,21 @@ function adminRequired(req,res,next){ if(!ADMIN_SECRET) return res.status(500).s
 // ====== R2 Signed URL ======
 function generateSignedUrlForKey(key) {
   if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
-  const expiresIn = 60 * 5; // 5 min
+  const expiresIn = 60 * 10; // 10 min
   const expiration = Math.floor(Date.now() / 1000) + expiresIn;
-  const stringToSign = `GET\n\n\n${expiration}\n/${R2_BUCKET}/${key}`;
-  const signature = crypto.createHmac('sha1', R2_SECRET_ACCESS_KEY).update(stringToSign).digest('base64');
-  return `${R2_ENDPOINT}/${R2_BUCKET}/${key}?AWSAccessKeyId=${encodeURIComponent(R2_ACCESS_KEY_ID)}&Expires=${expiration}&Signature=${encodeURIComponent(signature)}`;
+
+  // query string a ser assinada
+  const qs = `response-content-type=video/mp4`;
+  const resource = `/${R2_BUCKET}/${key}`;
+  const stringToSign = `GET\n\n\n${expiration}\n${resource}?${qs}`;
+
+  const signature = crypto.createHmac('sha1', R2_SECRET_ACCESS_KEY)
+    .update(stringToSign)
+    .digest('base64');
+
+  return `${R2_ENDPOINT}${resource}?${qs}&AWSAccessKeyId=${encodeURIComponent(R2_ACCESS_KEY_ID)}&Expires=${expiration}&Signature=${encodeURIComponent(signature)}`;
 }
+
 
 // ====== Páginas ======
 app.get('/', (req, res) => {

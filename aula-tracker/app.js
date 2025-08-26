@@ -464,10 +464,15 @@ app.post('/api/login', (req,res)=>{
     if(!row) return res.status(401).json({error:'Credenciais inválidas'});
     const ok = await bcrypt.compare(password, row.password_hash);
     if(!ok) return res.status(401).json({error:'Credenciais inválidas'});
+
+    // 🔒 sempre entra como aluno por padrão:
+    res.clearCookie('adm');                // <— ADICIONE ESTA LINHA
     res.cookie('uid', row.id, { httpOnly:true, sameSite:'lax' });
+
     res.json({ok:true});
   });
 });
+
 
 app.post('/track',(req,res)=>{
   const { sessionId, type, videoTime, clientTs } = req.body||{};

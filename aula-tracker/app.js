@@ -129,17 +129,17 @@ function generateSignedUrlForKey(key) {
   const expiresIn = 60 * 10; // 10 min
   const expiration = Math.floor(Date.now() / 1000) + expiresIn;
 
-  // query string a ser assinada
-  const qs = `response-content-type=video/mp4`;
   const resource = `/${R2_BUCKET}/${key}`;
-  const stringToSign = `GET\n\n\n${expiration}\n${resource}?${qs}`;
+  // Signature V2 simples (sem sub-recursos na query)
+  const stringToSign = `GET\n\n\n${expiration}\n${resource}`;
 
   const signature = crypto.createHmac('sha1', R2_SECRET_ACCESS_KEY)
     .update(stringToSign)
     .digest('base64');
 
-  return `${R2_ENDPOINT}${resource}?${qs}&AWSAccessKeyId=${encodeURIComponent(R2_ACCESS_KEY_ID)}&Expires=${expiration}&Signature=${encodeURIComponent(signature)}`;
+  return `${R2_ENDPOINT}${resource}?AWSAccessKeyId=${encodeURIComponent(R2_ACCESS_KEY_ID)}&Expires=${expiration}&Signature=${encodeURIComponent(signature)}`;
 }
+
 
 // ====== Páginas ======
 app.get('/', (req, res) => {

@@ -1,7 +1,8 @@
-// Aula Tracker — Multi-cursos (sem auto-registro), Express + SQLite
-// Fluxo: admin cria cursos, importa alunos por CSV (nome,email,senha,slug do curso), cadastra vídeos por curso.
-// Aluno faz login -> vê só as aulas dos cursos onde está matriculado -> assiste com URL R2 assinada (SigV4).
-// Relatórios CSV por vídeo. Área admin protegida por ADMIN_SECRET (cookie 'adm').
+// Aula Tracker — Multi-cursos com validade por usuário e por matrícula.
+// Express + SQLite; Admin cria cursos, cadastra vídeos por curso e importa alunos por CSV.
+// Aluno faz login -> vê só aulas dos cursos onde está matriculado e dentro da validade.
+// Vídeo servido por URL assinada (Cloudflare R2, SigV4) com controles para dificultar download.
+// Relatório CSV por vídeo (nome completo, email, sessão, eventos, tempo, timestamp).
 
 import express from 'express';
 import sqlite3 from 'sqlite3';
@@ -18,11 +19,12 @@ const db = new sqlite3.Database('db.sqlite');
 const PORT = process.env.PORT || 3000;
 
 // ====== CONFIG ======
-const SEMESTER_END = process.env.SEMESTER_END || null; // ex: 2025-12-20T23:59:59-03:00
+const SEMESTER_END = process.env.SEMESTER_END || null;                 // ex: 2025-12-20T23:59:59-03:00
 const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null; // ex: universidade.br (opcional)
-const ADMIN_SECRET = process.env.ADMIN_SECRET || null; // obrigatório
-// Cloudflare R2 (S3 compat, SigV4)
-const R2_BUCKET = process.env.R2_BUCKET;
+const ADMIN_SECRET = process.env.ADMIN_SECRET || null;                  // obrigatório
+
+// Cloudflare R2 (S3 compat — SigV4)
+const R2_BUCKET = process.env.R2_BUCKET; // ex: aulas-videos
 const R2_ENDPOINT = process.env.R2_ENDPOINT; // ex: https://<account>.r2.cloudflarestorage.com
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
@@ -31,8 +33,9 @@ app.use(bodyParser.json({ limit: '2mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '4mb' }));
 app.use(cookieParser());
 
-// ====== DB bootstrap & migrations ======
+// ====== DB bootstrap & auto-migrations ======
 db.serialize(() => {
+  // Base tables
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
@@ -46,22 +49,23 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     slug TEXT UNIQUE NOT NULL,
-    enroll_code TEXT,           -- opcional nesse app; importação já matricula
-    expires_at TEXT
+    enroll_code TEXT
+    -- expires_at adicionado por migração
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS course_members (
     user_id INTEGER NOT NULL,
     course_id INTEGER NOT NULL,
-    role TEXT DEFAULT 'student', -- 'student' | 'instructor'
+    role TEXT DEFAULT 'student',
     PRIMARY KEY (user_id, course_id)
+    -- expires_at adicionado por migração
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS videos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     r2_key TEXT NOT NULL
-    -- course_id será adicionado por migração se ainda não existir
+    -- course_id adicionado por migração
   )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS sessions (
@@ -79,13 +83,23 @@ db.serialize(() => {
     client_ts TEXT
   )`);
 
-  // Migração leve: garantir coluna videos.course_id
+  // --- auto-migrations: adiciona colunas se faltarem ---
   db.all(`PRAGMA table_info(videos)`, (err, cols) => {
     if (err) return;
     const hasCourseId = (cols || []).some(c => c.name === 'course_id');
-    if (!hasCourseId) {
-      db.run(`ALTER TABLE videos ADD COLUMN course_id INTEGER`, () => {});
-    }
+    if (!hasCourseId) db.run(`ALTER TABLE videos ADD COLUMN course_id INTEGER`);
+  });
+
+  db.all(`PRAGMA table_info(courses)`, (err, cols) => {
+    if (err) return;
+    const hasExp = (cols || []).some(c => c.name === 'expires_at');
+    if (!hasExp) db.run(`ALTER TABLE courses ADD COLUMN expires_at TEXT`);
+  });
+
+  db.all(`PRAGMA table_info(course_members)`, (err, cols) => {
+    if (err) return;
+    const hasExp = (cols || []).some(c => c.name === 'expires_at');
+    if (!hasExp) db.run(`ALTER TABLE course_members ADD COLUMN expires_at TEXT`);
   });
 });
 
@@ -130,7 +144,7 @@ function authRequired(req,res,next){
   });
 }
 
-// ====== Helpers de curso ======
+// ====== Helpers de curso/matrícula ======
 function getCourseBySlug(slug, cb){ db.get('SELECT * FROM courses WHERE slug=?',[slug], cb); }
 function listCourses(cb){ db.all('SELECT id,name,slug FROM courses ORDER BY id DESC', cb); }
 function ensureMembership(userId, courseId, cb){
@@ -180,6 +194,21 @@ function generateSignedUrlForKey(key) {
   return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
 
+// ====== Normalização de datas do CSV ======
+// Aceita: YYYY-MM-DD  -> YYYY-MM-DDT23:59:59-03:00
+//         YYYY-MM-DDTHH:MM -> YYYY-MM-DDTHH:MM:00-03:00
+//         ISO com Z/offset -> mantém
+function normalizeDateStr(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  if (!s) return null;
+  if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(s)) return s; // já com timezone
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T23:59:59-03:00`;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return `${s}:00-03:00`;
+  const d = new Date(s);
+  return isFinite(d) ? d.toISOString() : null;
+}
+
 // ====== Páginas ======
 // Home: só login (sem auto-registro)
 app.get('/', (req,res)=>{
@@ -216,7 +245,7 @@ app.get('/', (req,res)=>{
 
 app.get('/logout', (req,res)=>{ res.clearCookie('uid'); res.clearCookie('adm'); res.redirect('/'); });
 
-// Admin: entrar/ sair modo admin
+// Admin: entrar/sair modo admin
 app.get('/admin', authRequired, (req,res)=>{
   if(!ADMIN_SECRET) return res.send(renderShell('Admin', `<div class="card"><h1>Admin</h1><p class="mut">Defina ADMIN_SECRET no Render.</p></div>`));
   const html = `<div class="card"><h1>Admin</h1>
@@ -224,7 +253,7 @@ app.get('/admin', authRequired, (req,res)=>{
       <label>ADMIN_SECRET</label><input name="secret" type="password" required>
       <button>Entrar no modo admin</button>
     </form>
-    <p class="mut">Após entrar, verá botões de cursos, cadastro de vídeos e importação.</p>
+    <p class="mut">Após entrar, verá cursos, cadastro de aulas e importação.</p>
   </div>`;
   res.send(renderShell('Admin', html));
 });
@@ -237,18 +266,21 @@ app.post('/admin', authRequired, (req,res)=>{
 });
 app.get('/admin/logout', authRequired, (req,res)=>{ res.clearCookie('adm'); res.redirect('/aulas'); });
 
-// Lista de aulas do(s) curso(s) do aluno (+ filtro ?curso=slug)
+// Lista de aulas (apenas cursos onde o aluno é membro e dentro da validade)
 app.get('/aulas', authRequired, (req,res)=>{
   const admin = isAdmin(req);
   const slug = (req.query.curso || '').trim();
 
   const sql = `
-    SELECT v.id, v.title, v.course_id, c.name as course_name, c.slug
+    SELECT v.id, v.title, v.course_id, c.name as course_name, c.slug, c.expires_at, cm.expires_at as mem_expires_at
     FROM videos v
     JOIN courses c ON c.id = v.course_id
-    WHERE v.course_id IN (SELECT course_id FROM course_members WHERE user_id=?)
-      ${slug ? 'AND c.slug = ?' : ''}
+    JOIN course_members cm ON cm.course_id = v.course_id AND cm.user_id = ?
+    WHERE ${slug ? 'c.slug = ? AND ' : ''} 
+          (c.expires_at IS NULL OR datetime(c.expires_at) > datetime('now'))
+      AND (cm.expires_at IS NULL OR datetime(cm.expires_at) > datetime('now'))
     ORDER BY v.id DESC`;
+
   const params = slug ? [req.user.id, slug] : [req.user.id];
 
   db.all(sql, params, (err,rows)=>{
@@ -274,13 +306,13 @@ app.get('/aulas', authRequired, (req,res)=>{
           slug ? `<strong>${slug}</strong> · <a href="/aulas">limpar</a>`
                : '(use ?curso=slug, ex: /aulas?curso=infecto-2025-1)'
         }</p>
-        <ul>${items || '<li class="mut">Nenhuma aula disponível para seus cursos.</li>'}</ul>
+        <ul>${items || '<li class="mut">Nenhuma aula disponível (pode ter expirado).</li>'}</ul>
       </div>`;
     res.send(renderShell('Aulas', body));
   });
 });
 
-// Debug: mostrar URL assinada para teste
+// Debug: mostrar URL assinada (teste)
 app.get('/debug/signed/:id', authRequired, (req,res)=>{
   const id = parseInt(req.params.id,10);
   db.get('SELECT r2_key FROM videos WHERE id=?',[id],(err,row)=>{
@@ -292,29 +324,58 @@ app.get('/debug/signed/:id', authRequired, (req,res)=>{
 
 // ====== Admin: cursos ======
 app.get('/admin/cursos', adminRequired, (req,res)=>{
-  db.all('SELECT id,name,slug,enroll_code FROM courses ORDER BY id DESC', (e,rows)=>{
-    const list = (rows||[]).map(c=>`<li><strong>${c.name}</strong> — slug: <code>${c.slug}</code>${c.enroll_code?` — código: <code>${c.enroll_code}</code>`:''}</li>`).join('');
+  db.all('SELECT id,name,slug,enroll_code,expires_at FROM courses ORDER BY id DESC', (e,rows)=>{
+    const list = (rows||[]).map(c => `
+      <li>
+        <strong>${c.name}</strong>
+        — slug: <code>${c.slug}</code>
+        ${c.enroll_code?` — código: <code>${c.enroll_code}</code>`:''}
+        ${c.expires_at?` — expira: <code>${c.expires_at}</code>`:' — <em>sem validade</em>'}
+      </li>`).join('');
+
     const form = `
       <div class="card">
         <h1>Cursos</h1>
         <ul>${list || '<li class="mut">Nenhum curso.</li>'}</ul>
+
         <h2 class="mt2">Novo curso</h2>
         <form method="POST" action="/admin/cursos" class="mt2">
           <label>Nome</label><input name="name" required>
           <label>Slug (único, sem espaços)</label><input name="slug" required>
-          <label>Código (opcional, se for usar auto-matrícula)</label><input name="enroll_code">
+          <label>Código (opcional)</label><input name="enroll_code">
+          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
           <button class="mt">Criar</button>
+        </form>
+
+        <h2 class="mt2">Atualizar validade</h2>
+        <form method="POST" action="/admin/cursos/validade" class="mt2">
+          <label>Slug do curso</label><input name="slug" required>
+          <label>Nova validade</label><input name="expires_at" type="datetime-local">
+          <button class="mt">Salvar validade</button>
         </form>
       </div>`;
     res.send(renderShell('Cursos', form));
   });
 });
 app.post('/admin/cursos', adminRequired, (req,res)=>{
-  const { name, slug, enroll_code } = req.body || {};
+  let { name, slug, enroll_code, expires_at } = req.body || {};
   if(!name || !slug) return res.status(400).send('Dados obrigatórios');
-  db.run('INSERT INTO courses(name,slug,enroll_code) VALUES(?,?,?)',[name,slug,enroll_code||null], (err)=>{
-    if(err) return res.status(500).send('Falha ao criar curso (slug único?)');
-    res.redirect('/admin/cursos');
+  if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
+  if (!expires_at) expires_at = null;
+
+  db.run('INSERT INTO courses(name,slug,enroll_code,expires_at) VALUES(?,?,?,?)',
+    [name, slug, enroll_code||null, expires_at],
+    (err)=>{ if(err) return res.status(500).send('Falha ao criar curso (slug único?)'); res.redirect('/admin/cursos'); }
+  );
+});
+app.post('/admin/cursos/validade', adminRequired, (req,res)=>{
+  let { slug, expires_at } = req.body || {};
+  if(!slug) return res.status(400).send('Slug é obrigatório');
+  if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
+  if (!expires_at) expires_at = null;
+
+  db.run('UPDATE courses SET expires_at=? WHERE slug=?', [expires_at, slug], (err)=>{
+    if(err) return res.status(500).send('Falha ao atualizar'); res.redirect('/admin/cursos');
   });
 });
 
@@ -340,8 +401,7 @@ app.post('/admin/videos', adminRequired, (req,res)=>{
   const { title, r2_key, course_id } = req.body || {};
   if(!title || !r2_key || !course_id) return res.status(400).send('Dados obrigatórios');
   db.run('INSERT INTO videos(title,r2_key,course_id) VALUES(?,?,?)',[title,r2_key,course_id], (err)=>{
-    if(err) return res.status(500).send('Falha ao salvar');
-    res.redirect('/aulas');
+    if(err) return res.status(500).send('Falha ao salvar'); res.redirect('/aulas');
   });
 });
 
@@ -350,13 +410,17 @@ app.get('/admin/import', adminRequired, (req,res)=>{
   const body = `
     <div class="card">
       <h1>Importar alunos (CSV)</h1>
-      <p class="mut">Formato: <code>full_name,email,password,course_slug</code> — uma linha por aluno.</p>
+      <p class="mut">Formato: <code>full_name,email,password,course_slug,user_expires_at,member_expires_at</code>.
+      <br>Os 2 últimos são opcionais. Datas aceitas:
+      <code>YYYY-MM-DD</code> (assume 23:59:59 -03:00),
+      <code>YYYY-MM-DDTHH:MM</code> (assume -03:00),
+      ou ISO com timezone (ex.: <code>2025-12-20T23:59:59-03:00</code>).</p>
       <form method="POST" action="/admin/import" class="mt2">
         <label>CSV</label>
         <textarea name="csv" rows="12" style="width:100%;font-family:monospace"></textarea>
         <button class="mt">Importar</button>
       </form>
-      <p class="mut mt">As senhas são armazenadas com hash (bcrypt). Alunos são automaticamente matriculados no curso.</p>
+      <p class="mut mt">Senhas armazenadas com hash (bcrypt). O aluno é matriculado no curso indicado; datas de validade são aplicadas.</p>
     </div>`;
   res.send(renderShell('Importar', body));
 });
@@ -366,7 +430,7 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
 
   const lines = csv.split(/\r?\n/).filter(Boolean);
   const results = [];
-  const expiresAt = SEMESTER_END || null;
+  const defaultExpires = SEMESTER_END || null;
 
   for (const line of lines){
     // parse CSV simples com aspas
@@ -378,7 +442,15 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
       cur += ch;
     }
     cols.push(cur.trim());
-    let [full_name, email, password, course_slug] = cols;
+
+    let [
+      full_name,           // 0
+      email,               // 1
+      password,            // 2 (pode vir vazio -> geramos)
+      course_slug,         // 3
+      user_expires_at,     // 4 (opcional) -> users.expires_at
+      member_expires_at    // 5 (opcional) -> course_members.expires_at
+    ] = cols;
 
     if(!full_name || !email || !course_slug){
       results.push({email, ok:false, msg:'faltam campos (full_name,email,course_slug)'}); continue;
@@ -386,40 +458,51 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
     if (ALLOWED_EMAIL_DOMAIN && !email.toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) {
       results.push({email, ok:false, msg:`domínio inválido (exige @${ALLOWED_EMAIL_DOMAIN})`}); continue;
     }
-    if(!password || password.length<3){
-      password = (email.split('@')[0]||'aluno') + '123';
-    }
 
+    password = (password && password.length>=3) ? password : ((email.split('@')[0]||'aluno') + '123');
+    const userExpISO   = normalizeDateStr(user_expires_at)   || defaultExpires;
+    const memberExpISO = normalizeDateStr(member_expires_at) || null;
+
+    // curso
     const course = await new Promise(resolve=>{
-      getCourseBySlug(course_slug, (e,c)=>resolve(c||null));
+      db.get('SELECT * FROM courses WHERE slug=?',[course_slug], (e,c)=>resolve(c||null));
     });
     if(!course){ results.push({email, ok:false, msg:`curso não encontrado: ${course_slug}`}); continue; }
 
     const hash = await bcrypt.hash(password, 10);
 
-    const user = await new Promise(resolve=>{
+    const existing = await new Promise(resolve=>{
       db.get('SELECT id FROM users WHERE email=?',[email], (e,row)=>resolve(row||null));
     });
 
     let userId;
-    if(!user){
+    if(!existing){
       userId = await new Promise(resolve=>{
         db.run('INSERT INTO users(full_name,email,password_hash,expires_at) VALUES(?,?,?,?)',
-          [full_name,email,hash,expiresAt],
+          [full_name,email,hash,userExpISO],
           function(err){ resolve(err ? null : this.lastID); });
       });
       if(!userId){ results.push({email, ok:false, msg:'falha ao criar usuário'}); continue; }
     }else{
-      userId = user.id;
+      userId = existing.id;
       await new Promise(resolve=>{
         db.run('UPDATE users SET full_name=?, password_hash=?, expires_at=? WHERE id=?',
-          [full_name, hash, expiresAt, userId], ()=>resolve());
+          [full_name, hash, userExpISO, userId], ()=>resolve());
       });
     }
 
-    await new Promise(resolve=>{ ensureMembership(userId, course.id, ()=>resolve()); });
+    await new Promise(resolve=>{
+      db.run('INSERT OR IGNORE INTO course_members(user_id,course_id,role) VALUES (?,?,?)',
+        [userId, course.id, 'student'], ()=>resolve());
+    });
+    if (memberExpISO){
+      await new Promise(resolve=>{
+        db.run('UPDATE course_members SET expires_at=? WHERE user_id=? AND course_id=?',
+          [memberExpISO, userId, course.id], ()=>resolve());
+      });
+    }
 
-    results.push({email, ok:true, msg:`ok (curso: ${course.slug})`});
+    results.push({email, ok:true, msg:`ok (curso: ${course.slug}${memberExpISO?`, matrícula expira ${memberExpISO}`:''}; user exp: ${userExpISO||'—'})`});
   }
 
   const htmlRows = results.map(r=>`<tr><td>${r.email||'-'}</td><td>${r.ok?'✅':'❌'}</td><td>${r.msg}</td></tr>`).join('');
@@ -435,18 +518,28 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
   res.send(renderShell('Importado', body));
 });
 
-// ====== Player (exige matrícula no curso do vídeo) ======
+// ====== Player (checa validade do curso e da matrícula) ======
 app.get('/aula/:id', authRequired, (req,res)=>{
   const videoId = parseInt(req.params.id,10);
-  db.get(`SELECT v.id, v.title, v.r2_key, v.course_id, c.name as course_name
+  db.get(`SELECT v.id, v.title, v.r2_key, v.course_id, c.name as course_name, c.expires_at
           FROM videos v JOIN courses c ON c.id = v.course_id
           WHERE v.id=?`, [videoId], (err, v)=>{
     if(err||!v) {
       return res.status(404).send(renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`));
     }
-    db.get('SELECT 1 FROM course_members WHERE user_id=? AND course_id=?',[req.user.id, v.course_id], (e,m)=>{
+    // validade do curso
+    if (v.expires_at && new Date(v.expires_at) <= new Date()){
+      return res.status(403).send(
+        renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">"${v.course_name}" expirou em <code>${v.expires_at}</code>.</p><a href="/aulas">Voltar</a></div>`)
+      );
+    }
+    // matrícula + validade da matrícula
+    db.get('SELECT expires_at FROM course_members WHERE user_id=? AND course_id=?',[req.user.id, v.course_id], (e,m)=>{
       if(e || !m){
-        return res.status(403).send(renderShell('Acesso negado', `<div class="card"><h1>Você não está matriculado em "${v.course_name}"</h1><p class="mut">Peça a inclusão ou use outro curso.</p></div>`));
+        return res.status(403).send(renderShell('Acesso negado', `<div class="card"><h1>Você não está matriculado em "${v.course_name}"</h1></div>`));
+      }
+      if (m.expires_at && new Date(m.expires_at) <= new Date()){
+        return res.status(403).send(renderShell('Matrícula expirada', `<div class="card"><h1>Matrícula expirada</h1><p class="mut">Seu acesso a "${v.course_name}" expirou em <code>${m.expires_at}</code>.</p><a href="/aulas">Voltar</a></div>`));
       }
 
       const signedUrl = generateSignedUrlForKey(v.r2_key);
@@ -491,7 +584,7 @@ app.get('/aula/:id', authRequired, (req,res)=>{
   });
 });
 
-// ====== Relatório CSV por vídeo (admin) ======
+// ====== Relatório CSV por vídeo (admin) — vírgulas no nome tratadas ======
 app.get('/admin/relatorio/:videoId.csv', adminRequired, (req,res)=>{
   const { videoId } = req.params;
   const sql = `
@@ -505,6 +598,7 @@ app.get('/admin/relatorio/:videoId.csv', adminRequired, (req,res)=>{
     if(err) return res.status(500).send('erro');
     res.setHeader('Content-Type','text/csv; charset=utf-8');
     const header = 'full_name,email,session,type,video_time,client_ts\n';
+    // substitui vírgulas do nome por espaço para não quebrar CSV
     const body = rows.map(r=>`${(r.full_name||'').replace(/,/g,' ')},${r.email},${r.session},${r.type},${r.video_time},${r.client_ts}`).join('\n');
     res.send(header+body);
   });
@@ -531,7 +625,7 @@ app.post('/api/login', (req,res)=>{
   });
 });
 
-// rastreamento
+// rastreamento (play/pause/progress/ended)
 app.post('/track',(req,res)=>{
   const { sessionId, type, videoTime, clientTs } = req.body||{};
   if(!sessionId||!type) return res.status(400).end();

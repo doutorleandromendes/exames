@@ -1,6 +1,6 @@
 // Aula Tracker — Postgres edition (Render PG)
-// Features: multi-cursos + validade por matrícula, import CSV, login com cookie, admin via ADMIN_SECRET,
-// player com R2 SigV4 (24h), relatório CSV, migrações automáticas de schema.
+// Features: multi-cursos + validade por matrícula, import CSV (; , \t ou colar por colunas),
+// login com cookie, admin via ADMIN_SECRET, player com R2 SigV4 (24h), relatório CSV, migrações automáticas.
 
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -57,6 +57,7 @@ function renderShell(title, body) {
       table{width:100%;border-collapse:collapse} th,td{padding:8px;border-bottom:1px solid #2a2f39;text-align:left}
       .video{position:relative;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden}
       .wm{position:absolute;right:12px;bottom:12px;opacity:.65;background:rgba(0,0,0,.35);padding:6px 10px;border-radius:10px;font-size:12px}
+      code{background:#0f1116;border:1px solid #2a2f39;border-radius:8px;padding:0 6px}
     </style>
   </head>
   <body><div class="wrap">${body}</div></body>
@@ -68,13 +69,15 @@ const adminRequired = (req,res,next)=>{ if(!ADMIN_SECRET) return res.status(500)
 const authRequired = async (req,res,next)=>{
   const uid = req.cookies?.uid;
   if(!uid) return res.redirect('/');
-  const { rows } = await pool.query('SELECT id,email,full_name,expires_at FROM users WHERE id=$1',[uid]);
-  const user = rows[0];
-  if(!user) return res.redirect('/');
-  const exp = parseISO(user.expires_at);
-  if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-  req.user = user;
-  next();
+  try{
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at FROM users WHERE id=$1',[uid]);
+    const user = rows[0];
+    if(!user) return res.redirect('/');
+    const exp = parseISO(user.expires_at);
+    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+    req.user = user;
+    next();
+  }catch{ return res.redirect('/'); }
 };
 
 // ====== MIGRAÇÕES ======
@@ -359,46 +362,143 @@ app.post('/admin/videos', adminRequired, async (req,res)=>{
   res.redirect('/aulas');
 });
 
-// ====== Admin: import CSV ======
+// ====== Admin: import CSV (robusto ; , \t + colar por colunas) ======
 app.get('/admin/import', adminRequired, (req,res)=>{
   const body = `
     <div class="card">
-      <h1>Importar alunos (CSV)</h1>
-      <p class="mut">Formato: <code>full_name,email,password,course_slug,user_expires_at,member_expires_at</code></p>
-      <form method="POST" action="/admin/import" class="mt2">
-        <label>CSV</label><textarea name="csv" rows="12" style="width:100%;font-family:monospace"></textarea>
-        <button class="mt">Importar</button>
+      <h1>Importar alunos</h1>
+      <p class="mut">Formato: <code>full_name;email;password;course_slug;user_expires_at;member_expires_at</code> (Excel BR costuma exportar com ponto-e-vírgula).</p>
+
+      <h2 class="mt2">Opção A — Colar CSV</h2>
+      <form id="csvForm" method="POST" action="/admin/import" class="mt2">
+        <label>Delimitador</label>
+        <select name="delimiter">
+          <option value="auto">Auto (tenta detectar)</option>
+          <option value=";">Ponto-e-vírgula (;)</option>
+          <option value=",">Vírgula (,)</option>
+          <option value="tab">Tab (\\t)</option>
+        </select>
+        <label class="mt">CSV</label>
+        <textarea name="csv" rows="12" style="width:100%;font-family:monospace" placeholder="Cole aqui o CSV exportado do Excel"></textarea>
+        <button class="mt">Importar CSV</button>
       </form>
-    </div>`;
+
+      <h2 class="mt2">Opção B — Colar por colunas</h2>
+      <p class="mut">Cole cada coluna da planilha em sua caixa (uma linha por aluno). Depois clique em “Montar &amp; Importar”.</p>
+      <form id="colsForm" class="mt2" onsubmit="return false;">
+        <div class="row">
+          <div>
+            <label>full_name</label><textarea id="col_full_name" rows="6" style="width:100%;font-family:monospace"></textarea>
+            <label class="mt">password</label><textarea id="col_password" rows="6" style="width:100%;font-family:monospace"></textarea>
+            <label class="mt">user_expires_at</label><textarea id="col_user_expires_at" rows="6" style="width:100%;font-family:monospace" placeholder="ex: 2025-12-20T23:59:59-03:00"></textarea>
+          </div>
+          <div>
+            <label>email</label><textarea id="col_email" rows="6" style="width:100%;font-family:monospace"></textarea>
+            <label class="mt">course_slug</label><textarea id="col_course_slug" rows="6" style="width:100%;font-family:monospace" placeholder="ex: infecto, mbe, dermato"></textarea>
+            <label class="mt">member_expires_at</label><textarea id="col_member_expires_at" rows="6" style="width:100%;font-family:monospace"></textarea>
+          </div>
+        </div>
+        <div class="mt">
+          <button id="btnBuild">Montar &amp; Importar</button>
+        </div>
+      </form>
+    </div>
+    <script>
+      function splitLines(s){ return (s||'').replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n').split(/\\n/); }
+      function csvEscape(val, delim){
+        if(val==null) val='';
+        val = String(val);
+        const mustQuote = /["\\n\\r]/.test(val) || val.includes(delim);
+        return mustQuote ? '"' + val.replace(/"/g,'""') + '"' : val;
+      }
+      document.getElementById('btnBuild').addEventListener('click', ()=>{
+        const delim = ';'; // padrão BR
+        const cols = {
+          full_name: splitLines(document.getElementById('col_full_name').value),
+          email: splitLines(document.getElementById('col_email').value),
+          password: splitLines(document.getElementById('col_password').value),
+          course_slug: splitLines(document.getElementById('col_course_slug').value),
+          user_expires_at: splitLines(document.getElementById('col_user_expires_at').value),
+          member_expires_at: splitLines(document.getElementById('col_member_expires_at').value)
+        };
+        const maxRows = Math.max(
+          cols.full_name.length, cols.email.length, cols.password.length,
+          cols.course_slug.length, cols.user_expires_at.length, cols.member_expires_at.length
+        );
+        const lines = [];
+        for(let i=0;i<maxRows;i++){
+          const row = [
+            csvEscape(cols.full_name[i]||'', delim),
+            csvEscape(cols.email[i]||'', delim),
+            csvEscape(cols.password[i]||'', delim),
+            csvEscape(cols.course_slug[i]||'', delim),
+            csvEscape(cols.user_expires_at[i]||'', delim),
+            csvEscape(cols.member_expires_at[i]||'', delim)
+          ].join(delim);
+          lines.push(row);
+        }
+        // posta para a mesma rota de import
+        const form = document.getElementById('csvForm');
+        form.querySelector('select[name="delimiter"]').value = ';';
+        form.querySelector('textarea[name="csv"]').value = lines.join('\\n');
+        form.submit();
+      });
+    </script>`;
   res.send(renderShell('Importar', body));
 });
-app.post('/admin/import', adminRequired, async (req,res)=>{
-  const csv = (req.body?.csv || '').trim();
-  if(!csv) return res.status(400).send('CSV vazio');
-  const lines = csv.split(/\r?\n/).filter(Boolean);
-  const results = [];
 
-  for (const line of lines){
-    const cols=[]; let cur='', inQ=false;
+app.post('/admin/import', adminRequired, async (req,res)=>{
+  let csv = (req.body?.csv || '').trim();
+  let delimiter = (req.body?.delimiter || 'auto');
+
+  if(!csv) return res.status(400).send('CSV vazio');
+
+  // auto-detecção simples
+  if (delimiter === 'auto') {
+    const sample = csv.split(/\r?\n/).slice(0,10).join('\n');
+    if (sample.includes(';')) delimiter = ';'
+    else if (sample.includes(',')) delimiter = ','
+    else delimiter = 'tab';
+  }
+  const delimChar = delimiter === 'tab' ? '\t' : delimiter;
+
+  function parseLine(line, d){
+    const out=[]; let cur=''; let inQ=false;
     for(let i=0;i<line.length;i++){
       const ch=line[i];
-      if(ch === '"'){ inQ=!inQ; continue; }
-      if(ch === ',' && !inQ){ cols.push(cur.trim()); cur=''; continue; }
+      if(ch === '"'){
+        if(inQ && line[i+1] === '"'){ cur+='"'; i++; continue; }
+        inQ = !inQ; continue;
+      }
+      if(ch === d && !inQ){ out.push(cur); cur=''; continue; }
       cur += ch;
     }
-    cols.push(cur.trim());
+    out.push(cur);
+    return out.map(s=>s.trim());
+  }
 
+  const rows = csv.split(/\r?\n/).filter(Boolean).map(line => parseLine(line, delimChar));
+  const results = [];
+
+  for (const cols of rows){
     let [full_name,email,password,course_slug,user_expires_at,member_expires_at] = cols;
-    if(!full_name || !email || !course_slug){ results.push({email,ok:false,msg:'faltam campos'}); continue; }
+
+    if(!full_name || !email || !course_slug){
+      results.push({email: email||'', ok:false, msg:'faltam campos (full_name, email, course_slug)'});
+      continue;
+    }
 
     email = String(email).trim().toLowerCase();
-    if(ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)){ results.push({email,ok:false,msg:'domínio inválido'}); continue; }
+    if(ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)){
+      results.push({email, ok:false, msg:'domínio inválido'}); continue;
+    }
     password = (password && password.length>=3) ? password : ((email.split('@')[0]||'aluno') + '123');
+
     const userExpISO = normalizeDateStr(user_expires_at) || SEMESTER_END || null;
     const memExpISO  = normalizeDateStr(member_expires_at) || null;
 
     const c = await pool.query('SELECT id,slug FROM courses WHERE slug=$1',[course_slug]);
-    if(!c.rows[0]){ results.push({email,ok:false,msg:`curso não encontrado: ${course_slug}`}); continue; }
+    if(!c.rows[0]){ results.push({email, ok:false, msg:`curso não encontrado: ${course_slug}`}); continue; }
     const courseId = c.rows[0].id;
 
     const hash = await bcrypt.hash(password, 10);
@@ -426,7 +526,13 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
   }
 
   const htmlRows = results.map(r=>`<tr><td>${r.email||'-'}</td><td>${r.ok?'✅':'❌'}</td><td>${r.msg}</td></tr>`).join('');
-  res.send(renderShell('Importado', `<div class="card"><h1>Importação</h1><table><thead><tr><th>Email</th><th>OK</th><th>Mensagem</th></tr></thead><tbody>${htmlRows}</tbody></table><p class="mt"><a href="/aulas">Aulas</a></p></div>`));
+  res.send(renderShell('Importação', `
+    <div class="card">
+      <h1>Importação concluída</h1>
+      <p class="mut">Delimitador usado: <code>${delimiter}</code></p>
+      <table><thead><tr><th>Email</th><th>OK</th><th>Mensagem</th></tr></thead><tbody>${htmlRows}</tbody></table>
+      <p class="mt"><a href="/aulas">Aulas</a> · <a href="/admin/import">Voltar</a></p>
+    </div>`));
 });
 
 // ====== Player ======
@@ -520,58 +626,12 @@ app.post('/api/login', async (req,res)=>{
   res.json({ok:true});
 });
 
-// track
 app.post('/track', async (req,res)=>{
   const { sessionId, type, videoTime, clientTs } = req.body||{};
   if(!sessionId||!type) return res.status(400).end();
   await pool.query('INSERT INTO events(session_id,type,video_time,client_ts) VALUES($1,$2,$3,$4)',
     [sessionId, type, Math.max(0,parseInt(videoTime||0,10)), clientTs || new Date().toISOString()]);
   res.status(204).end();
-});
-
-// ====== BOOTSTRAP (temporário) ======
-app.get('/bootstrap', (req,res)=>{
-  if (!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado');
-  const html = `
-  <div style="font-family:system-ui;max-width:720px;margin:40px auto">
-    <h1>Bootstrap</h1>
-    <p class="mut">Use só para criar o primeiro usuário. Depois remova esta rota.</p>
-    <h2>Criar usuário</h2>
-    <form method="POST" action="/bootstrap/create" style="border:1px solid #2a2f39;padding:12px;border-radius:8px">
-      <p><label>ADMIN_SECRET</label><br><input name="admin_secret" required></p>
-      <p><label>Nome completo</label><br><input name="full_name" required></p>
-      <p><label>Email</label><br><input name="email" type="email" required></p>
-      <p><label>Senha</label><br><input name="password" type="password" required></p>
-      <button>Criar usuário</button>
-    </form>
-    <h2 style="margin-top:24px">Entrar como admin</h2>
-    <form method="POST" action="/bootstrap/login-admin" style="border:1px solid #2a2f39;padding:12px;border-radius:8px">
-      <p><label>ADMIN_SECRET</label><br><input name="admin_secret" required></p>
-      <p><label>Email do usuário</label><br><input name="email" type="email" required></p>
-      <button>Logar e ativar admin</button>
-    </form>
-  </div>`;
-  res.send(html);
-});
-app.post('/bootstrap/create', async (req,res)=>{
-  const { admin_secret, full_name, email, password } = req.body || {};
-  if (admin_secret !== ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
-  const e = String(email||'').trim().toLowerCase();
-  const hash = await bcrypt.hash(String(password||''), 10);
-  try{
-    await pool.query('INSERT INTO users(full_name,email,password_hash) VALUES($1,$2,$3)', [full_name||'', e, hash]);
-    res.send('<p>Usuário criado. <a href="/bootstrap">Voltar</a> | <a href="/">Ir ao login</a></p>');
-  }catch(err){ res.status(400).send('Falha ao criar: '+err.message); }
-});
-app.post('/bootstrap/login-admin', async (req,res)=>{
-  const { admin_secret, email } = req.body || {};
-  if (admin_secret !== ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
-  const e = String(email||'').trim().toLowerCase();
-  const { rows } = await pool.query('SELECT id FROM users WHERE email=$1',[e]);
-  if(!rows[0]) return res.status(404).send('Usuário não encontrado');
-  res.cookie('uid', rows[0].id, { httpOnly:true, sameSite:'lax', secure:true, maxAge: 1000*60*60*24*30 });
-  res.cookie('adm', '1', { httpOnly:true, sameSite:'lax', secure:true, maxAge: 1000*60*60*24 });
-  res.redirect('/aulas');
 });
 
 // ====== start ======

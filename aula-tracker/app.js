@@ -322,6 +322,45 @@ app.get('/debug/signed/:id', authRequired, (req,res)=>{
   });
 });
 
+// [DEBUG] Lista usuários (somente admin)
+app.get('/admin/debug/users', adminRequired, (req,res)=>{
+  db.all('SELECT id, full_name, email, substr(password_hash,1,4) as ph4, length(password_hash) as phlen FROM users ORDER BY id DESC', [], (e, rows)=>{
+    if(e) return res.status(500).send('erro');
+    const lis = (rows||[]).map(r => `<tr><td>${r.id}</td><td>${r.full_name||''}</td><td>${r.email}</td><td>${r.ph4||'-'}</td><td>${r.phlen||0}</td></tr>`).join('');
+    res.send(`<div style="font-family:system-ui;padding:20px">
+      <h1>Users</h1>
+      <table border="1" cellpadding="6"><tr><th>ID</th><th>Nome</th><th>Email</th><th>hash prefixo</th><th>len</th></tr>${lis||''}</table>
+      <p>Se a lista vier vazia, seu banco está vazio.</p>
+    </div>`);
+  });
+});
+
+// [DEBUG] Cria usuário rapidamente (somente admin) — para testar login
+app.get('/admin/debug/make-user', adminRequired, (req,res)=>{
+  const html = `<div style="font-family:system-ui;padding:20px">
+    <h1>Criar usuário de teste</h1>
+    <form method="POST" action="/admin/debug/make-user">
+      <p><label>Nome</label><input name="full_name" required></p>
+      <p><label>Email</label><input name="email" required></p>
+      <p><label>Senha</label><input name="password" required></p>
+      <button>Criar</button>
+    </form>
+  </div>`;
+  res.send(html);
+});
+app.post('/admin/debug/make-user', adminRequired, async (req,res)=>{
+  const { full_name, email, password } = req.body||{};
+  try{
+    const e = (email||'').trim().toLowerCase();
+    const hash = await bcrypt.hash(password, 10);
+    db.run('INSERT INTO users(full_name,email,password_hash) VALUES(?,?,?)',[full_name, e, hash], (err)=>{
+      if(err) return res.status(400).send('Falha ao criar: ' + err.message);
+      res.send('<p>OK. Tente fazer login com esse usuário.</p><p><a href="/">Login</a></p>');
+    });
+  }catch(err){ res.status(500).send('Erro: '+err.message); }
+});
+
+
 // ====== Admin: cursos ======
 app.get('/admin/cursos', adminRequired, (req,res)=>{
   db.all('SELECT id,name,slug,enroll_code,expires_at FROM courses ORDER BY id DESC', (e,rows)=>{

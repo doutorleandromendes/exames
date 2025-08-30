@@ -399,6 +399,7 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
         <td>${fmt(c.start_date)||'<span class="mut">—</span>'}</td>
         <td>${fmt(c.expires_at)||'<span class="mut">—</span>'}</td>
         <td><a href="/admin/cursos/${c.id}/edit">editar</a></td>
+        <td><a href="/admin/cursos/${c.id}/clone">Clonar</a><td>
       </tr>`
     ).join('');
     const form = `

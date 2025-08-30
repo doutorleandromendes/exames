@@ -453,7 +453,7 @@
       {
         "sku": "HL-A",
         "nome": "Hanseníase (Lepra) - Antígeno",
-        "estoque": "",
+        "estoque": 10,
         "alerta": 10
       },
       {

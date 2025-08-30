@@ -429,7 +429,7 @@
       {
         "sku": "DSDP",
         "nome": "Dosagem sérica de Procalcitonina",
-        "estoque": "",
+        "estoque": 53,
         "alerta": 5
       },
       {

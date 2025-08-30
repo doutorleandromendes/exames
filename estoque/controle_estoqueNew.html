@@ -150,9 +150,12 @@
     const txt = await r.text();
     if(!r.ok){ showErr('GET '+r.status+' – corpo: '+txt.slice(0,180)); throw new Error('GET '+r.status); }
     let data=null; try{ data = JSON.parse(txt); }catch(e){ showErr('GET OK mas JSON inválido da API. Corpo: '+txt.slice(0,180)); throw e; }
-    const content = atob(String(data.content||'').replace(/\n/g,''));
-    let json=null; try{ json=JSON.parse(content); }catch(_e){ json=null; }
-    return {exists:true, sha:data.sha, json, rawApiPreview: txt.slice(0,200) };
+    const b64   = String(data.content || '').replace(/\n/g, '');
+const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const text  = new TextDecoder('utf-8').decode(bytes);
+let json = null;
+try { json = JSON.parse(text); } catch (_e) { json = null; }
+return { exists: true, sha: data.sha, json, rawApiPreview: txt.slice(0,200) };
   }
   async function githubPutJSON(payload){
   if (!token) throw new Error('Token não configurado. Abra Configurações.');
@@ -301,9 +304,11 @@
     if (r.status === 404) return { exists:false };
     const txt = await r.text();
     if(!r.ok) throw new Error('GET '+r.status+' – '+txt.slice(0,200));
-    const data = JSON.parse(txt);
-    const content = atob(String(data.content||'').replace(/\n/g,''));
-    return { exists:true, sha:data.sha, json: JSON.parse(content) };
+    const data  = JSON.parse(txt);
+const b64   = String(data.content || '').replace(/\n/g, '');
+const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const text  = new TextDecoder('utf-8').decode(bytes);
+return { exists: true, sha: data.sha, json: JSON.parse(text) };
   }
 
   async function onSave(){

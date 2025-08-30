@@ -358,7 +358,7 @@ app.get('/aulas', authRequired, async (req,res)=>{
     }).join('');
 
     const actions = isAdmin(req)
-      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/videos/availability">Disponibilidade de Aulas</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
+      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/videos/availability">Disponibilidade de Aulas</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/relatorios">Relatórios</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
       : `<a href="/logout">Sair</a>`;
 
     const body = `

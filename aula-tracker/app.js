@@ -1,6 +1,10 @@
 // Aula Tracker — Postgres + Cloudflare R2 (SigV4)
 // Admin: gerencia cursos, aulas, alunos/matrículas; vê/edita tudo; relatórios web + CSV ordenados por nome
 // Player: URL assinada SigV4 (R2), sem download, watermark e tracking de progresso
+// Ajustes nesta versão:
+// - Disponibilidade: courses.start_date e videos.available_from
+// - Tela admin para editar disponibilidade das aulas (/admin/videos/availability)
+// - Filtro em /aulas (aluno) respeitando as datas
 
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -68,6 +72,7 @@ function renderShell(title, body) {
 const parseISO = s => (s ? new Date(s) : null);
 const safe = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmt = d => d ? new Date(d).toLocaleString('pt-BR') : '';
+const fmtDTLocal = d => d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
 
 // ====== Auth helpers ======
 const isAdmin = req => req.cookies?.adm === '1';
@@ -138,6 +143,10 @@ async function migrate(){
       video_time INTEGER,
       client_ts TIMESTAMPTZ
     );`);
+
+  // Novas colunas de disponibilidade (idempotentes)
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ`);
 }
 migrate().catch(e=>console.error('migration error', e));
 
@@ -184,39 +193,6 @@ function generateSignedUrlForKey(key) {
   return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
 
-// ==== Import helpers (CSV ; e colar-colunas) ====
-
-// CSV simples com separador ';' (Excel BR). Sem aspas/escape avançado de propósito.
-function parseCSVSemicolon(text) {
-  const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  if (!lines.length) return { header: [], rows: [] };
-  const header = lines[0].split(';').map(s => s.trim());
-  const rows = lines.slice(1).map(line => {
-    const cols = line.split(';').map(s => s.trim());
-    const obj = {};
-    header.forEach((h, i) => obj[h] = (cols[i] ?? '').trim());
-    return obj;
-  });
-  return { header, rows };
-}
-
-// Monta linhas a partir das "colunas coladas" (cada textarea = uma coluna, linhas por quebra de linha)
-// Retorna um array de objetos com as chaves do schema que usaremos no import.
-function buildRowsFromPastedColumns(cols) {
-  const keys = ['full_name', 'email', 'password', 'course_slug', 'user_expires_at', 'member_expires_at', 'is_admin'];
-  const arrays = keys.map(k => String(cols[k] || '').split(/\r?\n/));
-  const maxLen = Math.max(...arrays.map(a => a.length));
-  const rows = [];
-  for (let i = 0; i < maxLen; i++) {
-    const r = {};
-    keys.forEach((k, idx) => r[k] = (arrays[idx][i] || '').trim());
-    // ignora linhas totalmente vazias
-    if (Object.values(r).some(v => v)) rows.push(r);
-  }
-  return rows;
-}
-
-
 // ====== Utils ======
 function normalizeDateStr(s) {
   if (!s) return null;
@@ -228,6 +204,7 @@ function normalizeDateStr(s) {
   const d = new Date(s);
   return isFinite(d) ? d.toISOString() : null;
 }
+const fmtDT = (d)=> d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
 
 // ====== Health ======
 app.get('/healthz', (req,res)=> res.status(200).send('ok'));
@@ -274,7 +251,7 @@ app.get('/admin', authRequired, (req,res)=>{
       <label>ADMIN_SECRET</label><input name="secret" type="password" required>
       <button>Entrar no modo admin</button>
     </form>
-    <p class="mut">Após entrar, verá cursos, cadastro de aulas, alunos e importação.</p>
+    <p class="mut">Após entrar, verá cursos, cadastro de aulas, alunos, importação e disponibilidade.</p>
   </div>`;
   res.send(renderShell('Admin', html));
 });
@@ -287,7 +264,7 @@ app.post('/admin', authRequired, (req,res)=>{
 });
 app.get('/admin/logout', authRequired, (req,res)=>{ res.clearCookie('adm'); res.redirect('/aulas'); });
 
-// ====== /aulas — Admin vê tudo; aluno só o que está matriculado ======
+// ====== /aulas — Admin vê tudo; aluno só o que está matriculado e liberado pelas datas ======
 app.get('/aulas', authRequired, async (req,res)=>{
   try{
     const admin = isAdmin(req);
@@ -296,8 +273,8 @@ app.get('/aulas', authRequired, async (req,res)=>{
     let rows = [];
     if (admin) {
       const sqlAdmin = `
-        SELECT v.id, v.title, v.course_id, v.r2_key,
-               c.name AS course_name, c.slug
+        SELECT v.id, v.title, v.course_id, v.r2_key, v.available_from,
+               c.name AS course_name, c.slug, c.start_date
         FROM videos v
         JOIN courses c ON c.id = v.course_id
         ${slug ? 'WHERE c.slug = $1' : ''}
@@ -306,20 +283,25 @@ app.get('/aulas', authRequired, async (req,res)=>{
       ({ rows } = await pool.query(sqlAdmin, paramsAdmin));
     } else {
       const sqlAluno = `
-        SELECT v.id, v.title, v.course_id, c.name AS course_name, c.slug
+        SELECT v.id, v.title, v.course_id, v.available_from, c.name AS course_name, c.slug, c.start_date
         FROM videos v
         JOIN courses c ON c.id = v.course_id
         JOIN course_members cm ON cm.course_id = v.course_id AND cm.user_id = $1
         WHERE ${slug ? 'c.slug = $2 AND ' : ''} 
               (c.expires_at IS NULL OR c.expires_at > now())
           AND (cm.expires_at IS NULL OR cm.expires_at > now())
+          AND (c.start_date IS NULL OR c.start_date <= now())
+          AND (v.available_from IS NULL OR v.available_from <= now())
         ORDER BY v.id DESC`;
       const paramsAluno = slug ? [req.user.id, slug] : [req.user.id];
       ({ rows } = await pool.query(sqlAluno, paramsAluno));
     }
 
     const items = rows.map(v=>{
-      const base = `<li><strong>[${safe(v.course_name)}]</strong> <a href="/aula/${v.id}">${safe(v.title)}</a> — <span class="mut">/aula/${v.id}</span>`;
+      const tag = (!admin)
+        ? ''
+        : ` <span class="mut">[curso desde: ${fmt(v.start_date)||'—'} · aula desde: ${fmt(v.available_from)||'—'}]</span>`;
+      const base = `<li><strong>[${safe(v.course_name)}]</strong> <a href="/aula/${v.id}">${safe(v.title)}</a>${tag} — <span class="mut">/aula/${v.id}</span>`;
       const extra = isAdmin(req)
         ? ` — <a href="/admin/relatorio/${v.id}">relatório (web)</a> · <a href="/admin/relatorio/${v.id}.csv">CSV</a> · <a href="/admin/videos/${v.id}/edit">editar</a>`
         : '';
@@ -327,7 +309,7 @@ app.get('/aulas', authRequired, async (req,res)=>{
     }).join('');
 
     const actions = isAdmin(req)
-      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
+      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/videos/availability">Disponibilidade de Aulas</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
       : `<a href="/logout">Sair</a>`;
 
     const body = `
@@ -358,13 +340,14 @@ app.get('/debug/signed/:id', authRequired, async (req,res)=>{
 // ====== Admin: Cursos (listar/criar/editar) ======
 app.get('/admin/cursos', adminRequired, async (req,res)=>{
   try{
-    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at FROM courses ORDER BY name ASC');
+    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at,start_date FROM courses ORDER BY name ASC');
     const list = rows.map(c=>
       `<tr>
         <td>${c.id}</td>
         <td>${safe(c.name)}</td>
         <td><code>${safe(c.slug)}</code></td>
         <td>${safe(c.enroll_code)||'<span class="mut">—</span>'}</td>
+        <td>${fmt(c.start_date)||'<span class="mut">—</span>'}</td>
         <td>${fmt(c.expires_at)||'<span class="mut">—</span>'}</td>
         <td><a href="/admin/cursos/${c.id}/edit">editar</a></td>
       </tr>`
@@ -372,13 +355,14 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
     const form = `
       <div class="card">
         <h1>Cursos</h1>
-        <table class="mt2"><thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Código</th><th>Validade</th><th></th></tr></thead>
+        <table class="mt2"><thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Disponível desde</th><th>Validade</th><th></th></tr></thead>
         <tbody>${list || '<tr><td colspan="6" class="mut">Nenhum curso.</td></tr>'}</tbody></table>
         <h2 class="mt2">Novo curso</h2>
         <form method="POST" action="/admin/cursos" class="mt2">
           <label>Nome</label><input name="name" required>
           <label>Slug</label><input name="slug" required>
           <label>Código (opcional)</label><input name="enroll_code">
+          <label>Disponível desde (opcional)</label><input name="start_date" type="datetime-local">
           <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
           <button class="mt">Criar</button>
         </form>
@@ -391,10 +375,11 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
 });
 app.post('/admin/cursos', adminRequired, async (req,res)=>{
   try{
-    let { name, slug, enroll_code, expires_at } = req.body || {};
+    let { name, slug, enroll_code, start_date, expires_at } = req.body || {};
     if(!name || !slug) return res.status(400).send('Dados obrigatórios');
     if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
-    await pool.query('INSERT INTO courses(name,slug,enroll_code,expires_at) VALUES($1,$2,$3,$4)', [name, slug, enroll_code||null, expires_at||null]);
+    if (start_date && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(start_date)) start_date = `${start_date}:00Z`;
+    await pool.query('INSERT INTO courses(name,slug,enroll_code,start_date,expires_at) VALUES($1,$2,$3,$4,$5)', [name, slug, enroll_code||null, start_date||null, expires_at||null]);
     res.redirect('/admin/cursos');
   }catch(err){
     console.error('ADMIN COURSES CREATE ERROR', err);
@@ -404,7 +389,7 @@ app.post('/admin/cursos', adminRequired, async (req,res)=>{
 app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
-    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at FROM courses WHERE id=$1',[id]);
+    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,start_date,expires_at FROM courses WHERE id=$1',[id]);
     const c = rows[0];
     if(!c) return res.status(404).send(renderShell('Editar Curso', `<div class="card"><h1>Curso não encontrado</h1><a href="/admin/cursos">Voltar</a></div>`));
     const body = `
@@ -414,7 +399,8 @@ app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
           <label>Nome</label><input name="name" value="${safe(c.name).replace(/"/g,'&quot;')}" required>
           <label>Slug</label><input name="slug" value="${safe(c.slug)}" required>
           <label>Código (opcional)</label><input name="enroll_code" value="${safe(c.enroll_code||'')}">
-          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
+          <label>Disponível desde (opcional)</label><input name="start_date" type="datetime-local" value="${fmtDTLocal(c.start_date)||''}">
+          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local" value="${fmtDTLocal(c.expires_at)||''}">
           <button class="mt">Salvar</button>
           <a href="/admin/cursos" style="margin-left:12px">Cancelar</a>
         </form>
@@ -428,10 +414,10 @@ app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
 app.post('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
-    let { name, slug, enroll_code, expires_at } = req.body || {};
+    let { name, slug, enroll_code, start_date, expires_at } = req.body || {};
     if(!name || !slug) return res.status(400).send('Dados obrigatórios');
-    if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
-    await pool.query('UPDATE courses SET name=$1, slug=$2, enroll_code=$3, expires_at=$4 WHERE id=$5', [name, slug, enroll_code||null, expires_at||null, id]);
+    await pool.query('UPDATE courses SET name=$1, slug=$2, enroll_code=$3, start_date=$4, expires_at=$5 WHERE id=$6',
+      [name, slug, enroll_code||null, normalizeDateStr(start_date)||null, normalizeDateStr(expires_at)||null, id]);
     res.redirect('/admin/cursos');
   }catch(err){
     console.error('ADMIN COURSE EDIT POST ERROR', err);
@@ -446,7 +432,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
     const options = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
 
     const { rows:videos } = await pool.query(`
-      SELECT v.id, v.title, v.r2_key, v.duration_seconds, c.name AS course_name, c.slug
+      SELECT v.id, v.title, v.r2_key, v.duration_seconds, v.available_from, c.name AS course_name, c.slug
       FROM videos v
       JOIN courses c ON c.id = v.course_id
       ORDER BY v.id DESC`);
@@ -457,6 +443,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
         <td><code>${safe(v.r2_key)}</code></td>
         <td>${v.duration_seconds ?? '-'}</td>
         <td>[${safe(v.slug)}] ${safe(v.course_name)}</td>
+        <td>${fmt(v.available_from) || '<span class="mut">—</span>'}</td>
         <td>
           <a href="/aula/${v.id}" target="_blank">ver</a> ·
           <a href="/admin/relatorio/${v.id}">relatório (web)</a> ·
@@ -473,8 +460,8 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
         </div>
         <h2 class="mt2">Aulas cadastradas</h2>
         <table>
-          <thead><tr><th>ID</th><th>Título</th><th>R2 key</th><th>Duração (s)</th><th>Curso</th><th>Ações</th></tr></thead>
-          <tbody>${list || '<tr><td colspan="6" class="mut">Nenhuma aula.</td></tr>'}</tbody>
+          <thead><tr><th>ID</th><th>Título</th><th>R2 key</th><th>Duração (s)</th><th>Curso</th><th>Disponível a partir</th><th>Ações</th></tr></thead>
+          <tbody>${list || '<tr><td colspan="7" class="mut">Nenhuma aula.</td></tr>'}</tbody>
         </table>
 
         <h2 class="mt2">Cadastrar nova aula</h2>
@@ -483,6 +470,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
           <label>Título</label><input name="title" required>
           <label>R2 Key</label><input name="r2_key" required placeholder="pasta/arquivo.mp4">
           <label>Duração (segundos) — opcional</label><input name="duration_seconds" type="number" min="1" placeholder="ex.: 4840">
+          <label>Disponível a partir de (opcional)</label><input name="available_from" type="datetime-local">
           <button class="mt">Salvar</button>
         </form>
       </div>`;
@@ -494,12 +482,12 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
 });
 app.post('/admin/videos', adminRequired, async (req,res)=>{
   try{
-    const { title, r2_key, course_id, duration_seconds } = req.body || {};
+    const { title, r2_key, course_id, duration_seconds, available_from } = req.body || {};
     if(!title || !r2_key || !course_id) return res.status(400).send('Dados obrigatórios');
     const dur = duration_seconds ? Math.max(0, parseInt(duration_seconds, 10)) : null;
     await pool.query(
-      'INSERT INTO videos(title,r2_key,course_id,duration_seconds) VALUES($1,$2,$3,$4)',
-      [title, r2_key, course_id, dur]
+      'INSERT INTO videos(title,r2_key,course_id,duration_seconds,available_from) VALUES($1,$2,$3,$4,$5)',
+      [title, r2_key, course_id, dur, normalizeDateStr(available_from)||null]
     );
     res.redirect('/admin/videos');
   }catch(err){
@@ -511,7 +499,7 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
     const { rows:vrows } = await pool.query(`
-      SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, c.slug AS course_slug
+      SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, v.available_from, c.slug AS course_slug
       FROM videos v JOIN courses c ON c.id = v.course_id
       WHERE v.id=$1`, [id]);
     const v = vrows[0];
@@ -529,6 +517,8 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
           <label>R2 Key</label><input name="r2_key" value="${safe(v.r2_key).replace(/"/g,'&quot;')}" required>
           <label>Duração (segundos) — opcional</label>
           <input name="duration_seconds" type="number" min="1" value="${v.duration_seconds ?? ''}">
+          <label>Disponível a partir de (opcional)</label>
+          <input name="available_from" type="datetime-local" value="${fmtDTLocal(v.available_from)||''}">
           <div class="mt">
             <button>Salvar alterações</button>
             <a href="/admin/videos" style="margin-left:12px">Cancelar</a>
@@ -548,12 +538,12 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
 app.post('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
-    const { title, r2_key, course_id, duration_seconds } = req.body || {};
+    const { title, r2_key, course_id, duration_seconds, available_from } = req.body || {};
     if(!title || !r2_key || !course_id) return res.status(400).send('Dados obrigatórios');
     const dur = duration_seconds ? Math.max(0, parseInt(duration_seconds, 10)) : null;
     await pool.query(
-      'UPDATE videos SET title=$1, r2_key=$2, course_id=$3, duration_seconds=$4 WHERE id=$5',
-      [title, r2_key, course_id, dur, id]
+      'UPDATE videos SET title=$1, r2_key=$2, course_id=$3, duration_seconds=$4, available_from=$5 WHERE id=$6',
+      [title, r2_key, course_id, dur, normalizeDateStr(available_from)||null, id]
     );
     res.redirect('/admin/videos');
   }catch(err){
@@ -569,6 +559,61 @@ app.post('/admin/videos/:id/delete', adminRequired, async (req,res)=>{
   }catch(err){
     console.error('ADMIN VIDEO DELETE ERROR', err);
     res.status(500).send('Falha ao deletar');
+  }
+});
+
+// ====== Admin: Disponibilidade de Aulas (edição em massa) ======
+app.get('/admin/videos/availability', authRequired, adminRequired, async (req,res)=>{
+  try{
+    const { rows } = await pool.query(`
+      SELECT v.id, v.title, v.available_from, c.name AS course_name, c.slug
+      FROM videos v LEFT JOIN courses c ON c.id = v.course_id
+      ORDER BY c.name, v.title
+    `);
+    const lines = rows.map(v=>{
+      const val = v.available_from ? fmtDTLocal(v.available_from) : '';
+      return `<tr>
+        <td>${v.id}</td>
+        <td>[${safe(v.slug||'–')}] ${safe(v.course_name||'Sem curso')}</td>
+        <td>${safe(v.title)}</td>
+        <td><input type="datetime-local" name="avail_${v.id}" value="${val}"></td>
+      </tr>`;
+    }).join('');
+    const html = `
+      <div class="card">
+        <div class="right" style="justify-content:space-between;align-items:center">
+          <h1>Disponibilidade de Aulas</h1>
+          <div><a href="/aulas">Voltar</a></div>
+        </div>
+        <form method="POST" action="/admin/videos/availability">
+          <table>
+            <thead><tr><th>ID</th><th>Curso</th><th>Título</th><th>Disponível a partir de</th></tr></thead>
+            <tbody>${lines || '<tr><td colspan="4" class="mut">Nenhuma aula.</td></tr>'}</tbody>
+          </table>
+          <button class="mt">Salvar alterações</button>
+        </form>
+        <p class="mut mt">Deixe em branco para liberar imediatamente.</p>
+      </div>`;
+    res.send(renderShell('Disponibilidade de Aulas', html));
+  }catch(err){
+    console.error('AVAILABILITY GET ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
+  }
+});
+
+app.post('/admin/videos/availability', authRequired, adminRequired, async (req,res)=>{
+  try{
+    const entries = Object.entries(req.body||{}).filter(([k])=>k.startsWith('avail_'));
+    for (const [key, val] of entries){
+      const id = parseInt(key.slice('avail_'.length),10);
+      if (!id) continue;
+      const iso = normalizeDateStr(val);
+      await pool.query('UPDATE videos SET available_from=$1 WHERE id=$2', [iso || null, id]);
+    }
+    res.redirect('/admin/videos/availability');
+  }catch(err){
+    console.error('AVAILABILITY SAVE ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao salvar</h1><p class="mut">${err.message||err}</p></div>`));
   }
 });
 
@@ -783,172 +828,13 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
   }
 });
 
-// ==== Importar alunos: UI (CSV ; OU colar colunas) ====
-app.get('/admin/import', adminRequired, async (req, res) => {
-  const hint = 'Cabeçalho CSV esperado: full_name;email;password;course_slug;user_expires_at;member_expires_at;is_admin';
-  const html = `
-    <div class="card">
-      <div class="right" style="justify-content:space-between">
-        <h1>Importar alunos</h1>
-        <div><a href="/aulas">Voltar</a></div>
-      </div>
-
-      <h2 class="mt2">Opção A — Colar CSV inteiro (com ;)</h2>
-      <p class="mut">${hint}</p>
-      <form method="POST" action="/admin/import" class="mt2">
-        <input type="hidden" name="mode" value="csv">
-        <label>CSV</label>
-        <textarea name="csv" rows="10" placeholder="${hint}"></textarea>
-        <button class="mt">Importar CSV</button>
-      </form>
-
-      <h2 class="mt2">Opção B — Colar colunas separadas</h2>
-      <p class="mut">Cole cada coluna em seu campo; as linhas são separadas por quebras de linha.</p>
-      <form method="POST" action="/admin/import" class="mt2">
-        <input type="hidden" name="mode" value="columns">
-        <div class="row">
-          <div>
-            <label>full_name</label><textarea name="full_name" rows="6" placeholder="João Silva&#10;Maria Souza"></textarea>
-            <label>email</label><textarea name="email" rows="6" placeholder="aluno@ex.com&#10;aluna@ex.com"></textarea>
-            <label>password</label><textarea name="password" rows="6" placeholder="Senha123&#10;Senha456"></textarea>
-            <label>course_slug</label><textarea name="course_slug" rows="6" placeholder="infecto-2025&#10;infecto-2025"></textarea>
-          </div>
-          <div>
-            <label>user_expires_at (opcional)</label><textarea name="user_expires_at" rows="6" placeholder="2025-12-20&#10;2025-12-20"></textarea>
-            <label>member_expires_at (opcional)</label><textarea name="member_expires_at" rows="6" placeholder="2025-12-20&#10;2025-12-20"></textarea>
-            <label>is_admin (0/1, opcional)</label><textarea name="is_admin" rows="6" placeholder="0&#10;0"></textarea>
-          </div>
-        </div>
-        <button class="mt">Importar colunas</button>
-      </form>
-
-      <p class="mut mt">Observações:
-      <br>• Se o usuário já existir, atualizamos nome/validade e senha (se informada).
-      <br>• Matrícula é criada/atualizada no curso indicado (course_slug).
-      <br>• Datas aceitam <code>YYYY-MM-DD</code> (assumimos 23:59:59-03:00) ou <code>YYYY-MM-DDTHH:mm</code>.</p>
-    </div>`;
-  res.send(renderShell('Importar alunos', html));
-});
-
-// ==== Importar alunos: processamento ====
-app.post('/admin/import', adminRequired, async (req, res) => {
-  try {
-    const mode = String(req.body?.mode || '').trim();
-    let rows = [];
-
-    if (mode === 'csv') {
-      const csv = (req.body?.csv || '').trim();
-      if (!csv) return res.status(400).send(renderShell('Erro', `<div class="card"><h1>CSV vazio</h1><a href="/admin/import">Voltar</a></div>`));
-      const { header, rows: rr } = parseCSVSemicolon(csv);
-      const need = ['full_name','email','password','course_slug','user_expires_at','member_expires_at','is_admin'];
-      for (const h of need) if (!header.includes(h)) {
-        return res.status(400).send(renderShell('Erro', `<div class="card"><h1>Cabeçalho inválido</h1><p class="mut">Esperado: ${need.join(';')}</p><a href="/admin/import">Voltar</a></div>`));
-      }
-      rows = rr;
-    } else if (mode === 'columns') {
-      rows = buildRowsFromPastedColumns({
-        full_name: req.body?.full_name,
-        email: req.body?.email,
-        password: req.body?.password,
-        course_slug: req.body?.course_slug,
-        user_expires_at: req.body?.user_expires_at,
-        member_expires_at: req.body?.member_expires_at,
-        is_admin: req.body?.is_admin
-      });
-      if (!rows.length) {
-        return res.status(400).send(renderShell('Erro', `<div class="card"><h1>Nenhuma linha detectada</h1><a href="/admin/import">Voltar</a></div>`));
-      }
-    } else {
-      return res.status(400).send(renderShell('Erro', `<div class="card"><h1>Modo inválido</h1><a href="/admin/import">Voltar</a></div>`));
-    }
-
-    let created = 0, updated = 0, enrolled = 0, skipped = 0, errors = 0;
-
-    for (const r of rows) {
-      const full_name = (r.full_name || '').trim();
-      const emailRaw = (r.email || '').trim();
-      const email = emailRaw.toLowerCase();
-      const password = (r.password || '').trim();
-      const course_slug = (r.course_slug || '').trim();
-      const user_expires_at = normalizeDateStr(r.user_expires_at);
-      const member_expires_at = normalizeDateStr(r.member_expires_at);
-      const is_admin = String(r.is_admin || '').trim() === '1';
-
-      if (!full_name || !email) { skipped++; continue; }
-
-      // upsert user
-      const uSel = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
-      let userId;
-      if (!uSel.rows[0]) {
-        const hash = password ? await bcrypt.hash(password, 10) : await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 10);
-        const ins = await pool.query(
-          'INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
-          [full_name, email, hash, user_expires_at || null]
-        );
-        userId = ins.rows[0].id;
-        created++;
-      } else {
-        userId = uSel.rows[0].id;
-        if (password) {
-          const hash = await bcrypt.hash(password, 10);
-          await pool.query('UPDATE users SET full_name=$1, password_hash=$2, expires_at=$3 WHERE id=$4',
-            [full_name, hash, user_expires_at || null, userId]);
-        } else {
-          await pool.query('UPDATE users SET full_name=$1, expires_at=$2 WHERE id=$3',
-            [full_name, user_expires_at || null, userId]);
-        }
-        updated++;
-      }
-
-      // promover a admin se solicitado (opcional)
-      if (is_admin) {
-        await pool.query('UPDATE users SET full_name=$1 WHERE id=$2', [full_name, userId]); // mantemos simples, papel de admin é cookie/secret
-      }
-
-      // matrícula no curso (se slug veio)
-      if (course_slug) {
-        const cSel = await pool.query('SELECT id FROM courses WHERE slug=$1', [course_slug]);
-        if (!cSel.rows[0]) {
-          errors++; // curso não encontrado
-        } else {
-          const courseId = cSel.rows[0].id;
-          await pool.query(
-            `INSERT INTO course_members(user_id,course_id,role,expires_at)
-             VALUES($1,$2,$3,$4)
-             ON CONFLICT (user_id,course_id) DO UPDATE SET expires_at=EXCLUDED.expires_at`,
-            [userId, courseId, 'student', member_expires_at || null]
-          );
-          enrolled++;
-        }
-      }
-    }
-
-    const msg = `Importação concluída:
-    - criados: ${created}
-    - atualizados: ${updated}
-    - matrículas inseridas/atualizadas: ${enrolled}
-    - ignorados (sem nome/email): ${skipped}
-    - erros (curso não encontrado): ${errors}`;
-
-    const html = `<div class="card">
-      <h1>Importar alunos</h1>
-      <p>${msg.replace(/\n/g,'<br>')}</p>
-      <p><a href="/admin/alunos">Ir para alunos</a> · <a href="/admin/import">Voltar</a></p>
-    </div>`;
-    res.send(renderShell('Importar — resultado', html));
-  } catch (err) {
-    console.error('IMPORT ERROR', err);
-    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao importar</h1><p class="mut">${err.message || err}</p></div>`));
-  }
-});
-
-
 // ====== Player (admin bypass de matrícula) ======
 app.get('/aula/:id', authRequired, async (req,res)=>{
   try{
     const videoId = parseInt(req.params.id,10);
     const { rows:vr } = await pool.query(
-      `SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, c.name AS course_name, c.expires_at
+      `SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, v.available_from,
+              c.name AS course_name, c.expires_at, c.start_date
        FROM videos v JOIN courses c ON c.id = v.course_id WHERE v.id=$1`, [videoId]
     );
     const v = vr[0];
@@ -958,6 +844,12 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
     if (!admin) {
       if (v.expires_at && new Date(v.expires_at) <= new Date()){
         return res.status(403).send(renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">${safe(v.course_name)} expirou.</p><a href="/aulas">Voltar</a></div>`));
+      }
+      if (v.start_date && new Date(v.start_date) > new Date()){
+        return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.start_date)}.</p></div>`));
+      }
+      if (v.available_from && new Date(v.available_from) > new Date()){
+        return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.available_from)}.</p></div>`));
       }
       const { rows:m } = await pool.query('SELECT expires_at FROM course_members WHERE user_id=$1 AND course_id=$2',[req.user.id, v.course_id]);
       const mem = m[0];

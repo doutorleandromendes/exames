@@ -377,6 +377,166 @@ app.get('/aulas', authRequired, async (req,res)=>{
   }
 });
 
+// ====== Relatórios (painel com filtros) ======
+app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+
+  // combos
+  const courses = (await pool.query('SELECT id,name,slug FROM courses ORDER BY name')).rows;
+  const videos = course_id
+    ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title',[course_id])).rows
+    : [];
+
+  // filtros dinâmicos
+  const where = [];
+  const params = [];
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+  if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  // agregação aluno × vídeo (% assistido via max(video_time) / duration_seconds)
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email,
+             v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e ON e.session_id = s.id
+      JOIN users u  ON u.id = s.user_id
+      JOIN videos v ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id,u.full_name,u.email,v.id,v.title,v.duration_seconds
+    )
+    SELECT *, 
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  // combos HTML
+  const courseOpts = ['<option value="">(Todos)</option>']
+    .concat(courses.map(c=>`<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
+    .join('');
+  const videoOpts = ['<option value="">(Todos)</option>']
+    .concat(videos.map(v=>`<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
+    .join('');
+
+  // tabela
+  const table = rows.map(r=>`
+    <tr>
+      <td>${r.full_name}</td>
+      <td>${r.email}</td>
+      <td>${r.title}</td>
+      <td>${r.duration_seconds ?? '—'}</td>
+      <td>${r.max_time ?? 0}</td>
+      <td>${r.pct == null ? '—' : r.pct + '%'}</td>
+    </tr>
+  `).join('');
+
+  const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+    course_id: course_id || '',
+    video_id: video_id || '',
+    q: q || '',
+    dt_from: dt_from || '',
+    dt_to: dt_to || ''
+  }).toString();
+
+  const html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <h1>Relatórios (agregado)</h1>
+        <div><a href="/aulas">Voltar</a></div>
+      </div>
+
+      <form method="GET" action="/admin/relatorios" class="mt2">
+        <div class="row">
+          <div>
+            <label>Curso</label>
+            <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
+          </div>
+          <div>
+            <label>Aula (vídeo)</label>
+            <select name="video_id">${videoOpts}</select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Aluno (nome/email)</label>
+            <input name="q" value="${q||''}" placeholder="ex.: maria@ / João">
+          </div>
+          <div>
+            <label>De</label>
+            <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
+          </div>
+          <div>
+            <label>Até</label>
+            <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
+          </div>
+        </div>
+        <button class="mt">Aplicar filtros</button>
+        <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+        <a class="mt" href="/admin/relatorio/raw" style="margin-left:12px;display:inline-block">Ver eventos brutos</a>
+      </form>
+
+      <table>
+        <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
+        ${table || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>'}
+      </table>
+    </div>
+  `;
+  res.send(renderShell('Relatórios', html));
+});
+
+// ====== CSV com os mesmos filtros (separador ;) ======
+app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+  const where = [];
+  const params = [];
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+  if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email,
+             v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e ON e.session_id = s.id
+      JOIN users u  ON u.id = s.user_id
+      JOIN videos v ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id,u.full_name,u.email,v.id,v.title,v.duration_seconds
+    )
+    SELECT full_name, email, title AS video_title, duration_seconds, max_time,
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, video_title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  const header = 'full_name;email;video_title;duration_seconds;max_time;pct\n';
+  const body = rows.map(r =>
+    `${(r.full_name||'').replace(/;/g,' ')};${r.email};${(r.video_title||'').replace(/;/g,' ')};${r.duration_seconds??''};${r.max_time??0};${r.pct??''}`
+  ).join('\n');
+  res.send(header + body);
+});
+
+
 // ====== Debug URL assinada ======
 app.get('/debug/signed/:id', authRequired, async (req,res)=>{
   const id = parseInt(req.params.id,10);

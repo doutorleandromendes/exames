@@ -1,6 +1,6 @@
 // Aula Tracker — Postgres + Cloudflare R2 (SigV4)
-// Versão estendida: Admin pode gerenciar ALUNOS (CRUD + matrículas) e limpar relatórios.
-// Mantém: cursos, aulas, relatório web com % assistido + CSV, player com URL assinada e watermark.
+// Admin: gerencia cursos, aulas, alunos/matrículas; vê/edita tudo; relatórios web + CSV ordenados por nome
+// Player: URL assinada SigV4 (R2), sem download, watermark e tracking de progresso
 
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -83,7 +83,9 @@ const authRequired = async (req,res,next)=>{
     if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
     req.user = user;
     next();
-  }catch{ return res.redirect('/'); }
+  }catch{
+    return res.redirect('/');
+  }
 };
 
 // ====== MIGRAÇÕES ======
@@ -320,18 +322,25 @@ app.get('/debug/signed/:id', authRequired, async (req,res)=>{
   res.type('text/plain').send(url || 'ERRO: R2_* ausente');
 });
 
-// ====== Admin: Cursos (listar/criar/validade) ======
+// ====== Admin: Cursos (listar/criar/editar) ======
 app.get('/admin/cursos', adminRequired, async (req,res)=>{
   try{
     const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at FROM courses ORDER BY name ASC');
-    const list = rows.map(c=>`
-      <li><strong>${safe(c.name)}</strong> — slug: <code>${safe(c.slug)}</code> ${c.enroll_code?` — código: <code>${safe(c.enroll_code)}</code>`:''}
-          ${c.expires_at?` — expira: <code>${new Date(c.expires_at).toISOString()}</code>`:' — <em>sem validade</em>'}
-      </li>`).join('');
+    const list = rows.map(c=>
+      `<tr>
+        <td>${c.id}</td>
+        <td>${safe(c.name)}</td>
+        <td><code>${safe(c.slug)}</code></td>
+        <td>${safe(c.enroll_code)||'<span class="mut">—</span>'}</td>
+        <td>${fmt(c.expires_at)||'<span class="mut">—</span>'}</td>
+        <td><a href="/admin/cursos/${c.id}/edit">editar</a></td>
+      </tr>`
+    ).join('');
     const form = `
       <div class="card">
         <h1>Cursos</h1>
-        <ul>${list || '<li class="mut">Nenhum curso.</li>'}</ul>
+        <table class="mt2"><thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Código</th><th>Validade</th><th></th></tr></thead>
+        <tbody>${list || '<tr><td colspan="6" class="mut">Nenhum curso.</td></tr>'}</tbody></table>
         <h2 class="mt2">Novo curso</h2>
         <form method="POST" action="/admin/cursos" class="mt2">
           <label>Nome</label><input name="name" required>
@@ -339,12 +348,6 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
           <label>Código (opcional)</label><input name="enroll_code">
           <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
           <button class="mt">Criar</button>
-        </form>
-        <h2 class="mt2">Atualizar validade</h2>
-        <form method="POST" action="/admin/cursos/validade" class="mt2">
-          <label>Slug</label><input name="slug" required>
-          <label>Nova validade</label><input name="expires_at" type="datetime-local">
-          <button class="mt">Salvar</button>
         </form>
       </div>`;
     res.send(renderShell('Cursos', form));
@@ -365,15 +368,40 @@ app.post('/admin/cursos', adminRequired, async (req,res)=>{
     res.status(500).send('Falha ao salvar');
   }
 });
-app.post('/admin/cursos/validade', adminRequired, async (req,res)=>{
+app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
   try{
-    let { slug, expires_at } = req.body || {};
-    if(!slug) return res.status(400).send('Slug obrigatório');
+    const id = parseInt(req.params.id,10);
+    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at FROM courses WHERE id=$1',[id]);
+    const c = rows[0];
+    if(!c) return res.status(404).send(renderShell('Editar Curso', `<div class="card"><h1>Curso não encontrado</h1><a href="/admin/cursos">Voltar</a></div>`));
+    const body = `
+      <div class="card">
+        <h1>Editar curso #${c.id}</h1>
+        <form method="POST" action="/admin/cursos/${c.id}/edit" class="mt2">
+          <label>Nome</label><input name="name" value="${safe(c.name).replace(/"/g,'&quot;')}" required>
+          <label>Slug</label><input name="slug" value="${safe(c.slug)}" required>
+          <label>Código (opcional)</label><input name="enroll_code" value="${safe(c.enroll_code||'')}">
+          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
+          <button class="mt">Salvar</button>
+          <a href="/admin/cursos" style="margin-left:12px">Cancelar</a>
+        </form>
+      </div>`;
+    res.send(renderShell('Editar Curso', body));
+  }catch(err){
+    console.error('ADMIN COURSE EDIT GET ERROR', err);
+    res.status(500).send('Falha ao carregar');
+  }
+});
+app.post('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
+  try{
+    const id = parseInt(req.params.id,10);
+    let { name, slug, enroll_code, expires_at } = req.body || {};
+    if(!name || !slug) return res.status(400).send('Dados obrigatórios');
     if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
-    await pool.query('UPDATE courses SET expires_at=$1 WHERE slug=$2', [expires_at||null, slug]);
+    await pool.query('UPDATE courses SET name=$1, slug=$2, enroll_code=$3, expires_at=$4 WHERE id=$5', [name, slug, enroll_code||null, expires_at||null, id]);
     res.redirect('/admin/cursos');
   }catch(err){
-    console.error('ADMIN COURSES UPDATE ERROR', err);
+    console.error('ADMIN COURSE EDIT POST ERROR', err);
     res.status(500).send('Falha ao salvar');
   }
 });
@@ -551,13 +579,13 @@ app.get('/admin/alunos', adminRequired, async (req,res)=>{
 
     const userRows = users.map(u=>{
       const m = byUser.get(u.id)||[];
-      const memberships = m.map(x=>`[${safe(x.slug)}] ${safe(x.name)}${x.expires_at?` <span class=\"mut\">(até ${fmt(x.expires_at)})</span>`:''}`).join('<br/>');
+      const memberships = m.map(x=>`[${safe(x.slug)}] ${safe(x.name)}${x.expires_at?` <span class="mut">(até ${fmt(x.expires_at)})</span>`:''}`).join('<br/>');
       return `<tr>
         <td>${u.id}</td>
         <td>${safe(u.full_name)||'-'}</td>
         <td>${safe(u.email)}</td>
-        <td>${fmt(u.expires_at)||'<span class=\"mut\">—</span>'}</td>
-        <td>${memberships||'<span class=\"mut\">—</span>'}</td>
+        <td>${fmt(u.expires_at)||'<span class="mut">—</span>'}</td>
+        <td>${memberships||'<span class="mut">—</span>'}</td>
         <td><a href="/admin/alunos/${u.id}/edit">editar</a></td>
       </tr>`;
     }).join('');
@@ -722,7 +750,7 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
   }
 });
 
-// ====== Player ======
+// ====== Player (admin bypass de matrícula) ======
 app.get('/aula/:id', authRequired, async (req,res)=>{
   try{
     const videoId = parseInt(req.params.id,10);
@@ -733,18 +761,22 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
     const v = vr[0];
     if(!v) return res.status(404).send(renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`));
 
-    if (v.expires_at && new Date(v.expires_at) <= new Date()){
-      return res.status(403).send(renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">${safe(v.course_name)} expirou.</p><a href="/aulas">Voltar</a></div>`));
-    }
-    const { rows:m } = await pool.query('SELECT expires_at FROM course_members WHERE user_id=$1 AND course_id=$2',[req.user.id, v.course_id]);
-    const mem = m[0];
-    if(!mem) return res.status(403).send(renderShell('Sem matrícula', `<div class="card"><h1>Você não está matriculado em "${safe(v.course_name)}"</h1></div>`));
-    if (mem.expires_at && new Date(mem.expires_at) <= new Date()){
-      return res.status(403).send(renderShell('Matrícula expirada', `<div class="card"><h1>Matrícula expirada</h1></div>`));
+    const admin = isAdmin(req);
+    if (!admin) {
+      if (v.expires_at && new Date(v.expires_at) <= new Date()){
+        return res.status(403).send(renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">${safe(v.course_name)} expirou.</p><a href="/aulas">Voltar</a></div>`));
+      }
+      const { rows:m } = await pool.query('SELECT expires_at FROM course_members WHERE user_id=$1 AND course_id=$2',[req.user.id, v.course_id]);
+      const mem = m[0];
+      if(!mem) return res.status(403).send(renderShell('Sem matrícula', `<div class="card"><h1>Você não está matriculado em "${safe(v.course_name)}"</h1></div>`));
+      if (mem.expires_at && new Date(mem.expires_at) <= new Date()){
+        return res.status(403).send(renderShell('Matrícula expirada', `<div class="card"><h1>Matrícula expirada</h1></div>`));
+      }
     }
 
     const signedUrl = generateSignedUrlForKey(v.r2_key);
-    const ins = await pool.query('INSERT INTO sessions(user_id,video_id) VALUES($1,$2) RETURNING id', [req.user.id, videoId]);
+    const uidForSession = req.user.id; // registra sessão do admin ou aluno
+    const ins = await pool.query('INSERT INTO sessions(user_id,video_id) VALUES($1,$2) RETURNING id', [uidForSession, videoId]);
     const sessionId = ins.rows[0].id;
     const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -754,7 +786,7 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
           <h1 style="margin:0">${safe(v.title)}</h1>
           <div><a href="/logout">Sair</a></div>
         </div>
-        <p class="mut">Curso: ${safe(v.course_name)}</p>
+        <p class="mut">Curso: ${safe(v.course_name)} ${admin? '· <strong>(ADMIN)</strong>' : ''}</p>
         <div class="video">
           <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
             ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}

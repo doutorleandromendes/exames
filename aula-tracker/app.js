@@ -1,6 +1,10 @@
 // Aula Tracker — Postgres + Cloudflare R2 (SigV4)
 // Admin: gerencia cursos, aulas, alunos/matrículas; vê/edita tudo; relatórios web + CSV ordenados por nome
 // Player: URL assinada SigV4 (R2), sem download, watermark e tracking de progresso
+// Ajustes nesta versão:
+// - Disponibilidade: courses.start_date e videos.available_from
+// - Tela admin para editar disponibilidade das aulas (/admin/videos/availability)
+// - Filtro em /aulas (aluno) respeitando as datas
 
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -68,6 +72,7 @@ function renderShell(title, body) {
 const parseISO = s => (s ? new Date(s) : null);
 const safe = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmt = d => d ? new Date(d).toLocaleString('pt-BR') : '';
+const fmtDTLocal = d => d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
 
 // ====== Auth helpers ======
 const isAdmin = req => req.cookies?.adm === '1';
@@ -138,10 +143,61 @@ async function migrate(){
       video_time INTEGER,
       client_ts TIMESTAMPTZ
     );`);
-  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ`);
 
+  // Novas colunas de disponibilidade (idempotentes)
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ`);
 }
 migrate().catch(e=>console.error('migration error', e));
+
+// ====== Clonar curso (copia as aulas do curso origem para um novo curso/semestre) ======
+app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query('SELECT * OF courses WHERE id=$1', [id]).catch(()=>({rows:[]}));
+  const { rows: rows2 } = await pool.query('SELECT * FROM courses WHERE id=$1', [id]); // fallback
+  const c = (rows && rows[0]) || (rows2 && rows2[0]);
+  if (!c) return res.send(renderShell('Erro', '<div class="card">Curso não encontrado</div>'));
+
+  const html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+        <h1>Clonar Curso: ${c.name}</h1>
+        <div><a href="/admin/cursos">Voltar</a></div>
+      </div>
+      <form method="POST" action="/admin/cursos/${c.id}/clone">
+        <label>Novo nome</label><input name="name" value="${c.name}">
+        <label>Novo slug</label><input name="slug" value="${c.slug}-novo">
+        <label>Data de início do novo curso (YYYY-MM-DD ou YYYY-MM-DDTHH:mm-03:00)</label><input name="start_date">
+        <button>Clonar curso e aulas</button>
+      </form>
+      <p class="mut">As aulas serão clonadas com os mesmos títulos e R2 keys. O campo <code>available_from</code>
+      nos vídeos clonados ficará vazio (você define depois). Relatórios e matrículas não são clonados.</p>
+    </div>
+  `;
+  res.send(renderShell('Clonar curso', html));
+});
+
+app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
+  const { id } = req.params;
+  const { name, slug, start_date } = req.body || {};
+
+  // cria novo curso
+  const q1 = await pool.query(
+    'INSERT INTO courses(name,slug,start_date) VALUES($1,$2,$3) RETURNING id',
+    [name, slug, normalizeDateStr(start_date)]
+  );
+  const newCourseId = q1.rows[0].id;
+
+  // copia aulas do curso origem para o novo
+  await pool.query(`
+    INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from)
+    SELECT title, r2_key, $1, duration_seconds, NULL
+    FROM videos WHERE course_id = $2
+  `, [newCourseId, id]);
+
+  res.redirect('/admin/cursos');
+});
+
 
 // ====== SigV4 (R2) ======
 function hmac(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
@@ -197,6 +253,7 @@ function normalizeDateStr(s) {
   const d = new Date(s);
   return isFinite(d) ? d.toISOString() : null;
 }
+const fmtDT = (d)=> d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
 
 // ====== Health ======
 app.get('/healthz', (req,res)=> res.status(200).send('ok'));
@@ -243,7 +300,7 @@ app.get('/admin', authRequired, (req,res)=>{
       <label>ADMIN_SECRET</label><input name="secret" type="password" required>
       <button>Entrar no modo admin</button>
     </form>
-    <p class="mut">Após entrar, verá cursos, cadastro de aulas, alunos e importação.</p>
+    <p class="mut">Após entrar, verá cursos, cadastro de aulas, alunos, importação e disponibilidade.</p>
   </div>`;
   res.send(renderShell('Admin', html));
 });
@@ -256,7 +313,7 @@ app.post('/admin', authRequired, (req,res)=>{
 });
 app.get('/admin/logout', authRequired, (req,res)=>{ res.clearCookie('adm'); res.redirect('/aulas'); });
 
-// ====== /aulas — Admin vê tudo; aluno só o que está matriculado ======
+// ====== /aulas — Admin vê tudo; aluno só o que está matriculado e liberado pelas datas ======
 app.get('/aulas', authRequired, async (req,res)=>{
   try{
     const admin = isAdmin(req);
@@ -265,8 +322,8 @@ app.get('/aulas', authRequired, async (req,res)=>{
     let rows = [];
     if (admin) {
       const sqlAdmin = `
-        SELECT v.id, v.title, v.course_id, v.r2_key,
-               c.name AS course_name, c.slug
+        SELECT v.id, v.title, v.course_id, v.r2_key, v.available_from,
+               c.name AS course_name, c.slug, c.start_date
         FROM videos v
         JOIN courses c ON c.id = v.course_id
         ${slug ? 'WHERE c.slug = $1' : ''}
@@ -275,21 +332,25 @@ app.get('/aulas', authRequired, async (req,res)=>{
       ({ rows } = await pool.query(sqlAdmin, paramsAdmin));
     } else {
       const sqlAluno = `
-        SELECT v.id, v.title, v.course_id, c.name AS course_name, c.slug
+        SELECT v.id, v.title, v.course_id, v.available_from, c.name AS course_name, c.slug, c.start_date
         FROM videos v
         JOIN courses c ON c.id = v.course_id
         JOIN course_members cm ON cm.course_id = v.course_id AND cm.user_id = $1
         WHERE ${slug ? 'c.slug = $2 AND ' : ''} 
-              (c.archived_at IS NULL)
-          AND (c.expires_at IS NULL OR c.expires_at > now())
+              (c.expires_at IS NULL OR c.expires_at > now())
           AND (cm.expires_at IS NULL OR cm.expires_at > now())
+          AND (c.start_date IS NULL OR c.start_date <= now())
+          AND (v.available_from IS NULL OR v.available_from <= now())
         ORDER BY v.id DESC`;
       const paramsAluno = slug ? [req.user.id, slug] : [req.user.id];
       ({ rows } = await pool.query(sqlAluno, paramsAluno));
     }
 
     const items = rows.map(v=>{
-      const base = `<li><strong>[${safe(v.course_name)}]</strong> <a href="/aula/${v.id}">${safe(v.title)}</a> — <span class="mut">/aula/${v.id}</span>`;
+      const tag = (!admin)
+        ? ''
+        : ` <span class="mut">[curso desde: ${fmt(v.start_date)||'—'} · aula desde: ${fmt(v.available_from)||'—'}]</span>`;
+      const base = `<li><strong>[${safe(v.course_name)}]</strong> <a href="/aula/${v.id}">${safe(v.title)}</a>${tag} — <span class="mut">/aula/${v.id}</span>`;
       const extra = isAdmin(req)
         ? ` — <a href="/admin/relatorio/${v.id}">relatório (web)</a> · <a href="/admin/relatorio/${v.id}.csv">CSV</a> · <a href="/admin/videos/${v.id}/edit">editar</a>`
         : '';
@@ -297,7 +358,7 @@ app.get('/aulas', authRequired, async (req,res)=>{
     }).join('');
 
     const actions = isAdmin(req)
-      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
+      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/videos/availability">Disponibilidade de Aulas</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/relatorios">Relatórios</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
       : `<a href="/logout">Sair</a>`;
 
     const body = `
@@ -316,6 +377,166 @@ app.get('/aulas', authRequired, async (req,res)=>{
   }
 });
 
+// ====== Relatórios (painel com filtros) ======
+app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+
+  // combos
+  const courses = (await pool.query('SELECT id,name,slug FROM courses ORDER BY name')).rows;
+  const videos = course_id
+    ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title',[course_id])).rows
+    : [];
+
+  // filtros dinâmicos
+  const where = [];
+  const params = [];
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+  if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  // agregação aluno × vídeo (% assistido via max(video_time) / duration_seconds)
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email,
+             v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e ON e.session_id = s.id
+      JOIN users u  ON u.id = s.user_id
+      JOIN videos v ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id,u.full_name,u.email,v.id,v.title,v.duration_seconds
+    )
+    SELECT *, 
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  // combos HTML
+  const courseOpts = ['<option value="">(Todos)</option>']
+    .concat(courses.map(c=>`<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
+    .join('');
+  const videoOpts = ['<option value="">(Todos)</option>']
+    .concat(videos.map(v=>`<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
+    .join('');
+
+  // tabela
+  const table = rows.map(r=>`
+    <tr>
+      <td>${r.full_name}</td>
+      <td>${r.email}</td>
+      <td>${r.title}</td>
+      <td>${r.duration_seconds ?? '—'}</td>
+      <td>${r.max_time ?? 0}</td>
+      <td>${r.pct == null ? '—' : r.pct + '%'}</td>
+    </tr>
+  `).join('');
+
+  const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+    course_id: course_id || '',
+    video_id: video_id || '',
+    q: q || '',
+    dt_from: dt_from || '',
+    dt_to: dt_to || ''
+  }).toString();
+
+  const html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <h1>Relatórios (agregado)</h1>
+        <div><a href="/aulas">Voltar</a></div>
+      </div>
+
+      <form method="GET" action="/admin/relatorios" class="mt2">
+        <div class="row">
+          <div>
+            <label>Curso</label>
+            <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
+          </div>
+          <div>
+            <label>Aula (vídeo)</label>
+            <select name="video_id">${videoOpts}</select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Aluno (nome/email)</label>
+            <input name="q" value="${q||''}" placeholder="ex.: maria@ / João">
+          </div>
+          <div>
+            <label>De</label>
+            <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
+          </div>
+          <div>
+            <label>Até</label>
+            <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
+          </div>
+        </div>
+        <button class="mt">Aplicar filtros</button>
+        <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+        <a class="mt" href="/admin/relatorio/raw" style="margin-left:12px;display:inline-block">Ver eventos brutos</a>
+      </form>
+
+      <table>
+        <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
+        ${table || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>'}
+      </table>
+    </div>
+  `;
+  res.send(renderShell('Relatórios', html));
+});
+
+// ====== CSV com os mesmos filtros (separador ;) ======
+app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+  const where = [];
+  const params = [];
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+  if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email,
+             v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e ON e.session_id = s.id
+      JOIN users u  ON u.id = s.user_id
+      JOIN videos v ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id,u.full_name,u.email,v.id,v.title,v.duration_seconds
+    )
+    SELECT full_name, email, title AS video_title, duration_seconds, max_time,
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, video_title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  res.setHeader('Content-Type','text/csv; charset=utf-8');
+  const header = 'full_name;email;video_title;duration_seconds;max_time;pct\n';
+  const body = rows.map(r =>
+    `${(r.full_name||'').replace(/;/g,' ')};${r.email};${(r.video_title||'').replace(/;/g,' ')};${r.duration_seconds??''};${r.max_time??0};${r.pct??''}`
+  ).join('\n');
+  res.send(header + body);
+});
+
+
 // ====== Debug URL assinada ======
 app.get('/debug/signed/:id', authRequired, async (req,res)=>{
   const id = parseInt(req.params.id,10);
@@ -328,54 +549,31 @@ app.get('/debug/signed/:id', authRequired, async (req,res)=>{
 // ====== Admin: Cursos (listar/criar/editar) ======
 app.get('/admin/cursos', adminRequired, async (req,res)=>{
   try{
-    const show = req.query.show === 'archived' ? 'archived' : 'active';
-    const { rows } = await pool.query(
-      show === 'archived'
-        ? 'SELECT id,name,slug,enroll_code,expires_at,archived_at FROM courses WHERE archived_at IS NOT NULL ORDER BY name ASC'
-        : 'SELECT id,name,slug,enroll_code,expires_at,archived_at FROM courses WHERE archived_at IS NULL ORDER BY name ASC'
-    );
-    const toggleLink = show === 'archived'
-      ? `<a href="/admin/cursos">Ver ativos</a>`
-      : `<a href="/admin/cursos?show=archived">Ver arquivados</a>`;
+    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at,start_date FROM courses ORDER BY name ASC');
     const list = rows.map(c=>
       `<tr>
         <td>${c.id}</td>
         <td>${safe(c.name)}</td>
         <td><code>${safe(c.slug)}</code></td>
         <td>${safe(c.enroll_code)||'<span class="mut">—</span>'}</td>
+        <td>${fmt(c.start_date)||'<span class="mut">—</span>'}</td>
         <td>${fmt(c.expires_at)||'<span class="mut">—</span>'}</td>
-        <td>${c.archived_at ? '<strong class="mut">Arquivado</strong>' : '<span class="mut">Ativo</span>'}</td>
-        <td>
-          <a href="/admin/cursos/${c.id}/edit">Editar</a> ·
-          <a href="/admin/cursos/${c.id}/clone">Clonar</a> ·
-          ${c.archived_at
-            ? `<form class="inline" method="POST" action="/admin/cursos/${c.id}/unarchive"><button>Desarquivar</button></form>`
-            : `<form class="inline" method="POST" action="/admin/cursos/${c.id}/archive" onsubmit="return confirm('Arquivar este curso? Os alunos deixarão de vê-lo.');"><button style="background:#6c757d">Arquivar</button></form>`
-          }
-        </td>
+        <td><a href="/admin/cursos/${c.id}/edit">editar</a></td>
+        <td><a href="/admin/cursos/${c.id}/clone">Clonar</a><td>
       </tr>`
     ).join('');
     const form = `
       <div class="card">
         <h1>Cursos</h1>
-        <div class="right" style="justify-content:space-between">
-          <div>
-            <a href="/admin/cursos/new">Novo curso</a> ·
-            ${toggleLink} ·
-            <a href="/admin/relatorios">Relatórios</a> ·
-            <a href="/aulas">Voltar</a>
-          </div>
-        </div>
-        <table class="mt2">
-          <thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Código</th><th>Validade</th><th>Status</th><th></th></tr></thead>
-          <tbody>${list || '<tr><td colspan="7" class="mut">Nenhum curso aqui.</td></tr>'}</tbody>
-        </table>
-        <h2 class="mt2">Criar novo</h2>
-        <form method="POST" action="/admin/cursos">
+        <table class="mt2"><thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Disponível desde</th><th>Validade</th><th></th></tr></thead>
+        <tbody>${list || '<tr><td colspan="6" class="mut">Nenhum curso.</td></tr>'}</tbody></table>
+        <h2 class="mt2">Novo curso</h2>
+        <form method="POST" action="/admin/cursos" class="mt2">
           <label>Nome</label><input name="name" required>
-          <label>Slug (ex.: MBE2025)</label><input name="slug" required>
-          <label>Código de matrícula (opcional)</label><input name="enroll_code">
-          <label>Validade do curso (ex.: 2025-12-20T23:59)</label><input name="expires_at" placeholder="YYYY-MM-DDTHH:MM">
+          <label>Slug</label><input name="slug" required>
+          <label>Código (opcional)</label><input name="enroll_code">
+          <label>Disponível desde (opcional)</label><input name="start_date" type="datetime-local">
+          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
           <button class="mt">Criar</button>
         </form>
       </div>`;
@@ -387,43 +585,21 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
 });
 app.post('/admin/cursos', adminRequired, async (req,res)=>{
   try{
-    let { name, slug, enroll_code, expires_at } = req.body || {};
+    let { name, slug, enroll_code, start_date, expires_at } = req.body || {};
     if(!name || !slug) return res.status(400).send('Dados obrigatórios');
     if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
-    await pool.query('INSERT INTO courses(name,slug,enroll_code,expires_at) VALUES($1,$2,$3,$4)', [name, slug, enroll_code||null, expires_at||null]);
+    if (start_date && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(start_date)) start_date = `${start_date}:00Z`;
+    await pool.query('INSERT INTO courses(name,slug,enroll_code,start_date,expires_at) VALUES($1,$2,$3,$4,$5)', [name, slug, enroll_code||null, start_date||null, expires_at||null]);
     res.redirect('/admin/cursos');
   }catch(err){
     console.error('ADMIN COURSES CREATE ERROR', err);
     res.status(500).send('Falha ao salvar');
   }
 });
-// Arquivar curso
-app.post('/admin/cursos/:id/archive', adminRequired, async (req,res)=>{
-  try{
-    const id = parseInt(req.params.id,10);
-    await pool.query('UPDATE courses SET archived_at = now() WHERE id=$1',[id]);
-    res.redirect('/admin/cursos');
-  }catch(err){
-    console.error('COURSE ARCHIVE ERROR', err);
-    res.status(500).send('Falha ao arquivar');
-  }
-});
-// Desarquivar curso
-app.post('/admin/cursos/:id/unarchive', adminRequired, async (req,res)=>{
-  try{
-    const id = parseInt(req.params.id,10);
-    await pool.query('UPDATE courses SET archived_at = NULL WHERE id=$1',[id]);
-    res.redirect('/admin/cursos?show=archived');
-  }catch(err){
-    console.error('COURSE UNARCHIVE ERROR', err);
-    res.status(500).send('Falha ao desarquivar');
-  }
-});
-
 app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
-    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at FROM courses WHERE id=$1',[id]);
+    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,start_date,expires_at FROM courses WHERE id=$1',[id]);
     const c = rows[0];
     if(!c) return res.status(404).send(renderShell('Editar Curso', `<div class="card"><h1>Curso não encontrado</h1><a href="/admin/cursos">Voltar</a></div>`));
     const body = `
@@ -433,7 +609,8 @@ app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
           <label>Nome</label><input name="name" value="${safe(c.name).replace(/"/g,'&quot;')}" required>
           <label>Slug</label><input name="slug" value="${safe(c.slug)}" required>
           <label>Código (opcional)</label><input name="enroll_code" value="${safe(c.enroll_code||'')}">
-          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local">
+          <label>Disponível desde (opcional)</label><input name="start_date" type="datetime-local" value="${fmtDTLocal(c.start_date)||''}">
+          <label>Validade (opcional)</label><input name="expires_at" type="datetime-local" value="${fmtDTLocal(c.expires_at)||''}">
           <button class="mt">Salvar</button>
           <a href="/admin/cursos" style="margin-left:12px">Cancelar</a>
         </form>
@@ -447,10 +624,10 @@ app.get('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
 app.post('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
-    let { name, slug, enroll_code, expires_at } = req.body || {};
+    let { name, slug, enroll_code, start_date, expires_at } = req.body || {};
     if(!name || !slug) return res.status(400).send('Dados obrigatórios');
-    if (expires_at && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expires_at)) expires_at = `${expires_at}:00Z`;
-    await pool.query('UPDATE courses SET name=$1, slug=$2, enroll_code=$3, expires_at=$4 WHERE id=$5', [name, slug, enroll_code||null, expires_at||null, id]);
+    await pool.query('UPDATE courses SET name=$1, slug=$2, enroll_code=$3, start_date=$4, expires_at=$5 WHERE id=$6',
+      [name, slug, enroll_code||null, normalizeDateStr(start_date)||null, normalizeDateStr(expires_at)||null, id]);
     res.redirect('/admin/cursos');
   }catch(err){
     console.error('ADMIN COURSE EDIT POST ERROR', err);
@@ -465,7 +642,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
     const options = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
 
     const { rows:videos } = await pool.query(`
-      SELECT v.id, v.title, v.r2_key, v.duration_seconds, c.name AS course_name, c.slug
+      SELECT v.id, v.title, v.r2_key, v.duration_seconds, v.available_from, c.name AS course_name, c.slug
       FROM videos v
       JOIN courses c ON c.id = v.course_id
       ORDER BY v.id DESC`);
@@ -476,6 +653,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
         <td><code>${safe(v.r2_key)}</code></td>
         <td>${v.duration_seconds ?? '-'}</td>
         <td>[${safe(v.slug)}] ${safe(v.course_name)}</td>
+        <td>${fmt(v.available_from) || '<span class="mut">—</span>'}</td>
         <td>
           <a href="/aula/${v.id}" target="_blank">ver</a> ·
           <a href="/admin/relatorio/${v.id}">relatório (web)</a> ·
@@ -492,8 +670,8 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
         </div>
         <h2 class="mt2">Aulas cadastradas</h2>
         <table>
-          <thead><tr><th>ID</th><th>Título</th><th>R2 key</th><th>Duração (s)</th><th>Curso</th><th>Ações</th></tr></thead>
-          <tbody>${list || '<tr><td colspan="6" class="mut">Nenhuma aula.</td></tr>'}</tbody>
+          <thead><tr><th>ID</th><th>Título</th><th>R2 key</th><th>Duração (s)</th><th>Curso</th><th>Disponível a partir</th><th>Ações</th></tr></thead>
+          <tbody>${list || '<tr><td colspan="7" class="mut">Nenhuma aula.</td></tr>'}</tbody>
         </table>
 
         <h2 class="mt2">Cadastrar nova aula</h2>
@@ -502,6 +680,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
           <label>Título</label><input name="title" required>
           <label>R2 Key</label><input name="r2_key" required placeholder="pasta/arquivo.mp4">
           <label>Duração (segundos) — opcional</label><input name="duration_seconds" type="number" min="1" placeholder="ex.: 4840">
+          <label>Disponível a partir de (opcional)</label><input name="available_from" type="datetime-local">
           <button class="mt">Salvar</button>
         </form>
       </div>`;
@@ -513,12 +692,12 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
 });
 app.post('/admin/videos', adminRequired, async (req,res)=>{
   try{
-    const { title, r2_key, course_id, duration_seconds } = req.body || {};
+    const { title, r2_key, course_id, duration_seconds, available_from } = req.body || {};
     if(!title || !r2_key || !course_id) return res.status(400).send('Dados obrigatórios');
     const dur = duration_seconds ? Math.max(0, parseInt(duration_seconds, 10)) : null;
     await pool.query(
-      'INSERT INTO videos(title,r2_key,course_id,duration_seconds) VALUES($1,$2,$3,$4)',
-      [title, r2_key, course_id, dur]
+      'INSERT INTO videos(title,r2_key,course_id,duration_seconds,available_from) VALUES($1,$2,$3,$4,$5)',
+      [title, r2_key, course_id, dur, normalizeDateStr(available_from)||null]
     );
     res.redirect('/admin/videos');
   }catch(err){
@@ -530,7 +709,7 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
     const { rows:vrows } = await pool.query(`
-      SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, c.slug AS course_slug
+      SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, v.available_from, c.slug AS course_slug
       FROM videos v JOIN courses c ON c.id = v.course_id
       WHERE v.id=$1`, [id]);
     const v = vrows[0];
@@ -548,6 +727,8 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
           <label>R2 Key</label><input name="r2_key" value="${safe(v.r2_key).replace(/"/g,'&quot;')}" required>
           <label>Duração (segundos) — opcional</label>
           <input name="duration_seconds" type="number" min="1" value="${v.duration_seconds ?? ''}">
+          <label>Disponível a partir de (opcional)</label>
+          <input name="available_from" type="datetime-local" value="${fmtDTLocal(v.available_from)||''}">
           <div class="mt">
             <button>Salvar alterações</button>
             <a href="/admin/videos" style="margin-left:12px">Cancelar</a>
@@ -567,12 +748,12 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
 app.post('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);
-    const { title, r2_key, course_id, duration_seconds } = req.body || {};
+    const { title, r2_key, course_id, duration_seconds, available_from } = req.body || {};
     if(!title || !r2_key || !course_id) return res.status(400).send('Dados obrigatórios');
     const dur = duration_seconds ? Math.max(0, parseInt(duration_seconds, 10)) : null;
     await pool.query(
-      'UPDATE videos SET title=$1, r2_key=$2, course_id=$3, duration_seconds=$4 WHERE id=$5',
-      [title, r2_key, course_id, dur, id]
+      'UPDATE videos SET title=$1, r2_key=$2, course_id=$3, duration_seconds=$4, available_from=$5 WHERE id=$6',
+      [title, r2_key, course_id, dur, normalizeDateStr(available_from)||null, id]
     );
     res.redirect('/admin/videos');
   }catch(err){
@@ -588,6 +769,61 @@ app.post('/admin/videos/:id/delete', adminRequired, async (req,res)=>{
   }catch(err){
     console.error('ADMIN VIDEO DELETE ERROR', err);
     res.status(500).send('Falha ao deletar');
+  }
+});
+
+// ====== Admin: Disponibilidade de Aulas (edição em massa) ======
+app.get('/admin/videos/availability', authRequired, adminRequired, async (req,res)=>{
+  try{
+    const { rows } = await pool.query(`
+      SELECT v.id, v.title, v.available_from, c.name AS course_name, c.slug
+      FROM videos v LEFT JOIN courses c ON c.id = v.course_id
+      ORDER BY c.name, v.title
+    `);
+    const lines = rows.map(v=>{
+      const val = v.available_from ? fmtDTLocal(v.available_from) : '';
+      return `<tr>
+        <td>${v.id}</td>
+        <td>[${safe(v.slug||'–')}] ${safe(v.course_name||'Sem curso')}</td>
+        <td>${safe(v.title)}</td>
+        <td><input type="datetime-local" name="avail_${v.id}" value="${val}"></td>
+      </tr>`;
+    }).join('');
+    const html = `
+      <div class="card">
+        <div class="right" style="justify-content:space-between;align-items:center">
+          <h1>Disponibilidade de Aulas</h1>
+          <div><a href="/aulas">Voltar</a></div>
+        </div>
+        <form method="POST" action="/admin/videos/availability">
+          <table>
+            <thead><tr><th>ID</th><th>Curso</th><th>Título</th><th>Disponível a partir de</th></tr></thead>
+            <tbody>${lines || '<tr><td colspan="4" class="mut">Nenhuma aula.</td></tr>'}</tbody>
+          </table>
+          <button class="mt">Salvar alterações</button>
+        </form>
+        <p class="mut mt">Deixe em branco para liberar imediatamente.</p>
+      </div>`;
+    res.send(renderShell('Disponibilidade de Aulas', html));
+  }catch(err){
+    console.error('AVAILABILITY GET ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
+  }
+});
+
+app.post('/admin/videos/availability', authRequired, adminRequired, async (req,res)=>{
+  try{
+    const entries = Object.entries(req.body||{}).filter(([k])=>k.startsWith('avail_'));
+    for (const [key, val] of entries){
+      const id = parseInt(key.slice('avail_'.length),10);
+      if (!id) continue;
+      const iso = normalizeDateStr(val);
+      await pool.query('UPDATE videos SET available_from=$1 WHERE id=$2', [iso || null, id]);
+    }
+    res.redirect('/admin/videos/availability');
+  }catch(err){
+    console.error('AVAILABILITY SAVE ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao salvar</h1><p class="mut">${err.message||err}</p></div>`));
   }
 });
 
@@ -807,7 +1043,8 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
   try{
     const videoId = parseInt(req.params.id,10);
     const { rows:vr } = await pool.query(
-      `SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, c.name AS course_name, c.expires_at
+      `SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, v.available_from,
+              c.name AS course_name, c.expires_at, c.start_date
        FROM videos v JOIN courses c ON c.id = v.course_id WHERE v.id=$1`, [videoId]
     );
     const v = vr[0];
@@ -817,6 +1054,12 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
     if (!admin) {
       if (v.expires_at && new Date(v.expires_at) <= new Date()){
         return res.status(403).send(renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">${safe(v.course_name)} expirou.</p><a href="/aulas">Voltar</a></div>`));
+      }
+      if (v.start_date && new Date(v.start_date) > new Date()){
+        return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.start_date)}.</p></div>`));
+      }
+      if (v.available_from && new Date(v.available_from) > new Date()){
+        return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.available_from)}.</p></div>`));
       }
       const { rows:m } = await pool.query('SELECT expires_at FROM course_members WHERE user_id=$1 AND course_id=$2',[req.user.id, v.course_id]);
       const mem = m[0];
@@ -1044,6 +1287,178 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
     res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao gerar relatório</h1><p class="mut">${err.message||err}</p></div>`));
   }
 });
+
+// ====== Relatórios com filtros ======
+// UI de filtros + tabela com % assistido
+app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+
+  // combos de curso e aula
+  const courses = (await pool.query(
+    'SELECT id, name, slug FROM courses ORDER BY name'
+  )).rows;
+
+  let videos = [];
+  if (course_id) {
+    videos = (await pool.query(
+      'SELECT id, title FROM videos WHERE course_id=$1 ORDER BY title', [course_id]
+    )).rows;
+  }
+
+  // monta SQL dinamicamente (filtra por curso, por vídeo, por aluno e por faixa de datas)
+  const params = [];
+  const where = [];
+
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q) {
+    params.push(`%${q.toLowerCase()}%`);
+    where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`);
+  }
+  if (dt_from) { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)   { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  // agregação por aluno x vídeo, calculando max(video_time) e % assistido
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email, v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e   ON e.session_id = s.id
+      JOIN users u    ON u.id = s.user_id
+      JOIN videos v   ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+    )
+    SELECT *,
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  // HTML da página
+  const courseOptions = ['<option value="">(Todos)</option>']
+    .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
+    .join('');
+  const videoOptions = ['<option value="">(Todos)</option>']
+    .concat(videos.map(v => `<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
+    .join('');
+
+  const table = rows.map(r => `
+    <tr>
+      <td>${r.full_name}</td>
+      <td>${r.email}</td>
+      <td>${r.title}</td>
+      <td>${r.duration_seconds ?? '—'}</td>
+      <td>${r.max_time ?? 0}</td>
+      <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
+    </tr>
+  `).join('');
+
+  const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+    course_id: course_id || '',
+    video_id: video_id || '',
+    q: q || '',
+    dt_from: dt_from || '',
+    dt_to: dt_to || ''
+  }).toString();
+
+  const html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <h1>Relatórios</h1>
+        <div><a href="/aulas">Voltar</a></div>
+      </div>
+
+      <form method="GET" action="/admin/relatorios" class="mt2">
+        <div class="row">
+          <div>
+            <label>Curso</label>
+            <select name="course_id" onchange="this.form.submit()">${courseOptions}</select>
+          </div>
+          <div>
+            <label>Aula (vídeo)</label>
+            <select name="video_id">${videoOptions}</select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Aluno (nome ou email)</label>
+            <input name="q" value="${q||''}" placeholder="ex.: maria@ / João">
+          </div>
+          <div>
+            <label>De (client_ts)</label>
+            <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
+          </div>
+          <div>
+            <label>Até (client_ts)</label>
+            <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
+          </div>
+        </div>
+        <button class="mt">Aplicar filtros</button>
+        <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+      </form>
+
+      <table>
+        <tr>
+          <th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th>
+        </tr>
+        ${table || '<tr><td colspan="6" class="mut">Sem dados para os filtros selecionados.</td></tr>'}
+      </table>
+    </div>
+  `;
+  res.send(renderShell('Relatórios', html));
+});
+
+// CSV com os mesmos filtros (separador ; para Excel BR)
+app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+  const params = [];
+  const where = [];
+
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+  if (dt_from)   { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)     { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email, v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e   ON e.session_id = s.id
+      JOIN users u    ON u.id = s.user_id
+      JOIN videos v   ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+    )
+    SELECT full_name, email, title AS video_title, duration_seconds, max_time,
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, video_title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  const header = 'full_name;email;video_title;duration_seconds;max_time;pct\n';
+  const body = rows.map(r =>
+    `${(r.full_name||'').replace(/;/g,' ')};${r.email};${(r.video_title||'').replace(/;/g,' ')};${r.duration_seconds??''};${r.max_time??0};${r.pct??''}`
+  ).join('\n');
+  res.send(header + body);
+});
+
 
 // ====== APIs ======
 app.post('/api/login', async (req,res)=>{

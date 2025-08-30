@@ -150,6 +150,55 @@ async function migrate(){
 }
 migrate().catch(e=>console.error('migration error', e));
 
+// ====== Clonar curso (copia as aulas do curso origem para um novo curso/semestre) ======
+app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query('SELECT * OF courses WHERE id=$1', [id]).catch(()=>({rows:[]}));
+  const { rows: rows2 } = await pool.query('SELECT * FROM courses WHERE id=$1', [id]); // fallback
+  const c = (rows && rows[0]) || (rows2 && rows2[0]);
+  if (!c) return res.send(renderShell('Erro', '<div class="card">Curso não encontrado</div>'));
+
+  const html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+        <h1>Clonar Curso: ${c.name}</h1>
+        <div><a href="/admin/cursos">Voltar</a></div>
+      </div>
+      <form method="POST" action="/admin/cursos/${c.id}/clone">
+        <label>Novo nome</label><input name="name" value="${c.name}">
+        <label>Novo slug</label><input name="slug" value="${c.slug}-novo">
+        <label>Data de início do novo curso (YYYY-MM-DD ou YYYY-MM-DDTHH:mm-03:00)</label><input name="start_date">
+        <button>Clonar curso e aulas</button>
+      </form>
+      <p class="mut">As aulas serão clonadas com os mesmos títulos e R2 keys. O campo <code>available_from</code>
+      nos vídeos clonados ficará vazio (você define depois). Relatórios e matrículas não são clonados.</p>
+    </div>
+  `;
+  res.send(renderShell('Clonar curso', html));
+});
+
+app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
+  const { id } = req.params;
+  const { name, slug, start_date } = req.body || {};
+
+  // cria novo curso
+  const q1 = await pool.query(
+    'INSERT INTO courses(name,slug,start_date) VALUES($1,$2,$3) RETURNING id',
+    [name, slug, normalizeDateStr(start_date)]
+  );
+  const newCourseId = q1.rows[0].id;
+
+  // copia aulas do curso origem para o novo
+  await pool.query(`
+    INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from)
+    SELECT title, r2_key, $1, duration_seconds, NULL
+    FROM videos WHERE course_id = $2
+  `, [newCourseId, id]);
+
+  res.redirect('/admin/cursos');
+});
+
+
 // ====== SigV4 (R2) ======
 function hmac(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
 function sha256Hex(msg) { return crypto.createHash('sha256').update(msg).digest('hex'); }
@@ -1077,6 +1126,178 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
     res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao gerar relatório</h1><p class="mut">${err.message||err}</p></div>`));
   }
 });
+
+// ====== Relatórios com filtros ======
+// UI de filtros + tabela com % assistido
+app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+
+  // combos de curso e aula
+  const courses = (await pool.query(
+    'SELECT id, name, slug FROM courses ORDER BY name'
+  )).rows;
+
+  let videos = [];
+  if (course_id) {
+    videos = (await pool.query(
+      'SELECT id, title FROM videos WHERE course_id=$1 ORDER BY title', [course_id]
+    )).rows;
+  }
+
+  // monta SQL dinamicamente (filtra por curso, por vídeo, por aluno e por faixa de datas)
+  const params = [];
+  const where = [];
+
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q) {
+    params.push(`%${q.toLowerCase()}%`);
+    where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`);
+  }
+  if (dt_from) { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)   { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  // agregação por aluno x vídeo, calculando max(video_time) e % assistido
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email, v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e   ON e.session_id = s.id
+      JOIN users u    ON u.id = s.user_id
+      JOIN videos v   ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+    )
+    SELECT *,
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  // HTML da página
+  const courseOptions = ['<option value="">(Todos)</option>']
+    .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
+    .join('');
+  const videoOptions = ['<option value="">(Todos)</option>']
+    .concat(videos.map(v => `<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
+    .join('');
+
+  const table = rows.map(r => `
+    <tr>
+      <td>${r.full_name}</td>
+      <td>${r.email}</td>
+      <td>${r.title}</td>
+      <td>${r.duration_seconds ?? '—'}</td>
+      <td>${r.max_time ?? 0}</td>
+      <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
+    </tr>
+  `).join('');
+
+  const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+    course_id: course_id || '',
+    video_id: video_id || '',
+    q: q || '',
+    dt_from: dt_from || '',
+    dt_to: dt_to || ''
+  }).toString();
+
+  const html = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <h1>Relatórios</h1>
+        <div><a href="/aulas">Voltar</a></div>
+      </div>
+
+      <form method="GET" action="/admin/relatorios" class="mt2">
+        <div class="row">
+          <div>
+            <label>Curso</label>
+            <select name="course_id" onchange="this.form.submit()">${courseOptions}</select>
+          </div>
+          <div>
+            <label>Aula (vídeo)</label>
+            <select name="video_id">${videoOptions}</select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Aluno (nome ou email)</label>
+            <input name="q" value="${q||''}" placeholder="ex.: maria@ / João">
+          </div>
+          <div>
+            <label>De (client_ts)</label>
+            <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
+          </div>
+          <div>
+            <label>Até (client_ts)</label>
+            <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
+          </div>
+        </div>
+        <button class="mt">Aplicar filtros</button>
+        <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+      </form>
+
+      <table>
+        <tr>
+          <th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th>
+        </tr>
+        ${table || '<tr><td colspan="6" class="mut">Sem dados para os filtros selecionados.</td></tr>'}
+      </table>
+    </div>
+  `;
+  res.send(renderShell('Relatórios', html));
+});
+
+// CSV com os mesmos filtros (separador ; para Excel BR)
+app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
+  const { course_id, video_id, q, dt_from, dt_to } = req.query;
+  const params = [];
+  const where = [];
+
+  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+  if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+  if (dt_from)   { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
+  if (dt_to)     { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+  const sql = `
+    WITH base AS (
+      SELECT u.id AS user_id, u.full_name, u.email, v.id AS video_id, v.title, v.duration_seconds,
+             MAX(e.video_time) AS max_time
+      FROM sessions s
+      JOIN events e   ON e.session_id = s.id
+      JOIN users u    ON u.id = s.user_id
+      JOIN videos v   ON v.id = s.video_id
+      ${whereSql}
+      GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+    )
+    SELECT full_name, email, title AS video_title, duration_seconds, max_time,
+      CASE
+        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+      END AS pct
+    FROM base
+    ORDER BY full_name, video_title
+  `;
+  const rows = (await pool.query(sql, params)).rows;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  const header = 'full_name;email;video_title;duration_seconds;max_time;pct\n';
+  const body = rows.map(r =>
+    `${(r.full_name||'').replace(/;/g,' ')};${r.email};${(r.video_title||'').replace(/;/g,' ')};${r.duration_seconds??''};${r.max_time??0};${r.pct??''}`
+  ).join('\n');
+  res.send(header + body);
+});
+
 
 // ====== APIs ======
 app.post('/api/login', async (req,res)=>{

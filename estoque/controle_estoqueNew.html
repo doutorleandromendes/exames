@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<script src="https://cdn.jsdelivr.net/npm/json5@2/dist/index.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Controle de Estoque — v2.3 (UI imediata + recheck)</title>
+<style>
+  :root { --blue:#1976d2; --red:#e53935; --green:#2e7d32; --warn:#f7c948; }
+  body{font-family:-apple-system,system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#fafafa;color:#111}
+  header{background:var(--blue);color:#fff;padding:12px}
+  h2{margin:0 0 6px 0;font-size:18px}
+  #topbar{display:grid;grid-template-columns:auto 1fr auto auto auto auto;gap:6px;align-items:center}
+  select,input[type=text]{padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:14px}
+  button{padding:8px 12px;border:none;border-radius:6px;cursor:pointer;font-size:14px}
+  .action{background:var(--blue);color:#fff}
+  .minus{background:var(--red);color:#fff}
+  .plus{background:var(--green);color:#fff}
+  #status{padding:8px;font-size:12px;text-align:center}
+  #list{padding:8px}
+  .card{background:#fff;border:1px solid #ddd;border-radius:10px;margin:6px 0;padding:10px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+  .low-card{background:#fff8e1;border-color:var(--warn)}
+  .nome{font-weight:600;margin-bottom:4px}
+  .sku{font-size:12px;color:#555}
+  .low{color:#c62828;font-weight:700}
+  .right{display:grid;grid-auto-flow:column;gap:6px;align-items:center}
+  .qty{width:72px;text-align:center;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:16px}
+  .low-input{background:#fff59d}
+  .footer{position:sticky;bottom:0;background:#fff;border-top:1px solid #eaeaea;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:8px}
+  dialog{border:1px solid #e7e7ef;border-radius:12px;padding:16px;max-width:720px;width:calc(100% - 32px)}
+  dialog form{display:grid;gap:10px}
+  dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  dialog input{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px}
+  dialog menu{display:flex;gap:8px;justify-content:flex-end;margin:0;padding:0}
+  #err{white-space:pre-wrap;background:#fdecea;color:#611a15;border:1px solid #f5c6cb;border-radius:8px;padding:8px;margin:8px;display:none}
+  #hint{white-space:pre-wrap;background:#fff3cd;color:#663c00;border:1px solid #ffeeba;border-radius:8px;padding:8px;margin:8px;display:none}
+</style>
+</head>
+<body>
+<header>
+  <h2>Controle de Estoque — v2.3 (UI imediata + recheck)</h2>
+  <div id="topbar">
+    <select id="locationSel">
+      <option value="EM_USO">EM USO</option>
+      <option value="STORAGE">STORAGE</option>
+    </select>
+    <input type="text" id="q" placeholder="Buscar por nome/SKU…">
+    <button class="action" id="refreshBtn">Recarregar CSV</button>
+    <button class="action" id="saveBtn">Salvar no GitHub</button>
+    <button class="action" id="settingsBtn">Configurações</button>
+    <button class="action" id="diagBtn">Diagnóstico</button>
+  </div>
+</header>
+
+<div id="err"></div>
+<div id="hint"></div>
+<div id="status">Carregando…</div>
+<div id="list"></div>
+
+<div class="footer">
+  <button id="preencherZero">Preencher 0 em branco</button>
+  <button id="exportCsv">Exportar CSV</button>
+  <span id="csvStatus"></span>
+</div>
+
+<!-- Configurações -->
+<dialog id="cfgDialog">
+  <form method="dialog">
+    <h3 style="margin:0">Configurações</h3>
+    <small>Repo: <b>doutorleandromendes/exames</b> (branch <b>main</b>) — CSV: <b>products.csv</b> — JSON: <b>estoque.v2.json</b></small>
+    <div class="grid">
+      <label>Token (github_pat_…)
+        <input id="ghToken" type="password" placeholder="github_pat_...">
+      </label>
+      <label>Seu nome (commit)
+        <input id="ghName" placeholder="Seu Nome">
+      </label>
+      <label>Seu e-mail (commit)
+        <input id="ghEmail" placeholder="seuemail@exemplo.com">
+      </label>
+    </div>
+    <menu>
+      <button value="cancel">Fechar</button>
+      <button id="saveCfgBtn" value="default" class="action">Salvar</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- Diagnóstico -->
+<dialog id="diagDialog">
+  <form method="dialog">
+    <h3 style="margin:0 0 8px 0">Diagnóstico</h3>
+    <pre id="diagPre" style="white-space:pre-wrap;max-height:55vh;overflow:auto;background:#f6f8fa;border:1px solid #e1e4e8;border-radius:8px;padding:10px;"></pre>
+    <menu>
+      <button value="cancel" class="action">Fechar</button>
+    </menu>
+  </form>
+</dialog>
+
+<script>
+(function(){
+  const RAW_CSV_URL = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/products.csv';
+  const API_JSON_URL = 'https://api.github.com/repos/doutorleandromendes/exames/contents/estoque.v2.json';
+  const BRANCH = 'main';
+
+  let token = localStorage.getItem('gh_token_v1') || '';
+  let author = { name: localStorage.getItem('gh_name')||'', email: localStorage.getItem('gh_email')||'' };
+  let produtos = []; // {sku, nome, categoria, estoque(string), alerta}
+  let locationSel = 'EM_USO';
+
+  const $ = (id)=>document.getElementById(id);
+  const log = (t)=>{ const el=$('status'); if(el) el.textContent=t; };
+  const showErr = (m)=>{ const el=$('err'); el.style.display='block'; el.textContent=m; };
+  const showHint = (m)=>{ const el=$('hint'); el.style.display='block'; el.textContent=m; };
+  function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/'/g,'&#39;'); }
+  function slugifySKU(text){ const t=(text||'').toUpperCase(); const base=t.replace(/[^A-Z0-9\s\-]/g,'').split(/\s+/).filter(Boolean).map(w=>w[0]).join(''); return (base.slice(0,8) || t.replace(/[^A-Z0-9]/g,'').slice(0,8) || 'SKU'); }
+  function unifyName(n){ n=String(n||'').trim(); if(/epstein\s*-?\s*barr/i.test(n)) return 'Epstein-Barr (VCA/EBNA/Heterófilos)'; const g=n.match(/^(.+?)\s*-\s*.*?(IgG|IgM)/i); if(g){return g[1].trim()+' (IgG/IgM)';} if(/\b(igg|igm)\b/i.test(n)) return n.replace(/\s*-\s*(IgG|IgM).*/i,' (IgG/IgM)'); return n; }
+  function nameKey(s){ return unifyName(String(s||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim(); }
+
+  async function loadCSV(){
+    try{
+      log('Carregando CSV…');
+      const r = await fetch(RAW_CSV_URL+'?_ts='+Date.now(), {cache:'reload'});
+      if(!r.ok) throw new Error('CSV '+r.status);
+      const text = await r.text();
+      const rawNames = String(text).split(/\r?\n/).map(l => (l.split(';')[0]||'').trim()).filter(Boolean);
+      const map={};
+      rawNames.forEach((n)=>{
+        const u = unifyName(n);
+        if(!map[u]) map[u] = { sku: slugifySKU(u), nome: u, categoria:'', estoque:'', alerta: (u.toLowerCase().includes('antígeno')||u.toLowerCase().includes('antigeno'))?10:5 };
+      });
+      produtos = Object.values(map).sort((a,b)=> a.nome.localeCompare(b.nome, 'pt', {sensitivity:'base'}));
+      render();
+      log('Lista carregada ('+locationSel+').');
+      await loadJSON();
+    }catch(e){ showErr('Erro ao carregar CSV: '+(e&&e.message?e.message:e)); log('Falha ao carregar CSV'); }
+  }
+
+  function authHeaders(){
+    const h = new Headers();
+    h.set('Accept','application/vnd.github+json');
+    h.set('X-GitHub-Api-Version','2022-11-28');
+    if(token) h.set('Authorization','Bearer '+token.trim());
+    return h;
+  }
+  async function githubGetJSON(){
+    const url = API_JSON_URL + '?ref='+encodeURIComponent(BRANCH)+'&_ts='+Date.now();
+    const r = await fetch(url,{headers:authHeaders(),mode:'cors'});
+    if(r.status===404) return {exists:false};
+    const txt = await r.text();
+    if(!r.ok){ showErr('GET '+r.status+' – corpo: '+txt.slice(0,180)); throw new Error('GET '+r.status); }
+    let data=null; try{ data = JSON.parse(txt); }catch(e){ showErr('GET OK mas JSON inválido da API. Corpo: '+txt.slice(0,180)); throw e; }
+    const content = atob(String(data.content||'').replace(/\n/g,''));
+    let json=null; try{ json=JSON.parse(content); }catch(_e){ json=null; }
+    return {exists:true, sha:data.sha, json, rawApiPreview: txt.slice(0,200) };
+  }
+  async function githubPutJSON(payload){
+  if (!token) throw new Error('Token não configurado. Abra Configurações.');
+
+  let sha = null;
+  try {
+    const cur = await githubGetJSON();
+    if (cur.exists) sha = cur.sha;
+  } catch (_e) {}
+
+  // UTF-8 seguro: serializa -> bytes -> base64
+  const enc   = new TextEncoder();
+  const bytes = enc.encode(JSON.stringify(payload, null, 2));
+  const b64   = btoa(String.fromCharCode(...bytes));
+
+  const body = {
+    message: `Atualiza estoque.v2.json (${BRANCH})`,
+    content: b64,
+    branch: BRANCH,
+    committer: { name: author.name || 'web', email: author.email || 'web@example.com' }
+  };
+  if (sha) body.sha = sha;
+
+
+    const r = await fetch(API_JSON_URL, {
+      method:'PUT',
+      headers: new Headers([...authHeaders(), ['Content-Type','application/json']]),
+      body: JSON.stringify(body),
+      mode:'cors'
+    });
+    const txt = await r.text();
+    if(!r.ok){ showErr('PUT '+r.status+' – '+txt.slice(0,200)); throw new Error('PUT '+r.status); }
+    return JSON.parse(txt);
+  }
+
+  function ensureSchema(obj){
+    if(obj && obj.locations) return obj;
+    if(obj && Array.isArray(obj.produtos)){
+      const em = obj.produtos.map(p=>({sku:p.sku, nome:p.nome, estoque:(p.estoque===0||p.estoque==='0')?0:Number(p.estoque)||0, alerta:(typeof p.alerta!=='undefined'?p.alerta:5)}));
+      const st = obj.produtos.map(p=>({sku:p.sku, nome:p.nome, estoque:'', alerta:(typeof p.alerta!=='undefined'?p.alerta:5)}));
+      return { meta:{updated:new Date().toISOString(), migrated:true}, locations:{ EM_USO: em, STORAGE: st } };
+    }
+    return { meta:{updated:new Date().toISOString()}, locations:{ EM_USO: [], STORAGE: [] } };
+  }
+
+  function applyLocation(payload){
+    const loc = (payload.locations||{})[locationSel] || [];
+    const bySku=Object.create(null), byName=Object.create(null);
+    produtos.forEach((p,i)=>{ if(p&&p.sku) bySku[p.sku]=i; const nk=nameKey(p&&p.nome); if(nk) byName[nk]=i; });
+    // NÃO limpamos tudo antes — preserva o que já está na tela
+    let applied=0;
+    for(const row of loc){
+      let idx=-1;
+      if(row && row.sku && (row.sku in bySku)) idx=bySku[row.sku];
+      if(idx<0 && row && row.nome){ const nk=nameKey(row.nome); if(nk in byName) idx=byName[nk]; }
+      if(idx>=0){
+        let v = row.estoque;
+        if (v === 0 || v === '0') v = '0';
+        else if (v === '' || v == null) v = '';
+        else v = String(v);
+        produtos[idx].estoque = v;
+        applied++;
+      }
+    }
+    log('Aplicados neste local: '+applied+'/'+loc.length);
+    render();
+  }
+
+  function syncFromDOM(){
+    const inputs = document.querySelectorAll('input.qty');
+    const bySku = Object.create(null); produtos.forEach((p,i)=>{ bySku[p.sku]=i; });
+    inputs.forEach(inp=>{ const sku = inp.dataset.sku; if(bySku[sku]!=null){ produtos[bySku[sku]].estoque = inp.value; } });
+  }
+
+  function buildMergedPayload(base){
+  // Atualiza SOMENTE 'estoque', preservando todos os outros campos do JSON
+  const payload = ensureSchema(base||{});
+  const old = (payload.locations||{})[locationSel] || [];
+
+  // Lê o que o usuário digitou
+  syncFromDOM();
+
+  // Índices da UI para lookup (por SKU e por nome normalizado)
+  const bySku = Object.create(null), byName = Object.create(null);
+  produtos.forEach((p)=>{ 
+    if(p && p.sku) bySku[String(p.sku).trim()] = p; 
+    const nk = nameKey(p && p.nome); 
+    if(nk) byName[nk] = p; 
+  });
+
+  // Percorre a lista já existente no JSON e só muda 'estoque'
+  const newList = old.map((prev)=>{
+    const p = (prev && prev.sku && bySku[String(prev.sku).trim()]) 
+           || (prev && prev.nome && byName[nameKey(prev.nome)]) 
+           || null;
+    const raw = p ? ((p.estoque===0 || p.estoque==='0') ? '0' : String(p.estoque||'')) : '';
+    let final;
+    if(raw===''){
+      // Mantém o estoque anterior se não houver valor novo na UI
+      final = (typeof prev.estoque==='number' ? prev.estoque 
+               : (prev.estoque==='' ? '' : Number(prev.estoque)||0));
+    } else {
+      final = Number(raw); if(!isFinite(final)) final = 0;
+    }
+    const out = Object.assign({}, prev);
+    out.estoque = final;
+    return out;
+  });
+
+  payload.locations[locationSel] = newList;
+  // NÃO atualizar payload.meta.updated (mantém intacto)
+  return payload;
+}
+
+  function render(){
+    const root=$('list'), statusEl=$('status');
+    const q=($('q').value||'').trim().toLowerCase();
+    const items=produtos.filter(p=>{ const n=(p.nome||'').toLowerCase(), s=(p.sku||'').toLowerCase(); return !q || n.includes(q) || s.includes(q); });
+    items.sort((a,b)=> String(a.nome||'').localeCompare(String(b.nome||''), 'pt', {sensitivity:'base'}));
+    const threshold=(locationSel==='STORAGE')?10:5;
+
+    root.innerHTML='';
+    for(const p of items){
+      const low=(p.estoque!=='' && !isNaN(Number(p.estoque)) && Number(p.estoque)<threshold);
+      const card=document.createElement('div'); card.className='card'+(low?' low-card':'');
+      const left=document.createElement('div'); const right=document.createElement('div'); right.className='right';
+      left.innerHTML='<div class="nome">'+escapeHtml(p.nome)+'</div>'+'<div class="sku">SKU: <b>'+escapeHtml(p.sku)+'</b> '+(low?'<span class="low">• Abaixo do alerta</span>':'')+'</div>';
+      const minus=document.createElement('button'); minus.className='minus'; minus.textContent='–1';
+      const plus=document.createElement('button'); plus.className='plus'; plus.textContent='+1';
+      const input=document.createElement('input'); input.className='qty'+(low?' low-input':''); input.type='number'; input.inputMode='numeric'; input.placeholder='Estoque'; input.value=(p.estoque===0?'0':(p.estoque||''));
+      input.dataset.sku = p.sku;
+      input.oninput=()=>{ p.estoque=input.value; };
+      minus.onclick=()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=Math.max(0,n-1); input.value=n; p.estoque=String(n); render(); };
+      plus.onclick =()=>{ let n=parseInt(input.value||'0',10); if(isNaN(n)) n=0; n=n+1; input.value=n; p.estoque=String(n); render(); };
+      right.appendChild(minus); right.appendChild(input); right.appendChild(plus);
+      card.appendChild(left); card.appendChild(right); root.appendChild(card);
+    }
+    if(!items.length) root.innerHTML='<div class="sku">Nenhum item encontrado.</div>';
+    statusEl.textContent='Lista '+(produtos.length? 'carregada':'vazia')+' ('+locationSel+').';
+  }
+
+  async function githubGetJSONFresh(){
+    const rand = crypto.getRandomValues(new Uint32Array(1))[0];
+    const url = API_JSON_URL + '?ref=' + encodeURIComponent(BRANCH) + '&_ts=' + Date.now() + '&_bust=' + rand;
+    const r = await fetch(url, { headers: authHeaders(), mode: 'cors', cache: 'no-store' });
+    if (r.status === 404) return { exists:false };
+    const txt = await r.text();
+    if(!r.ok) throw new Error('GET '+r.status+' – '+txt.slice(0,200));
+    const data = JSON.parse(txt);
+    const content = atob(String(data.content||'').replace(/\n/g,''));
+    return { exists:true, sha:data.sha, json: JSON.parse(content) };
+  }
+
+  async function onSave(){
+    const btn = $('saveBtn'); const hint=$('hint'); hint.style.display='none';
+    try{
+      if(btn){ btn.disabled=true; btn.textContent='Salvando…'; }
+      log('Preparando dados…');
+
+      const cur = await githubGetJSON().catch(()=>({exists:false}));
+      const payload = buildMergedPayload(cur && cur.json);
+
+      // >>> APLICA IMEDIATAMENTE NA UI (sem esperar GitHub)
+      applyLocation(payload);
+      showHint('Pré-visualização aplicada localmente. Gravando no GitHub…');
+
+      let sendingCount = 0; produtos.forEach(p=>{ const v = (p.estoque===0 || p.estoque==='0') ? '0' : String(p.estoque||''); if(v !== '') sendingCount++; });
+      log('Gravando no GitHub… (enviando não-vazios: '+sendingCount+')');
+
+      const putRes = await githubPutJSON(payload);
+      const commitSha = (putRes && putRes.commit && putRes.commit.sha) ? putRes.commit.sha : '(sem sha)';
+      showHint('Gravado com sucesso. Commit SHA: ' + commitSha +
+        '\nAbra: https://github.com/doutorleandromendes/exames/blob/main/estoque.v2.json');
+
+      await new Promise(r=>setTimeout(r, 1500));
+      log('Conferindo no remoto (fresh)…');
+
+      const after = await githubGetJSONFresh();
+      const applied = ensureSchema(after.json);
+      const loc = (applied.locations||{})[locationSel] || [];
+      const totalNotEmpty = loc.filter(x => String(x.estoque||'') !== '').length;
+
+      showHint('Remoto atualizado: ' + totalNotEmpty + ' itens não-vazios em ' + locationSel);
+
+      // >>> APLICA DE NOVO, AGORA COM O REMOTO
+      applyLocation(applied);
+      log('Pronto.');
+    }catch(e){ showErr('Falha ao salvar: '+(e&&e.message?e.message:e)); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent='Salvar no GitHub'; } }
+  }
+
+  $('refreshBtn').onclick=loadCSV;
+  $('saveBtn').onclick=onSave;
+  $('settingsBtn').onclick=function(){ 
+    const t = localStorage.getItem('gh_token_v1')||''; 
+    $('ghToken').value=t; 
+    $('ghName').value=localStorage.getItem('gh_name')||''; 
+    $('ghEmail').value=localStorage.getItem('gh_email')||''; 
+    $('cfgDialog').showModal(); 
+  };
+  $('saveCfgBtn').onclick=function(){ 
+    const t = ($('ghToken').value||'').trim(); 
+    const n = ($('ghName').value||'').trim(); 
+    const e = ($('ghEmail').value||'').trim(); 
+    localStorage.setItem('gh_token_v1', t); 
+    localStorage.setItem('gh_name', n); 
+    localStorage.setItem('gh_email', e); 
+    token=t; author.name=n; author.email=e; 
+    $('cfgDialog').close(); 
+  };
+  $('diagBtn').onclick=async function(){
+    let extra='';
+    try{ const r=await githubGetJSON(); extra='Remoto: '+(r.exists?'existe':'não existe')+(r.exists? ('; JSON='+!!r.json):''); }catch(e){ extra='Falha remoto: '+(e&&e.message?e.message:e); }
+    $('diagPre').textContent=[
+      'Owner/Repo: doutorleandromendes/exames',
+      'Branch: main',
+      'CSV: products.csv',
+      'JSON: estoque.v2.json',
+      'Itens: '+produtos.length,
+      'Local: '+locationSel,
+      extra
+    ].join('\n');
+    $('diagDialog').showModal();
+  };
+  $('locationSel').onchange=function(){ locationSel=this.value; loadJSON(); };
+  $('q').oninput=render;
+
+  function exportCSV(){
+    const head=['local','sku','nome','categoria','estoque','alerta'];
+    const esc=v=>{v=String(v==null?'':v); return /[",\n]/.test(v)? '"'+v.replace(/"/g,'""')+'"' : v;};
+    const lines=[head.join(',')];
+    for(const p of produtos){ lines.push([locationSel,p.sku,p.nome,p.categoria||'',p.estoque||'',p.alerta].map(esc).join(',')); }
+    const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='estoque_'+locationSel.toLowerCase()+'.csv'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+  }
+  $('exportCsv').onclick=exportCSV;
+  $('preencherZero').onclick=function(){ if(!confirm('Preencher 0 nos campos vazios?')) return; produtos.forEach(p=>{ if(!p.estoque) p.estoque='0';}); render(); };
+
+  async function loadJSON(){
+    try{
+      const got = await githubGetJSON();
+      if(!got.exists){ log('Sem estoque remoto.'); render(); return; }
+      if(!got.json){ showErr('estoque.v2.json inválido (não é JSON).'); return; }
+      const payload = ensureSchema(got.json);
+      applyLocation(payload);
+    }catch(e){ showErr('Erro ao ler estoque.v2.json: '+(e&&e.message?e.message:e)); }
+  }
+
+  loadCSV();
+})();
+</script>
+<script>
+  async function carregarConfig(url) {
+    const resp = await fetch(url + (url.includes('?') ? '&' : '?') + '_=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ao buscar ' + url);
+    const texto = await resp.text();
+    try { 
+      return JSON.parse(texto); 
+    } catch (e1) {
+      try { 
+        return JSON5.parse(texto); 
+      } catch (e2) { 
+        throw new Error('JSON inválido em ' + url + ': ' + (e2?.message || e2)); 
+      }
+    }
+  }
+  
+  async function lerConfiguracaoEstoque() {
+    const url = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/estoque.v2.json'; // ajuste se o caminho for diferente
+    return carregarConfig(url);
+  }
+  
+  // Exemplo de inicialização
+  (async () => {
+    try {
+      window.__CFG__ = await lerConfiguracaoEstoque();
+      // continue sua inicialização usando window.__CFG__
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao ler estoque.v2.json: ' + err.message);
+    }
+  })();
+  </script>  
+</body>
+</html>

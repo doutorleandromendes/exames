@@ -184,6 +184,39 @@ function generateSignedUrlForKey(key) {
   return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
 
+// ==== Import helpers (CSV ; e colar-colunas) ====
+
+// CSV simples com separador ';' (Excel BR). Sem aspas/escape avançado de propósito.
+function parseCSVSemicolon(text) {
+  const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return { header: [], rows: [] };
+  const header = lines[0].split(';').map(s => s.trim());
+  const rows = lines.slice(1).map(line => {
+    const cols = line.split(';').map(s => s.trim());
+    const obj = {};
+    header.forEach((h, i) => obj[h] = (cols[i] ?? '').trim());
+    return obj;
+  });
+  return { header, rows };
+}
+
+// Monta linhas a partir das "colunas coladas" (cada textarea = uma coluna, linhas por quebra de linha)
+// Retorna um array de objetos com as chaves do schema que usaremos no import.
+function buildRowsFromPastedColumns(cols) {
+  const keys = ['full_name', 'email', 'password', 'course_slug', 'user_expires_at', 'member_expires_at', 'is_admin'];
+  const arrays = keys.map(k => String(cols[k] || '').split(/\r?\n/));
+  const maxLen = Math.max(...arrays.map(a => a.length));
+  const rows = [];
+  for (let i = 0; i < maxLen; i++) {
+    const r = {};
+    keys.forEach((k, idx) => r[k] = (arrays[idx][i] || '').trim());
+    // ignora linhas totalmente vazias
+    if (Object.values(r).some(v => v)) rows.push(r);
+  }
+  return rows;
+}
+
+
 // ====== Utils ======
 function normalizeDateStr(s) {
   if (!s) return null;
@@ -749,6 +782,166 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
     res.status(500).send('Falha ao remover matrícula');
   }
 });
+
+// ==== Importar alunos: UI (CSV ; OU colar colunas) ====
+app.get('/admin/import', adminRequired, async (req, res) => {
+  const hint = 'Cabeçalho CSV esperado: full_name;email;password;course_slug;user_expires_at;member_expires_at;is_admin';
+  const html = `
+    <div class="card">
+      <div class="right" style="justify-content:space-between">
+        <h1>Importar alunos</h1>
+        <div><a href="/aulas">Voltar</a></div>
+      </div>
+
+      <h2 class="mt2">Opção A — Colar CSV inteiro (com ;)</h2>
+      <p class="mut">${hint}</p>
+      <form method="POST" action="/admin/import" class="mt2">
+        <input type="hidden" name="mode" value="csv">
+        <label>CSV</label>
+        <textarea name="csv" rows="10" placeholder="${hint}"></textarea>
+        <button class="mt">Importar CSV</button>
+      </form>
+
+      <h2 class="mt2">Opção B — Colar colunas separadas</h2>
+      <p class="mut">Cole cada coluna em seu campo; as linhas são separadas por quebras de linha.</p>
+      <form method="POST" action="/admin/import" class="mt2">
+        <input type="hidden" name="mode" value="columns">
+        <div class="row">
+          <div>
+            <label>full_name</label><textarea name="full_name" rows="6" placeholder="João Silva&#10;Maria Souza"></textarea>
+            <label>email</label><textarea name="email" rows="6" placeholder="aluno@ex.com&#10;aluna@ex.com"></textarea>
+            <label>password</label><textarea name="password" rows="6" placeholder="Senha123&#10;Senha456"></textarea>
+            <label>course_slug</label><textarea name="course_slug" rows="6" placeholder="infecto-2025&#10;infecto-2025"></textarea>
+          </div>
+          <div>
+            <label>user_expires_at (opcional)</label><textarea name="user_expires_at" rows="6" placeholder="2025-12-20&#10;2025-12-20"></textarea>
+            <label>member_expires_at (opcional)</label><textarea name="member_expires_at" rows="6" placeholder="2025-12-20&#10;2025-12-20"></textarea>
+            <label>is_admin (0/1, opcional)</label><textarea name="is_admin" rows="6" placeholder="0&#10;0"></textarea>
+          </div>
+        </div>
+        <button class="mt">Importar colunas</button>
+      </form>
+
+      <p class="mut mt">Observações:
+      <br>• Se o usuário já existir, atualizamos nome/validade e senha (se informada).
+      <br>• Matrícula é criada/atualizada no curso indicado (course_slug).
+      <br>• Datas aceitam <code>YYYY-MM-DD</code> (assumimos 23:59:59-03:00) ou <code>YYYY-MM-DDTHH:mm</code>.</p>
+    </div>`;
+  res.send(renderShell('Importar alunos', html));
+});
+
+// ==== Importar alunos: processamento ====
+app.post('/admin/import', adminRequired, async (req, res) => {
+  try {
+    const mode = String(req.body?.mode || '').trim();
+    let rows = [];
+
+    if (mode === 'csv') {
+      const csv = (req.body?.csv || '').trim();
+      if (!csv) return res.status(400).send(renderShell('Erro', `<div class="card"><h1>CSV vazio</h1><a href="/admin/import">Voltar</a></div>`));
+      const { header, rows: rr } = parseCSVSemicolon(csv);
+      const need = ['full_name','email','password','course_slug','user_expires_at','member_expires_at','is_admin'];
+      for (const h of need) if (!header.includes(h)) {
+        return res.status(400).send(renderShell('Erro', `<div class="card"><h1>Cabeçalho inválido</h1><p class="mut">Esperado: ${need.join(';')}</p><a href="/admin/import">Voltar</a></div>`));
+      }
+      rows = rr;
+    } else if (mode === 'columns') {
+      rows = buildRowsFromPastedColumns({
+        full_name: req.body?.full_name,
+        email: req.body?.email,
+        password: req.body?.password,
+        course_slug: req.body?.course_slug,
+        user_expires_at: req.body?.user_expires_at,
+        member_expires_at: req.body?.member_expires_at,
+        is_admin: req.body?.is_admin
+      });
+      if (!rows.length) {
+        return res.status(400).send(renderShell('Erro', `<div class="card"><h1>Nenhuma linha detectada</h1><a href="/admin/import">Voltar</a></div>`));
+      }
+    } else {
+      return res.status(400).send(renderShell('Erro', `<div class="card"><h1>Modo inválido</h1><a href="/admin/import">Voltar</a></div>`));
+    }
+
+    let created = 0, updated = 0, enrolled = 0, skipped = 0, errors = 0;
+
+    for (const r of rows) {
+      const full_name = (r.full_name || '').trim();
+      const emailRaw = (r.email || '').trim();
+      const email = emailRaw.toLowerCase();
+      const password = (r.password || '').trim();
+      const course_slug = (r.course_slug || '').trim();
+      const user_expires_at = normalizeDateStr(r.user_expires_at);
+      const member_expires_at = normalizeDateStr(r.member_expires_at);
+      const is_admin = String(r.is_admin || '').trim() === '1';
+
+      if (!full_name || !email) { skipped++; continue; }
+
+      // upsert user
+      const uSel = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+      let userId;
+      if (!uSel.rows[0]) {
+        const hash = password ? await bcrypt.hash(password, 10) : await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 10);
+        const ins = await pool.query(
+          'INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
+          [full_name, email, hash, user_expires_at || null]
+        );
+        userId = ins.rows[0].id;
+        created++;
+      } else {
+        userId = uSel.rows[0].id;
+        if (password) {
+          const hash = await bcrypt.hash(password, 10);
+          await pool.query('UPDATE users SET full_name=$1, password_hash=$2, expires_at=$3 WHERE id=$4',
+            [full_name, hash, user_expires_at || null, userId]);
+        } else {
+          await pool.query('UPDATE users SET full_name=$1, expires_at=$2 WHERE id=$3',
+            [full_name, user_expires_at || null, userId]);
+        }
+        updated++;
+      }
+
+      // promover a admin se solicitado (opcional)
+      if (is_admin) {
+        await pool.query('UPDATE users SET full_name=$1 WHERE id=$2', [full_name, userId]); // mantemos simples, papel de admin é cookie/secret
+      }
+
+      // matrícula no curso (se slug veio)
+      if (course_slug) {
+        const cSel = await pool.query('SELECT id FROM courses WHERE slug=$1', [course_slug]);
+        if (!cSel.rows[0]) {
+          errors++; // curso não encontrado
+        } else {
+          const courseId = cSel.rows[0].id;
+          await pool.query(
+            `INSERT INTO course_members(user_id,course_id,role,expires_at)
+             VALUES($1,$2,$3,$4)
+             ON CONFLICT (user_id,course_id) DO UPDATE SET expires_at=EXCLUDED.expires_at`,
+            [userId, courseId, 'student', member_expires_at || null]
+          );
+          enrolled++;
+        }
+      }
+    }
+
+    const msg = `Importação concluída:
+    - criados: ${created}
+    - atualizados: ${updated}
+    - matrículas inseridas/atualizadas: ${enrolled}
+    - ignorados (sem nome/email): ${skipped}
+    - erros (curso não encontrado): ${errors}`;
+
+    const html = `<div class="card">
+      <h1>Importar alunos</h1>
+      <p>${msg.replace(/\n/g,'<br>')}</p>
+      <p><a href="/admin/alunos">Ir para alunos</a> · <a href="/admin/import">Voltar</a></p>
+    </div>`;
+    res.send(renderShell('Importar — resultado', html));
+  } catch (err) {
+    console.error('IMPORT ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao importar</h1><p class="mut">${err.message || err}</p></div>`));
+  }
+});
+
 
 // ====== Player (admin bypass de matrícula) ======
 app.get('/aula/:id', authRequired, async (req,res)=>{

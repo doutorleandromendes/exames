@@ -1358,14 +1358,21 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
     const body = `
       <div class="card">
         <h1>Importar alunos</h1>
-        <form method="POST" action="/admin/import" enctype="multipart/form-data">
+        <form method="POST" action="/admin/import">
           <label>Curso</label>
           <select name="course_id" required>${courseOpts}</select>
-          <label>Dados (CSV ou colar colunas: nome,email,senha,validade)</label>
-          <textarea name="data" rows="10" placeholder="João,j@ex.com,Senha123,2025-12-31"></textarea>
+  
+          <label>Dados (CSV ou colar colunas)</label>
+          <textarea name="data" rows="12" placeholder="Exemplos:
+  Nome completo, email, senha, validade
+  João Silva,joao@ex.com,Senha123,2025-12-31
+  Maria Souza,maria@ex.com,123456,2025-12-30
+  
+  Também funciona com ; como separador."></textarea>
+  
           <button class="mt">Importar</button>
         </form>
-        <p class="mut mt">Você pode colar direto as colunas ou enviar CSV (UTF-8).</p>
+        <p class="mut mt">Aceita vírgula <code>,</code> ou ponto-e-vírgula <code>;</code>. Linha de cabeçalho (se presente) é ignorada automaticamente.</p>
         <div class="mt"><a href="/aulas">Voltar</a></div>
       </div>`;
     res.send(renderShell('Importar alunos', body));
@@ -1373,30 +1380,72 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
   
   app.post('/admin/import', adminRequired, async (req,res)=>{
     try{
-      let { data, course_id } = req.body||{};
+      let { data, course_id } = req.body || {};
       if (!data || !course_id) return res.status(400).send('Dados e curso são obrigatórios');
-      const lines = data.split(/\r?\n/).map(l=>l.trim()).filter(l=>l);
-      for(const line of lines){
-        const [full_name,emailRaw,password,userExp] = line.split(',').map(x=>x.trim());
-        if(!emailRaw) continue;
-        const email = emailRaw.toLowerCase();
-        const hash = await bcrypt.hash(password||crypto.randomBytes(4).toString('hex'),10);
-        let userId;
+  
+      const lines = String(data).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  
+      // separa por ; se existir ; na linha, senão por ,
+      const splitSmart = (line) => {
+        const parts = (line.includes(';') ? line.split(';') : line.split(','))
+          .map(s => s.trim().replace(/^"(.*)"$/, '$1')); // remove aspas ao redor se houver
+        // completa até 4 colunas
+        while (parts.length < 4) parts.push('');
+        return parts.slice(0,4);
+      };
+  
+      // detecta se a primeira linha é cabeçalho
+      const maybeHeader = splitSmart(lines[0]).map(s => s.toLowerCase());
+      const isHeader =
+        maybeHeader.includes('nome') ||
+        maybeHeader.includes('full_name') ||
+        maybeHeader.includes('email') ||
+        maybeHeader.includes('senha') ||
+        maybeHeader.includes('password');
+  
+      const rows = isHeader ? lines.slice(1) : lines;
+  
+      for (const line of rows){
+        const [full_name_raw, email_raw, password_raw, userExp_raw] = splitSmart(line);
+        const full_name = (full_name_raw || '').trim();
+        const email = (email_raw || '').trim().toLowerCase();
+        const password = (password_raw && String(password_raw).length)
+          ? String(password_raw)
+          : crypto.randomBytes(4).toString('hex'); // senha aleatória se vazio
+        const userExp = normalizeDateStr(userExp_raw) || null;
+  
+        if (!email) continue;
+  
+        // cria/atualiza usuário
         const u = await pool.query('SELECT id FROM users WHERE email=$1',[email]);
-        if(u.rows[0]){
+        let userId;
+        if (u.rows[0]) {
           userId = u.rows[0].id;
-          await pool.query('UPDATE users SET full_name=$1 WHERE id=$2',[full_name||email,userId]);
-        }else{
-          const ins = await pool.query('INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
-            [full_name||email,email,hash, normalizeDateStr(userExp)||null]);
+          if (full_name) {
+            await pool.query('UPDATE users SET full_name=$1 WHERE id=$2',[full_name, userId]);
+          }
+          if (userExp) {
+            await pool.query('UPDATE users SET expires_at=$1 WHERE id=$2',[userExp, userId]);
+          }
+        } else {
+          const hash = await bcrypt.hash(password, 10);
+          const ins = await pool.query(
+            'INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
+            [full_name || email, email, hash, userExp]
+          );
           userId = ins.rows[0].id;
         }
-        await pool.query('INSERT INTO course_members(user_id,course_id,role) VALUES($1,$2,$3) ON CONFLICT (user_id,course_id) DO NOTHING',
-          [userId, course_id,'student']);
+  
+        // matricula no curso (ignora se já existe)
+        await pool.query(
+          'INSERT INTO course_members(user_id,course_id,role) VALUES($1,$2,$3) ON CONFLICT (user_id,course_id) DO NOTHING',
+          [userId, course_id, 'student']
+        );
       }
+  
       res.redirect('/admin/alunos');
     }catch(err){
-      console.error('ADMIN IMPORT ERROR',err);
+      console.error('ADMIN IMPORT ERROR', err);
       res.status(500).send('Falha ao importar alunos');
     }
   });

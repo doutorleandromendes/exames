@@ -2495,14 +2495,25 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
         ${page<totalPages ? `<a href="/admin/relatorio/${videoId}?page=${page+1}">Próxima »</a>` : `<span class="mut">Próxima »</span>`}
       </div>`;
 
+      // --- Botão "Limpar relatório" (POST) com redirect de volta para esta página
+const clearForm = `
+<form method="POST" action="/admin/relatorio/${videoId}/clear"
+      style="display:inline"
+      onsubmit="return confirm('Remover TODOS os eventos e sessões deste vídeo?');">
+  <input type="hidden" name="redirect" value="/admin/relatorio/${videoId}">
+  <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">Limpar relatório</button>
+</form>
+`;
+
     const body = `
       <div class="card">
         <div class="right" style="justify-content:space-between;gap:12px">
           <h1 style="margin:0">Relatório — ${safe(videoTitle)}</h1>
           <div>
-            <a href="/admin/relatorio/${videoId}.csv">Exportar CSV</a> ·
-            <a href="/aulas">Voltar</a>
-          </div>
+  <a href="/admin/relatorio/${videoId}.csv">Exportar CSV</a> ·
+  ${clearForm}
+  · <a href="/aulas">Voltar</a>
+</div>
         </div>
         <p class="mut">Curso: ${safe(courseName)} ${durationSec ? `· Duração do vídeo: <code>${durationSec}s</code>` : ''}</p>
 

@@ -1175,68 +1175,236 @@ app.get('/admin/relatorio/curso/:courseId/clear', adminRequired, async (req,res)
   }
 });
 
-// ====== Admin: Alunos (listar, criar, editar, matrículas) ======
-app.get('/admin/alunos', adminRequired, async (req,res)=>{
-  try{
-    const { rows:users } = await pool.query('SELECT id, full_name, email, expires_at FROM users ORDER BY full_name NULLS LAST, email');
-    const { rows:courses } = await pool.query('SELECT id, name, slug FROM courses ORDER BY name ASC');
-
-    // map de matrículas
-    const { rows:members } = await pool.query(`
-      SELECT cm.user_id, cm.course_id, cm.expires_at, c.name, c.slug
-      FROM course_members cm JOIN courses c ON c.id=cm.course_id`);
-    const byUser = new Map();
-    for(const m of members){
-      if(!byUser.has(m.user_id)) byUser.set(m.user_id, []);
-      byUser.get(m.user_id).push(m);
-    }
-
-    const userRows = users.map(u=>{
-      const m = byUser.get(u.id)||[];
-      const memberships = m.map(x=>`[${safe(x.slug)}] ${safe(x.name)}${x.expires_at?` <span class="mut">(até ${fmt(x.expires_at)})</span>`:''}`).join('<br/>');
-      return `<tr>
-        <td>${u.id}</td>
-        <td>${safe(u.full_name)||'-'}</td>
-        <td>${safe(u.email)}</td>
-        <td>${fmt(u.expires_at)||'<span class="mut">—</span>'}</td>
-        <td>${memberships||'<span class="mut">—</span>'}</td>
-        <td><a href="/admin/alunos/${u.id}/edit">editar</a></td>
-      </tr>`;
-    }).join('');
-
-    const courseOpts = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
-
-    const body = `
-      <div class="card">
-        <div class="right" style="justify-content:space-between"><h1>Alunos</h1>
-          <div><a href="/aulas">Voltar</a></div>
-        </div>
-        <table class="mt2"><thead><tr><th>ID</th><th>Nome</th><th>Email</th><th>Validade usuário</th><th>Matrículas</th><th></th></tr></thead>
-        <tbody>${userRows || '<tr><td colspan="6" class="mut">Nenhum aluno.</td></tr>'}</tbody></table>
-
-        <h2 class="mt2">Adicionar aluno manualmente</h2>
-        <form method="POST" action="/admin/alunos" class="mt2">
-          <div class="row">
-            <div>
-              <label>Nome completo</label><input name="full_name" required>
-              <label>Senha</label><input name="password" type="text" required placeholder="ex.: Abc123456">
-              <label>Validade do usuário (opcional)</label><input name="user_expires_at" type="datetime-local">
-            </div>
-            <div>
-              <label>Email</label><input name="email" type="email" required>
-              <label>Matricular no curso</label><select name="course_id">${courseOpts}</select>
-              <label>Validade da matrícula (opcional)</label><input name="member_expires_at" type="datetime-local">
-            </div>
+// ====== Admin: Alunos (listar, filtrar, seleção múltipla, criar, editar, matrículas) ======
+app.get('/admin/alunos', adminRequired, async (req, res) => {
+    try {
+      const { q, course_id, role } = req.query || {};
+  
+      // Cursos (inclua arquivados se quiser no filtro; aqui pego todos)
+      const { rows: courses } = await pool.query('SELECT id, name, slug FROM courses ORDER BY name ASC');
+  
+      // Monta filtro dinâmico
+      const params = [];
+      const where = [];
+  
+      if (q && q.trim()) {
+        params.push(`%${q.trim().toLowerCase()}%`);
+        where.push(`(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length})`);
+      }
+      if (course_id) {
+        params.push(course_id);
+        // só lista usuários matriculados no curso escolhido
+        where.push(`EXISTS (SELECT 1 FROM course_members cm WHERE cm.user_id = u.id AND cm.course_id = $${params.length})`);
+      }
+      if (role === 'admin')  where.push(`u.is_admin = true`);
+      if (role === 'student') where.push(`u.is_admin = false`);
+  
+      const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  
+      // Usuários filtrados
+      const { rows: users } = await pool.query(
+        `SELECT u.id, u.full_name, u.email, u.expires_at, u.is_admin, u.temp_password
+           FROM users u
+           ${whereSql}
+           ORDER BY u.full_name NULLS LAST, u.email`
+      , params);
+  
+      // Busca matrículas apenas dos usuários listados (evita tabela enorme quando há filtros)
+      let byUser = new Map();
+      if (users.length) {
+        const ids = users.map(u => u.id);
+        const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+        const { rows: members } = await pool.query(
+          `SELECT cm.user_id, cm.course_id, cm.expires_at, c.name, c.slug
+             FROM course_members cm
+             JOIN courses c ON c.id = cm.course_id
+            WHERE cm.user_id IN (${placeholders})`,
+          ids
+        );
+        for (const m of members) {
+          if (!byUser.has(m.user_id)) byUser.set(m.user_id, []);
+          byUser.get(m.user_id).push(m);
+        }
+      }
+  
+      // linhas da tabela
+      const userRows = users.map(u => {
+        const m = byUser.get(u.id) || [];
+        const memberships = m
+          .map(x => `[${safe(x.slug)}] ${safe(x.name)}${x.expires_at ? ` <span class="mut">(até ${fmt(x.expires_at)})</span>` : ''}`)
+          .join('<br/>') || '<span class="mut">—</span>';
+  
+        return `<tr>
+          <td><input type="checkbox" name="ids[]" value="${u.id}"></td>
+          <td>${u.id}</td>
+          <td>${safe(u.full_name) || '-'}</td>
+          <td>${safe(u.email)}</td>
+          <td>${fmt(u.expires_at) || '<span class="mut">—</span>'}</td>
+          <td>${u.is_admin ? 'Admin' : 'Aluno'}</td>
+          <td>${u.temp_password ? `<code>${safe(u.temp_password)}</code>` : '—'}</td>
+          <td><a href="/admin/alunos/${u.id}/edit">editar</a></td>
+        </tr>`;
+      }).join('');
+  
+      // opções de curso no filtro e no form de criação
+      const courseOptsFilter = ['<option value="">(Todos)</option>']
+        .concat(courses.map(c => `<option value="${c.id}" ${String(c.id) === String(course_id) ? 'selected' : ''}>[${safe(c.slug)}] ${safe(c.name)}</option>`))
+        .join('');
+      const courseOptsCreate = courses.map(c => `<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
+  
+      const roleOpts = `
+        <option value="">(Todos)</option>
+        <option value="student" ${role === 'student' ? 'selected' : ''}>Alunos</option>
+        <option value="admin" ${role === 'admin' ? 'selected' : ''}>Admins</option>
+      `;
+  
+      const body = `
+        <div class="card">
+          <div class="right" style="justify-content:space-between">
+            <h1>Alunos</h1>
+            <div><a href="/aulas">Voltar</a></div>
           </div>
-          <button class="mt">Criar aluno</button>
-        </form>
-      </div>`;
-    res.send(renderShell('Alunos', body));
-  }catch(err){
-    console.error('ADMIN STUDENTS LIST ERROR', err);
-    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
-  }
-});
+  
+          <!-- Filtros -->
+          <form method="GET" action="/admin/alunos" class="mt2">
+            <div class="row">
+              <div>
+                <label>Nome/Email</label>
+                <input name="q" value="${q ? safe(q) : ''}" placeholder="ex.: maria / @usf.edu.br">
+              </div>
+              <div>
+                <label>Curso</label>
+                <select name="course_id">${courseOptsFilter}</select>
+              </div>
+              <div>
+                <label>Tipo</label>
+                <select name="role">${roleOpts}</select>
+              </div>
+            </div>
+            <button class="mt">Filtrar</button>
+            <a href="/admin/alunos" class="mt" style="margin-left:12px;display:inline-block">Limpar</a>
+          </form>
+  
+          <!-- Ações em lote -->
+          <form method="POST" action="/admin/alunos/bulk" id="bulkForm">
+            <div class="mt2" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+              <label><input type="checkbox" id="selectAll"> Selecionar todos</label>
+              <button type="submit" name="action" value="delete" onclick="return confirm('Apagar os alunos selecionados? Esta ação também remove matrículas, sessões e eventos.');">Apagar selecionados</button>
+            </div>
+  
+            <table class="mt2">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>ID</th>
+                  <th>Nome</th>
+                  <th>Email</th>
+                  <th>Validade usuário</th>
+                  <th>Tipo</th>
+                  <th>Senha temporária</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>${userRows || '<tr><td colspan="8" class="mut">Nenhum aluno.</td></tr>'}</tbody>
+            </table>
+          </form>
+  
+          <!-- Adicionar aluno manualmente (mantido) -->
+          <h2 class="mt2">Adicionar aluno manualmente</h2>
+          <form method="POST" action="/admin/alunos" class="mt2">
+            <div class="row">
+              <div>
+                <label>Nome completo</label><input name="full_name" required>
+                <label>Senha</label><input name="password" type="text" required placeholder="ex.: Abc123456">
+                <label>Validade do usuário (opcional)</label><input name="user_expires_at" type="datetime-local">
+              </div>
+              <div>
+                <label>Email</label><input name="email" type="email" required>
+                <label>Matricular no curso</label><select name="course_id">${courseOptsCreate}</select>
+                <label>Validade da matrícula (opcional)</label><input name="member_expires_at" type="datetime-local">
+              </div>
+            </div>
+            <button class="mt">Criar aluno</button>
+          </form>
+        </div>
+  
+        <script>
+          (function(){
+            const selectAll = document.getElementById('selectAll');
+            const form = document.getElementById('bulkForm');
+            if(selectAll && form){
+              selectAll.addEventListener('change', ()=>{
+                form.querySelectorAll('input[type="checkbox"][name="ids[]"]').forEach(ch => ch.checked = selectAll.checked);
+              });
+            }
+          })();
+        </script>
+      `;
+      res.send(renderShell('Alunos', body));
+    } catch (err) {
+      console.error('ADMIN STUDENTS LIST ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message || err}</p></div>`));
+    }
+  });
+
+  // ====== Admin: Ação em lote (ex.: apagar selecionados) ======
+app.post('/admin/alunos/bulk', adminRequired, async (req, res) => {
+    const { action } = req.body || {};
+    let ids = req.body['ids[]'] || req.body.ids || [];
+    if (!Array.isArray(ids)) ids = [ids];
+    ids = ids.map(x => parseInt(x, 10)).filter(n => Number.isFinite(n));
+  
+    if (!ids.length) return res.redirect('/admin/alunos');
+  
+    // não permitir que o admin logado se apague
+    const selfId = req.user?.id;
+    ids = ids.filter(id => id !== selfId);
+    if (!ids.length) return res.redirect('/admin/alunos');
+  
+    if (action === 'delete') {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+  
+        const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+  
+        // apaga em ordem segura (se não houver FKs com CASCADE)
+        await client.query(
+          `DELETE FROM events
+             WHERE session_id IN (SELECT id FROM sessions WHERE user_id IN (${placeholders}))`,
+          ids
+        );
+        await client.query(
+          `DELETE FROM sessions WHERE user_id IN (${placeholders})`,
+          ids
+        );
+        await client.query(
+          `DELETE FROM course_members WHERE user_id IN (${placeholders})`,
+          ids
+        );
+        await client.query(
+          `DELETE FROM users WHERE id IN (${placeholders})`,
+          ids
+        );
+  
+        await client.query('COMMIT');
+        return res.redirect('/admin/alunos');
+      } catch (e) {
+        try { await client.query('ROLLBACK'); } catch {}
+        console.error('BULK DELETE USERS ERROR', e);
+        return res
+          .status(500)
+          .send(renderShell('Erro',
+            `<div class="card"><h1>Falha ao apagar</h1><p class="mut">${safe(e.message || e)}</p><p><a href="/admin/alunos">Voltar</a></p></div>`));
+      } finally {
+        client.release();
+      }
+    }
+  
+    // outras ações futuras (ex.: tornar admin, remover admin, remover de curso, etc.)
+    return res.redirect('/admin/alunos');
+  });
+  
 app.post('/admin/alunos', adminRequired, async (req,res)=>{
   try{
     let { full_name, email, password, user_expires_at, course_id, member_expires_at } = req.body || {};

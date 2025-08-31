@@ -1363,7 +1363,7 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
     res.status(500).send('Falha ao remover matrícula');
   }
 });
-// ====== Admin: Importação de alunos (CSV ou colar colunas) ======
+// ====== Admin: Importação de alunos (CSV ou colar colunas) — com atualização seletiva ======
 app.get('/admin/import', adminRequired, async (req,res)=>{
     const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name');
     const courseOpts = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
@@ -1381,11 +1381,32 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
   João Silva,joao@ex.com,Senha123,2025-12-31
   Maria Souza,maria@ex.com,123456,2025-12-30
   
-  Também funciona com ; como separador."></textarea>
+  Separador pode ser vírgula ou ponto-e-vírgula.
+  Primeira linha cabeçalho (se presente) é ignorada."></textarea>
+  
+          <fieldset style="margin-top:12px;border:1px solid #ddd;padding:12px;border-radius:6px">
+            <legend>Quando o aluno já existir:</legend>
+            <label style="display:block;margin-top:6px">
+              <input type="checkbox" name="overwrite_name" value="1" checked>
+              Atualizar <b>nome</b> com o do CSV
+            </label>
+            <label style="display:block;margin-top:6px">
+              <input type="checkbox" name="overwrite_password" value="1">
+              Substituir <b>senha</b> pela do CSV (se vazia, gerar aleatória)
+            </label>
+            <label style="display:block;margin-top:6px">
+              <input type="checkbox" name="overwrite_expires" value="1">
+              Atualizar <b>validade</b> (expires_at) com a do CSV
+            </label>
+          </fieldset>
   
           <button class="mt">Importar</button>
         </form>
-        <p class="mut mt">Aceita vírgula <code>,</code> ou ponto-e-vírgula <code>;</code>. Linha de cabeçalho (se presente) é ignorada automaticamente.</p>
+  
+        <p class="mut mt">
+          Dica: você pode manter senhas existentes intactas (deixe a opção de senha desmarcada)
+          e apenas atualizar nomes/matrículas.
+        </p>
         <div class="mt"><a href="/aulas">Voltar</a></div>
       </div>`;
     res.send(renderShell('Importar alunos', body));
@@ -1393,7 +1414,7 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
   
   app.post('/admin/import', adminRequired, async (req,res)=>{
     try{
-      let { data, course_id } = req.body || {};
+      let { data, course_id, overwrite_name, overwrite_password, overwrite_expires } = req.body||{};
       if (!data || !course_id) return res.status(400).send('Dados e curso são obrigatórios');
   
       const lines = String(data).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
@@ -1401,55 +1422,78 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
       // separa por ; se existir ; na linha, senão por ,
       const splitSmart = (line) => {
         const parts = (line.includes(';') ? line.split(';') : line.split(','))
-          .map(s => s.trim().replace(/^"(.*)"$/, '$1')); // remove aspas ao redor se houver
-        // completa até 4 colunas
+          .map(s => s.trim().replace(/^"(.*)"$/, '$1')); // tira aspas externas
         while (parts.length < 4) parts.push('');
-        return parts.slice(0,4);
+        return parts.slice(0,4); // [full_name, email, password, expires]
       };
   
-      // detecta se a primeira linha é cabeçalho
+      // ignora cabeçalho se detectar
       const maybeHeader = splitSmart(lines[0]).map(s => s.toLowerCase());
       const isHeader =
         maybeHeader.includes('nome') ||
         maybeHeader.includes('full_name') ||
         maybeHeader.includes('email') ||
         maybeHeader.includes('senha') ||
-        maybeHeader.includes('password');
+        maybeHeader.includes('password') ||
+        maybeHeader.includes('validade') ||
+        maybeHeader.includes('expires_at');
   
       const rows = isHeader ? lines.slice(1) : lines;
+  
+      const owName = String(overwrite_name||'') === '1';
+      const owPass = String(overwrite_password||'') === '1';
+      const owExpr = String(overwrite_expires||'') === '1';
   
       for (const line of rows){
         const [full_name_raw, email_raw, password_raw, userExp_raw] = splitSmart(line);
         const full_name = (full_name_raw || '').trim();
         const email = (email_raw || '').trim().toLowerCase();
-        const password = (password_raw && String(password_raw).length)
-          ? String(password_raw)
-          : crypto.randomBytes(4).toString('hex'); // senha aleatória se vazio
-        const userExp = normalizeDateStr(userExp_raw) || null;
+        const expiresAt = normalizeDateStr(userExp_raw) || null;
   
         if (!email) continue;
   
-        // cria/atualiza usuário
-        const u = await pool.query('SELECT id FROM users WHERE email=$1',[email]);
+        const existing = await pool.query('SELECT id FROM users WHERE email=$1',[email]);
         let userId;
-        if (u.rows[0]) {
-          userId = u.rows[0].id;
-          if (full_name) {
+  
+        if (existing.rows[0]) {
+          // ---- já existe: atualização seletiva ----
+          userId = existing.rows[0].id;
+  
+          if (owName && full_name) {
             await pool.query('UPDATE users SET full_name=$1 WHERE id=$2',[full_name, userId]);
           }
-          if (userExp) {
-            await pool.query('UPDATE users SET expires_at=$1 WHERE id=$2',[userExp, userId]);
+  
+          if (owExpr) {
+            await pool.query('UPDATE users SET expires_at=$1 WHERE id=$2',[expiresAt, userId]);
           }
+  
+          if (owPass) {
+            // se o CSV trouxer senha vazia, geramos uma aleatória
+            const plain = (password_raw && String(password_raw).trim().length)
+              ? String(password_raw).trim()
+              : crypto.randomBytes(5).toString('base64url');
+            const hash = await bcrypt.hash(plain,10);
+            await pool.query(
+              'UPDATE users SET password_hash=$1, temp_password=$2 WHERE id=$3',
+              [hash, plain, userId]
+            );
+          }
+  
         } else {
-          const hash = await bcrypt.hash(password, 10);
+          // ---- novo usuário ----
+          const plain = (password_raw && String(password_raw).trim().length)
+            ? String(password_raw).trim()
+            : crypto.randomBytes(5).toString('base64url');
+          const hash = await bcrypt.hash(plain,10);
+  
           const ins = await pool.query(
-            'INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
-            [full_name || email, email, hash, userExp]
+            'INSERT INTO users(full_name,email,password_hash,expires_at,temp_password) VALUES($1,$2,$3,$4,$5) RETURNING id',
+            [full_name || email, email, hash, expiresAt, plain]
           );
           userId = ins.rows[0].id;
         }
   
-        // matricula no curso (ignora se já existe)
+        // matricula no curso (ignora se já existir)
         await pool.query(
           'INSERT INTO course_members(user_id,course_id,role) VALUES($1,$2,$3) ON CONFLICT (user_id,course_id) DO NOTHING',
           [userId, course_id, 'student']

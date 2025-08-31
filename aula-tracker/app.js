@@ -1350,7 +1350,57 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
     res.status(500).send('Falha ao remover matrícula');
   }
 });
-
+// ====== Admin: Importação de alunos (CSV ou colar colunas) ======
+app.get('/admin/import', adminRequired, async (req,res)=>{
+    const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name');
+    const courseOpts = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
+  
+    const body = `
+      <div class="card">
+        <h1>Importar alunos</h1>
+        <form method="POST" action="/admin/import" enctype="multipart/form-data">
+          <label>Curso</label>
+          <select name="course_id" required>${courseOpts}</select>
+          <label>Dados (CSV ou colar colunas: nome,email,senha,validade)</label>
+          <textarea name="data" rows="10" placeholder="João,j@ex.com,Senha123,2025-12-31"></textarea>
+          <button class="mt">Importar</button>
+        </form>
+        <p class="mut mt">Você pode colar direto as colunas ou enviar CSV (UTF-8).</p>
+        <div class="mt"><a href="/aulas">Voltar</a></div>
+      </div>`;
+    res.send(renderShell('Importar alunos', body));
+  });
+  
+  app.post('/admin/import', adminRequired, async (req,res)=>{
+    try{
+      let { data, course_id } = req.body||{};
+      if (!data || !course_id) return res.status(400).send('Dados e curso são obrigatórios');
+      const lines = data.split(/\r?\n/).map(l=>l.trim()).filter(l=>l);
+      for(const line of lines){
+        const [full_name,emailRaw,password,userExp] = line.split(',').map(x=>x.trim());
+        if(!emailRaw) continue;
+        const email = emailRaw.toLowerCase();
+        const hash = await bcrypt.hash(password||crypto.randomBytes(4).toString('hex'),10);
+        let userId;
+        const u = await pool.query('SELECT id FROM users WHERE email=$1',[email]);
+        if(u.rows[0]){
+          userId = u.rows[0].id;
+          await pool.query('UPDATE users SET full_name=$1 WHERE id=$2',[full_name||email,userId]);
+        }else{
+          const ins = await pool.query('INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
+            [full_name||email,email,hash, normalizeDateStr(userExp)||null]);
+          userId = ins.rows[0].id;
+        }
+        await pool.query('INSERT INTO course_members(user_id,course_id,role) VALUES($1,$2,$3) ON CONFLICT (user_id,course_id) DO NOTHING',
+          [userId, course_id,'student']);
+      }
+      res.redirect('/admin/alunos');
+    }catch(err){
+      console.error('ADMIN IMPORT ERROR',err);
+      res.status(500).send('Falha ao importar alunos');
+    }
+  });
+  
 // ====== Player (admin bypass de matrícula) ======
 app.get('/aula/:id', authRequired, async (req,res)=>{
   try{

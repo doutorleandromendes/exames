@@ -41,6 +41,15 @@ const pool = new Pool({
 });
 
 // ====== HTML helpers ======
+
+function safe(v) {
+    return String(v ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
 function renderShell(title, body) {
   return `<!doctype html>
   <html lang="pt-br">
@@ -499,164 +508,181 @@ app.get('/aulas', authRequired, async (req,res)=>{
 
 // ====== Relatórios (painel com filtros + limpeza em lote) ======
 app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
-    const { course_id, video_id, q, dt_from, dt_to } = req.query;
+    try {
+      const { course_id, video_id, q, dt_from, dt_to } = req.query;
   
-    // combos
-    const courses = (await pool.query('SELECT id,name,slug FROM courses ORDER BY name')).rows;
-    const videos = course_id
-      ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title',[course_id])).rows
-      : [];
+      // combos
+      const courses = (await pool.query('SELECT id,name,slug FROM courses ORDER BY name')).rows;
+      const videos = course_id
+        ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title',[course_id])).rows
+        : [];
   
-    // filtros dinâmicos
-    const where = [];
-    const params = [];
-    if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
-    if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
-    if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
-    if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
-    if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      // só busca dados agregados se tiver AO MENOS um filtro
+      const hasAnyFilter = Boolean(course_id || video_id || q || dt_from || dt_to);
   
-    // agregação aluno × vídeo (% assistido via max(video_time) / duration_seconds)
-    const sql = `
-      WITH base AS (
-        SELECT u.id AS user_id, u.full_name, u.email,
-               v.id AS video_id, v.title, v.duration_seconds,
-               MAX(e.video_time) AS max_time
-        FROM sessions s
-        JOIN events e ON e.session_id = s.id
-        JOIN users u  ON u.id = s.user_id
-        JOIN videos v ON v.id = s.video_id
-        ${whereSql}
-        GROUP BY u.id,u.full_name,u.email,v.id,v.title,v.duration_seconds
-      )
-      SELECT *, 
-        CASE
-          WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
-          ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
-        END AS pct
-      FROM base
-      ORDER BY full_name, title
-    `;
-    const rows = (await pool.query(sql, params)).rows;
+      let rows = [];
+      if (hasAnyFilter) {
+        const where = [];
+        const params = [];
+        if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+        if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+        if (q)         { params.push(`%${String(q).toLowerCase()}%`); where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`); }
+        if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
+        if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   
-    // vídeos distintos do resultado atual (para os checkboxes de limpeza)
-    const seen = new Set();
-    const distinctVideos = [];
-    for (const r of rows) {
-      if (!seen.has(r.video_id)) {
-        seen.add(r.video_id);
-        distinctVideos.push({ id: r.video_id, title: r.title });
+        const sql = `
+          WITH base AS (
+            SELECT u.id AS user_id, u.full_name, u.email,
+                   v.id AS video_id, v.title, v.duration_seconds,
+                   MAX(e.video_time) AS max_time
+            FROM sessions s
+            JOIN events e ON e.session_id = s.id
+            JOIN users u  ON u.id = s.user_id
+            JOIN videos v ON v.id = s.video_id
+            ${whereSql}
+            GROUP BY u.id,u.full_name,u.email,v.id,v.title,v.duration_seconds
+          )
+          SELECT *, 
+            CASE
+              WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+              ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+            END AS pct
+          FROM base
+          ORDER BY full_name, title
+          LIMIT 5000
+        `;
+        rows = (await pool.query(sql, params)).rows;
       }
-    }
   
-    // combos HTML
-    const courseOpts = ['<option value="">(Todos)</option>']
-      .concat(courses.map(c=>`<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${safe(c.name)}</option>`))
-      .join('');
-    const videoOpts = ['<option value="">(Todos)</option>']
-      .concat(videos.map(v=>`<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${safe(v.title)}</option>`))
-      .join('');
+      // vídeos distintos do resultado (para limpeza em lote)
+      const distinctVideos = [];
+      if (hasAnyFilter && rows.length) {
+        const seen = new Set();
+        for (const r of rows) {
+          if (!seen.has(r.video_id)) {
+            seen.add(r.video_id);
+            distinctVideos.push({ id: r.video_id, title: r.title });
+          }
+        }
+      }
   
-    // tabela
-    const table = rows.map(r=>`
-      <tr>
-        <td>${safe(r.full_name)}</td>
-        <td>${safe(r.email)}</td>
-        <td>${safe(r.title)}</td>
-        <td>${r.duration_seconds ?? '—'}</td>
-        <td>${r.max_time ?? 0}</td>
-        <td>${r.pct == null ? '—' : r.pct + '%'}</td>
-      </tr>
-    `).join('');
+      // combos HTML
+      const courseOpts = ['<option value="">(Todos)</option>']
+        .concat(courses.map(c=>`<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${safe(c.name)}</option>`))
+        .join('');
+      const videoOpts = ['<option value="">(Todos)</option>']
+        .concat(videos.map(v=>`<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${safe(v.title)}</option>`))
+        .join('');
   
-    const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
-      course_id: course_id || '',
-      video_id: video_id || '',
-      q: q || '',
-      dt_from: dt_from || '',
-      dt_to: dt_to || ''
-    }).toString();
+      // tabela
+      const table = hasAnyFilter
+        ? (rows.map(r=>`
+             <tr>
+               <td>${safe(r.full_name||'-')}</td>
+               <td>${safe(r.email)}</td>
+               <td>${safe(r.title)}</td>
+               <td>${r.duration_seconds ?? '—'}</td>
+               <td>${r.max_time ?? 0}</td>
+               <td>${r.pct == null ? '—' : r.pct + '%'}</td>
+             </tr>
+           `).join('') || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>')
+        : '<tr><td colspan="6" class="mut">Aplique algum filtro e clique em “Aplicar filtros”.</td></tr>';
   
-    // caixa de limpeza em lote
-    const batchList = distinctVideos.map(v =>
-      `<label style="display:block"><input type="checkbox" name="video_ids[]" value="${v.id}"> ${safe(v.title)} (ID ${v.id})</label>`
-    ).join('');
+      const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+        course_id: course_id || '',
+        video_id: video_id || '',
+        q: q || '',
+        dt_from: dt_from || '',
+        dt_to: dt_to || ''
+      }).toString();
   
-    const html = `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-          <h1>Relatórios (agregado)</h1>
-          <div><a href="/aulas">Voltar</a></div>
-        </div>
+      // caixa de limpeza em lote (só mostra quando há filtros e resultados)
+      const batchList = distinctVideos.length
+        ? distinctVideos.map(v =>
+            `<label style="display:block"><input type="checkbox" name="video_ids[]" value="${v.id}"> ${safe(v.title)} (ID ${v.id})</label>`
+          ).join('')
+        : '';
   
-        <form method="GET" action="/admin/relatorios" class="mt2">
-          <div class="row">
-            <div>
-              <label>Curso</label>
-              <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
-            </div>
-            <div>
-              <label>Aula (vídeo)</label>
-              <select name="video_id">${videoOpts}</select>
-            </div>
+      const html = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <h1>Relatórios (agregado)</h1>
+            <div><a href="/aulas">Voltar</a></div>
           </div>
-          <div class="row">
-            <div>
-              <label>Aluno (nome/email)</label>
-              <input name="q" value="${q||''}" placeholder="ex.: maria@ / João">
-            </div>
-            <div>
-              <label>De</label>
-              <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
-            </div>
-            <div>
-              <label>Até</label>
-              <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
-            </div>
-          </div>
-          <button class="mt">Aplicar filtros</button>
-          <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
-          <a class="mt" href="/admin/relatorio/raw" style="margin-left:12px;display:inline-block">Ver eventos brutos</a>
-        </form>
   
-        <div class="card mt2" style="border:1px solid #ddd">
-          <h2 style="margin-top:0">Limpeza em lote (vídeos no resultado atual)</h2>
-          <form method="POST" action="/admin/relatorios/clear-batch" id="batchClearForm">
-            <div class="mt">
-              <button type="button" class="linklike" id="selAll">Selecionar todos</button> ·
-              <button type="button" class="linklike" id="selNone">Limpar seleção</button>
+          <form method="GET" action="/admin/relatorios" class="mt2">
+            <div class="row">
+              <div>
+                <label>Curso</label>
+                <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
+              </div>
+              <div>
+                <label>Aula (vídeo)</label>
+                <select name="video_id">${videoOpts}</select>
+              </div>
             </div>
-            <div class="mt" style="columns:2;max-width:720px">
-              ${batchList || '<span class="mut">Nenhum vídeo no resultado atual.</span>'}
+            <div class="row">
+              <div>
+                <label>Aluno (nome/email)</label>
+                <input name="q" value="${safe(q||'')}" placeholder="ex.: maria@ / João">
+              </div>
+              <div>
+                <label>De</label>
+                <input name="dt_from" value="${safe(dt_from||'')}" placeholder="2025-08-01T00:00:00-03:00">
+              </div>
+              <div>
+                <label>Até</label>
+                <input name="dt_to" value="${safe(dt_to||'')}" placeholder="2025-08-31T23:59:59-03:00">
+              </div>
             </div>
-            <input type="hidden" name="redirect" value="${htmlEscape(req.url)}">
-            <div class="mt">
-              <button ${batchList ? '' : 'disabled'} onclick="return confirm('Remover TODOS os eventos e sessões dos vídeos selecionados?');">Limpar relatórios selecionados</button>
-            </div>
+            <button class="mt">Aplicar filtros</button>
+            <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+            <a class="mt" href="/admin/relatorio/raw" style="margin-left:12px;display:inline-block">Ver eventos brutos</a>
           </form>
-        </div>
   
-        <table class="mt2">
-          <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
-          ${table || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>'}
-        </table>
-      </div>
-      <style>.linklike{background:none;border:0;padding:0;color:#007bff;cursor:pointer}</style>
-      <script>
-        (function(){
-          const root = document.getElementById('batchClearForm');
-          if(!root) return;
-          const selAll = document.getElementById('selAll');
-          const selNone = document.getElementById('selNone');
-          selAll && selAll.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=true); });
-          selNone && selNone.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=false); });
-        })();
-      </script>
-    `;
-    res.send(renderShell('Relatórios', html));
+          ${hasAnyFilter ? `
+            <div class="card mt2" style="border:1px solid #ddd">
+              <h2 style="margin-top:0">Limpeza em lote (vídeos no resultado atual)</h2>
+              <form method="POST" action="/admin/relatorios/clear-batch" id="batchClearForm">
+                <div class="mt">
+                  <button type="button" class="linklike" id="selAll">Selecionar todos</button> ·
+                  <button type="button" class="linklike" id="selNone">Limpar seleção</button>
+                </div>
+                <div class="mt" style="columns:2;max-width:720px">
+                  ${batchList || '<span class="mut">Nenhum vídeo no resultado atual.</span>'}
+                </div>
+                <input type="hidden" name="redirect" value="${safe(req.url)}">
+                <div class="mt">
+                  <button ${batchList ? '' : 'disabled'} onclick="return confirm('Remover TODOS os eventos e sessões dos vídeos selecionados?');">Limpar relatórios selecionados</button>
+                </div>
+              </form>
+            </div>` : ''
+          }
+  
+          <table class="mt2">
+            <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
+            ${table}
+          </table>
+        </div>
+        <style>.linklike{background:none;border:0;padding:0;color:#007bff;cursor:pointer}</style>
+        <script>
+          (function(){
+            const root = document.getElementById('batchClearForm');
+            if(!root) return;
+            const selAll = document.getElementById('selAll');
+            const selNone = document.getElementById('selNone');
+            selAll && selAll.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=true); });
+            selNone && selNone.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=false); });
+          })();
+        </script>
+      `;
+      res.send(renderShell('Relatórios', html));
+    } catch (err) {
+      console.error('RELATORIOS ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir relatórios</h1><p class="mut">${err.message||err}</p></div>`));
+    }
   });
-
 // ====== CSV com os mesmos filtros (separador ;) ======
 app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
   const { course_id, video_id, q, dt_from, dt_to } = req.query;

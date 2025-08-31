@@ -569,10 +569,18 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
         [courseId]
       );
   
-      const toLocalInput = (ts) => {
+      // Converte timestamptz -> formato aceito por <input type="datetime-local"> (YYYY-MM-DDTHH:mm, sem TZ)
+      const tsToLocalInput = (ts) => {
         if (!ts) return '';
-        const s = String(ts).replace('Z','');
-        return s.slice(0,16); // yyyy-mm-ddThh:mm
+        const d = new Date(ts);              // interpreta o que veio do banco
+        if (isNaN(d)) return '';
+        const pad = (n) => String(n).padStart(2,'0');
+        const yyyy = d.getFullYear();
+        const mm   = pad(d.getMonth()+1);
+        const dd   = pad(d.getDate());
+        const HH   = pad(d.getHours());
+        const MM   = pad(d.getMinutes());
+        return `${yyyy}-${mm}-${dd}T${HH}:${MM}`;
       };
   
       const rowsHtml = videos.map((v, idx) => `
@@ -585,7 +593,7 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
           <td>${safe(v.title)}</td>
           <td><code>${safe(v.r2_key)}</code></td>
           <td>${v.duration_seconds ?? '—'}</td>
-          <td><input type="datetime-local" name="available_from[]" value="${toLocalInput(v.available_from)}"></td>
+          <td><input type="datetime-local" name="available_from[]" value="${tsToLocalInput(v.available_from)}"></td>
           <td><input type="number" name="sort_index[]" value="${v.sort_index ?? ''}" min="0" step="1" style="width:90px"></td>
         </tr>
       `).join('');
@@ -730,45 +738,50 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
     }
   });
 
-  // Salva em lote: available_from e sort_index dos vídeos do curso
+ // Salva em lote as datas/ordem do curso
 app.post('/admin/cursos/:id/bulk', adminRequired, async (req, res) => {
-    const courseId = parseInt(req.params.id, 10);
-    try {
-      const ids = Array.isArray(req.body['video_id[]']) ? req.body['video_id[]']
-                 : Array.isArray(req.body.video_id) ? req.body.video_id
-                 : [req.body.video_id].filter(Boolean);
-  
-      const avs = Array.isArray(req.body['available_from[]']) ? req.body['available_from[]']
-                 : Array.isArray(req.body.available_from) ? req.body.available_from
-                 : [req.body.available_from].filter(()=>true);
-  
-      const sis = Array.isArray(req.body['sort_index[]']) ? req.body['sort_index[]']
-                 : Array.isArray(req.body.sort_index) ? req.body.sort_index
-                 : [req.body.sort_index].filter(()=>true);
-  
-      if (!ids || !ids.length) return res.redirect('/admin/cursos/'+courseId);
-  
-      // transação para salvar tudo
-      await pool.query('BEGIN');
-      for (let i=0;i<ids.length;i++){
-        const vid = parseInt(ids[i],10);
-        const avail = (avs[i] && String(avs[i]).trim()) ? avs[i] : null;
-        const siRaw = (sis[i] !== undefined && sis[i] !== null) ? String(sis[i]).trim() : '';
-        const si = siRaw === '' ? null : parseInt(siRaw,10);
-  
-        await pool.query(
-          'UPDATE videos SET available_from = $1::timestamptz, sort_index = $2 WHERE id = $3 AND course_id=$4',
-          [avail, isNaN(si)? null : si, vid, courseId]
-        );
+  const courseId = parseInt(req.params.id, 10);
+  try {
+    const vids = Array.isArray(req.body['video_id[]']) ? req.body['video_id[]'] :
+                 Array.isArray(req.body.video_id)      ? req.body.video_id      : [req.body.video_id];
+    const avs  = Array.isArray(req.body['available_from[]']) ? req.body['available_from[]'] :
+                 Array.isArray(req.body.available_from)      ? req.body.available_from      : [req.body.available_from];
+    const sis  = Array.isArray(req.body['sort_index[]']) ? req.body['sort_index[]'] :
+                 Array.isArray(req.body.sort_index)      ? req.body.sort_index      : [req.body.sort_index];
+
+    // normaliza tamanho
+    const n = Math.max(vids.length, avs.length, sis.length);
+
+    for (let i = 0; i < n; i++) {
+      const vid = parseInt(vids[i], 10);
+      if (!vid) continue;
+
+      // trata datetime-local sem TZ -> adiciona -03:00
+      const raw = (avs[i] && String(avs[i]).trim()) || null;
+      let avail = null;
+      if (raw) {
+        avail = /Z|[+-]\d{2}:\d{2}$/.test(raw) ? raw : `${raw}-03:00`;
       }
-      await pool.query('COMMIT');
-      res.redirect('/admin/cursos/'+courseId);
-    } catch (err) {
-      await pool.query('ROLLBACK');
-      console.error('COURSE BULK SAVE ERROR', err);
-      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao salvar</h1><p class="mut">${err.message||err}</p></div>`));
+
+      // sort_index
+      const siRaw = (sis[i] !== undefined && sis[i] !== null) ? String(sis[i]).trim() : '';
+      const si = siRaw === '' ? null : parseInt(siRaw, 10);
+
+      await pool.query(
+        `UPDATE videos
+            SET available_from = $1::timestamptz,
+                sort_index     = $2
+          WHERE id = $3 AND course_id = $4`,
+        [avail, isNaN(si) ? null : si, vid, courseId]
+      );
     }
-  });
+
+    res.redirect(`/admin/cursos/${courseId}`);
+  } catch (err) {
+    console.error('ADMIN COURSE BULK SAVE ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao salvar</h1><p class="mut">${err.message||err}</p></div>`));
+  }
+});
   
   
 app.get('/admin/cursos', adminRequired, async (req,res)=>{

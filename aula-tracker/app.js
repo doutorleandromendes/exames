@@ -152,30 +152,50 @@ migrate().catch(e=>console.error('migration error', e));
 
 // ====== Clonar curso (copia as aulas do curso origem para um novo curso/semestre) ======
 app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
-  const { id } = req.params;
-  const { rows } = await pool.query('SELECT * OF courses WHERE id=$1', [id]).catch(()=>({rows:[]}));
-  const { rows: rows2 } = await pool.query('SELECT * FROM courses WHERE id=$1', [id]); // fallback
-  const c = (rows && rows[0]) || (rows2 && rows2[0]);
-  if (!c) return res.send(renderShell('Erro', '<div class="card">Curso não encontrado</div>'));
-
-  const html = `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-        <h1>Clonar Curso: ${c.name}</h1>
-        <div><a href="/admin/cursos">Voltar</a></div>
-      </div>
-      <form method="POST" action="/admin/cursos/${c.id}/clone">
-        <label>Novo nome</label><input name="name" value="${c.name}">
-        <label>Novo slug</label><input name="slug" value="${c.slug}-novo">
-        <label>Data de início do novo curso (YYYY-MM-DD ou YYYY-MM-DDTHH:mm-03:00)</label><input name="start_date">
-        <button>Clonar curso e aulas</button>
-      </form>
-      <p class="mut">As aulas serão clonadas com os mesmos títulos e R2 keys. O campo <code>available_from</code>
-      nos vídeos clonados ficará vazio (você define depois). Relatórios e matrículas não são clonados.</p>
-    </div>
-  `;
-  res.send(renderShell('Clonar curso', html));
-});
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) {
+        return res.status(400).send(renderShell('Clonar curso', '<div class="card">ID inválido</div>'));
+      }
+  
+      const { rows } = await pool.query('SELECT id, name, slug, start_date FROM courses WHERE id=$1', [id]);
+      const c = rows[0];
+      if (!c) {
+        return res.send(renderShell('Erro', '<div class="card">Curso não encontrado</div>'));
+      }
+  
+      const html = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+            <h1>Clonar Curso: ${safe(c.name)}</h1>
+            <div><a href="/admin/cursos">Voltar</a></div>
+          </div>
+  
+          <form method="POST" action="/admin/cursos/${c.id}/clone">
+            <label>Novo nome</label>
+            <input name="name" required value="${safe(c.name)}">
+  
+            <label>Novo slug</label>
+            <input name="slug" required value="${safe(c.slug)}-novo">
+  
+            <label>Data de início do novo curso (YYYY-MM-DD ou YYYY-MM-DDTHH:mm-03:00)</label>
+            <input name="start_date" placeholder="2025-02-10">
+  
+            <button class="mt">Clonar curso e aulas</button>
+          </form>
+  
+          <p class="mut mt">
+            As aulas serão clonadas com os mesmos títulos e R2 keys. O campo <code>available_from</code>
+            nos vídeos clonados ficará vazio (você define depois). Relatórios e matrículas não são clonados.
+          </p>
+        </div>
+      `;
+      res.send(renderShell('Clonar curso', html));
+    } catch (err) {
+      console.error('ADMIN CLONE GET ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${safe(err.message||err)}</p></div>`));
+    }
+  });
 
 app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
   const { id } = req.params;
@@ -315,68 +335,149 @@ app.get('/admin/logout', authRequired, (req,res)=>{ res.clearCookie('adm'); res.
 
 // ====== /aulas — Admin vê tudo; aluno só o que está matriculado e liberado pelas datas ======
 app.get('/aulas', authRequired, async (req,res)=>{
-  try{
-    const admin = isAdmin(req);
-    const slug = (req.query.curso || '').trim();
-
-    let rows = [];
-    if (admin) {
-      const sqlAdmin = `
-        SELECT v.id, v.title, v.course_id, v.r2_key, v.available_from,
-               c.name AS course_name, c.slug, c.start_date
-        FROM videos v
-        JOIN courses c ON c.id = v.course_id
-        ${slug ? 'WHERE c.slug = $1' : ''}
-        ORDER BY v.id DESC`;
-      const paramsAdmin = slug ? [slug] : [];
-      ({ rows } = await pool.query(sqlAdmin, paramsAdmin));
-    } else {
-      const sqlAluno = `
-        SELECT v.id, v.title, v.course_id, v.available_from, c.name AS course_name, c.slug, c.start_date
-        FROM videos v
-        JOIN courses c ON c.id = v.course_id
-        JOIN course_members cm ON cm.course_id = v.course_id AND cm.user_id = $1
-        WHERE ${slug ? 'c.slug = $2 AND ' : ''} 
-              (c.expires_at IS NULL OR c.expires_at > now())
-          AND (cm.expires_at IS NULL OR cm.expires_at > now())
-          AND (c.start_date IS NULL OR c.start_date <= now())
-          AND (v.available_from IS NULL OR v.available_from <= now())
-          AND c.archived = false
-        ORDER BY v.id DESC`;
-      const paramsAluno = slug ? [req.user.id, slug] : [req.user.id];
-      ({ rows } = await pool.query(sqlAluno, paramsAluno));
+    try{
+      const admin = isAdmin(req);
+      const slug = (req.query.curso || '').trim();      // filtro por curso (slug)
+      const q    = (req.query.q || '').trim();          // filtro por título (busca simples)
+  
+      // Carrega lista de cursos (para o dropdown) e identifica o curso atual (para link "Clonar")
+      let courseForActions = null;
+      let courseOptionsHtml = '';
+      try {
+        const { rows: courseRows } = await pool.query(
+          'SELECT id, slug, name FROM courses WHERE archived = false ORDER BY name'
+        );
+        courseOptionsHtml = ['<option value="">(Todos os cursos)</option>']
+          .concat(courseRows.map(c => 
+            `<option value="${safe(c.slug)}" ${c.slug===slug?'selected':''}>${safe(c.name)} (${safe(c.slug)})</option>`
+          ))
+          .join('');
+        if (admin && slug) {
+          courseForActions = courseRows.find(c => c.slug === slug) || null;
+        }
+      } catch {}
+  
+      // Busca as aulas conforme papel (admin/aluno) + filtros (slug, q)
+      let rows = [];
+      if (admin) {
+        // Admin: pode filtrar por curso (slug) e por título (q)
+        const cond = [];
+        const params = [];
+        let idx = 1;
+  
+        cond.push('1=1'); // base
+  
+        if (slug) {
+          cond.push(`c.slug = $${idx++}`);
+          params.push(slug);
+        }
+        if (q) {
+          cond.push(`LOWER(v.title) LIKE $${idx++}`);
+          params.push(`%${q.toLowerCase()}%`);
+        }
+  
+        const sqlAdmin = `
+          SELECT v.id, v.title, v.course_id, v.r2_key, v.available_from,
+                 c.name AS course_name, c.slug, c.start_date
+          FROM videos v
+          JOIN courses c ON c.id = v.course_id
+          WHERE ${cond.join(' AND ')}
+          ORDER BY v.id DESC`;
+        ({ rows } = await pool.query(sqlAdmin, params));
+      } else {
+        // Aluno: apenas aulas matriculadas e liberadas; aceita também filtro de título (q)
+        const condCore = [
+          `(c.expires_at IS NULL OR c.expires_at > now())`,
+          `(cm.expires_at IS NULL OR cm.expires_at > now())`,
+          `(c.start_date IS NULL OR c.start_date <= now())`,
+          `(v.available_from IS NULL OR v.available_from <= now())`,
+          `c.archived = false`
+        ];
+        const paramsAluno = [req.user.id];
+  
+        if (slug) {
+          condCore.unshift(`c.slug = $${paramsAluno.length + 1}`);
+          paramsAluno.push(slug);
+        }
+        if (q) {
+          condCore.push(`LOWER(v.title) LIKE $${paramsAluno.length + 1}`);
+          paramsAluno.push(`%${q.toLowerCase()}%`);
+        }
+  
+        const sqlAluno = `
+          SELECT v.id, v.title, v.course_id, v.available_from,
+                 c.name AS course_name, c.slug, c.start_date
+          FROM videos v
+          JOIN courses c ON c.id = v.course_id
+          JOIN course_members cm ON cm.course_id = v.course_id AND cm.user_id = $1
+          WHERE ${condCore.join(' AND ')}
+          ORDER BY v.id DESC`;
+        ({ rows } = await pool.query(sqlAluno, paramsAluno));
+      }
+  
+      // Lista de itens (links)
+      const items = rows.map(v=>{
+        const tag = (!admin)
+          ? ''
+          : ` <span class="mut">[curso desde: ${fmt(v.start_date)||'—'} · aula desde: ${fmt(v.available_from)||'—'}]</span>`;
+        const base = `<li><strong>[${safe(v.course_name)}]</strong> <a href="/aula/${v.id}">${safe(v.title)}</a>${tag} — <span class="mut">/aula/${v.id}</span>`;
+        const extra = admin
+          ? ` — <a href="/admin/relatorio/${v.id}">relatório (web)</a> · <a href="/admin/relatorio/${v.id}.csv">CSV</a> · <a href="/admin/videos/${v.id}/edit">editar</a>`
+          : '';
+        return `${base}${extra}</li>`;
+      }).join('');
+  
+      // Barra de ações (inclui "Clonar curso" quando filtrado por um curso válido)
+      const actions = admin
+        ? [
+            `<a href="/admin/cursos">Cursos</a>`,
+            `<a href="/admin/videos">Cadastrar aula</a>`,
+            `<a href="/admin/videos/availability">Disponibilidade de Aulas</a>`,
+            `<a href="/admin/alunos">Alunos</a>`,
+            `<a href="/admin/relatorios">Relatórios</a>`,
+            `<a href="/admin/import">Importar alunos</a>`,
+            (courseForActions ? `<a href="/admin/cursos/${courseForActions.id}/clone">Clonar curso "${safe(courseForActions.name)}"</a>` : null),
+            `<a href="/admin/logout">Sair admin</a>`,
+            `<a href="/logout">Sair</a>`
+          ].filter(Boolean).join(' · ')
+        : `<a href="/logout">Sair</a>`;
+  
+      // UI com filtros (dropdown de curso + busca por título)
+      const body = `
+        <div class="card">
+          <div class="right" style="justify-content:space-between;align-items:center;gap:12px">
+            <h1>Aulas</h1>
+            <div>${actions}</div>
+          </div>
+  
+          <form method="GET" action="/aulas" class="mt2" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div>
+              <label style="display:block;margin-bottom:4px">Curso</label>
+              <select name="curso" onchange="this.form.submit()" style="min-width:240px">${courseOptionsHtml}</select>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:4px">Título contém</label>
+              <input name="q" value="${safe(q)}" placeholder="ex.: hepatites, antibióticos" style="min-width:260px">
+            </div>
+            <div>
+              <button type="submit">Aplicar</button>
+              ${(slug || q) ? `<a href="/aulas" style="margin-left:8px">Limpar</a>` : ''}
+            </div>
+          </form>
+  
+          <p class="mut" style="margin-top:8px">
+            ${slug ? `Curso: <strong>${safe(slug)}</strong>` : 'Curso: (todos)'}
+            ${q ? ` · Título contém: <strong>${safe(q)}</strong>` : ''}
+          </p>
+  
+          <ul style="margin-top:12px">${items || '<li class="mut">Nenhuma aula disponível.</li>'}</ul>
+        </div>`;
+      res.send(renderShell('Aulas', body));
+    }catch(err){
+      console.error('AULAS ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao listar aulas</h1><p class="mut">${safe(err.message||err)}</p></div>`));
     }
-
-    const items = rows.map(v=>{
-      const tag = (!admin)
-        ? ''
-        : ` <span class="mut">[curso desde: ${fmt(v.start_date)||'—'} · aula desde: ${fmt(v.available_from)||'—'}]</span>`;
-      const base = `<li><strong>[${safe(v.course_name)}]</strong> <a href="/aula/${v.id}">${safe(v.title)}</a>${tag} — <span class="mut">/aula/${v.id}</span>`;
-      const extra = isAdmin(req)
-        ? ` — <a href="/admin/relatorio/${v.id}">relatório (web)</a> · <a href="/admin/relatorio/${v.id}.csv">CSV</a> · <a href="/admin/videos/${v.id}/edit">editar</a>`
-        : '';
-      return `${base}${extra}</li>`;
-    }).join('');
-
-    const actions = isAdmin(req)
-      ? `<a href="/admin/cursos">Cursos</a> · <a href="/admin/videos">Cadastrar aula</a> · <a href="/admin/videos/availability">Disponibilidade de Aulas</a> · <a href="/admin/alunos">Alunos</a> · <a href="/admin/relatorios">Relatórios</a> · <a href="/admin/import">Importar alunos</a> · <a href="/admin/logout">Sair admin</a> · <a href="/logout">Sair</a>`
-      : `<a href="/logout">Sair</a>`;
-
-    const body = `
-      <div class="card">
-        <div class="right" style="justify-content:space-between">
-          <h1>Aulas</h1>
-          <div>${actions}</div>
-        </div>
-        <p class="mut">Filtro: ${slug ? `<strong>${safe(slug)}</strong> · <a href="/aulas">limpar</a>` : '(use ?curso=slug)'} </p>
-        <ul>${items || '<li class="mut">Nenhuma aula disponível.</li>'}</ul>
-      </div>`;
-    res.send(renderShell('Aulas', body));
-  }catch(err){
-    console.error('AULAS ERROR', err);
-    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao listar aulas</h1><p class="mut">${err.message||err}</p></div>`));
-  }
-});
+  });
 
 // ====== Relatórios (painel com filtros) ======
 app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {

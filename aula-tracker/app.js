@@ -2545,134 +2545,156 @@ const clearForm = `
   }
 });
 
-// ====== Relatórios com filtros ======
-// UI de filtros + tabela com % assistido
+// ====== Relatórios com filtros (rápidos) ======
+// UI de filtros + tabela com % assistido (usa MAX(video_time) / duration_seconds)
 app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
-  const { course_id, video_id, q, dt_from, dt_to } = req.query;
-
-  // combos de curso e aula
-  const courses = (await pool.query(
-    'SELECT id, name, slug FROM courses ORDER BY name'
-  )).rows;
-
-  let videos = [];
-  if (course_id) {
-    videos = (await pool.query(
-      'SELECT id, title FROM videos WHERE course_id=$1 ORDER BY title', [course_id]
-    )).rows;
-  }
-
-  // monta SQL dinamicamente (filtra por curso, por vídeo, por aluno e por faixa de datas)
-  const params = [];
-  const where = [];
-
-  if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
-  if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
-  if (q) {
-    params.push(`%${q.toLowerCase()}%`);
-    where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`);
-  }
-  if (dt_from) { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
-  if (dt_to)   { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
-
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-  // agregação por aluno x vídeo, calculando max(video_time) e % assistido
-  const sql = `
-    WITH base AS (
-      SELECT u.id AS user_id, u.full_name, u.email, v.id AS video_id, v.title, v.duration_seconds,
-             MAX(e.video_time) AS max_time
-      FROM sessions s
-      JOIN events e   ON e.session_id = s.id
-      JOIN users u    ON u.id = s.user_id
-      JOIN videos v   ON v.id = s.video_id
-      ${whereSql}
-      GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
-    )
-    SELECT *,
-      CASE
-        WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
-        ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
-      END AS pct
-    FROM base
-    ORDER BY full_name, title
-  `;
-  const rows = (await pool.query(sql, params)).rows;
-
-  // HTML da página
-  const courseOptions = ['<option value="">(Todos)</option>']
-    .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
-    .join('');
-  const videoOptions = ['<option value="">(Todos)</option>']
-    .concat(videos.map(v => `<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
-    .join('');
-
-  const table = rows.map(r => `
-    <tr>
-      <td>${r.full_name}</td>
-      <td>${r.email}</td>
-      <td>${r.title}</td>
-      <td>${r.duration_seconds ?? '—'}</td>
-      <td>${r.max_time ?? 0}</td>
-      <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
-    </tr>
-  `).join('');
-
-  const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
-    course_id: course_id || '',
-    video_id: video_id || '',
-    q: q || '',
-    dt_from: dt_from || '',
-    dt_to: dt_to || ''
-  }).toString();
-
-  const html = `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-        <h1>Relatórios</h1>
-        <div><a href="/aulas">Voltar</a></div>
-      </div>
-
-      <form method="GET" action="/admin/relatorios" class="mt2">
-        <div class="row">
-          <div>
-            <label>Curso</label>
-            <select name="course_id" onchange="this.form.submit()">${courseOptions}</select>
+    try {
+      const { course_id, video_id, q, dt_from, dt_to } = req.query;
+  
+      // combos de curso e, se houver curso, de vídeo
+      const courses = (await pool.query(
+        'SELECT id, name, slug FROM courses ORDER BY name'
+      )).rows;
+  
+      let videos = [];
+      if (course_id) {
+        videos = (await pool.query(
+          'SELECT id, title FROM videos WHERE course_id=$1 ORDER BY title', [course_id]
+        )).rows;
+      }
+  
+      // Se nenhum filtro foi definido, NÃO executa a query pesada; mostra só a UI
+      const hasAnyFilter = Boolean(course_id || video_id || (q && q.trim()) || dt_from || dt_to);
+  
+      let rows = [];
+      if (hasAnyFilter) {
+        // monta SQL dinamicamente (filtra por curso, por vídeo, por aluno e por faixa de datas)
+        const params = [];
+        const where = [];
+  
+        if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+        if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
+        if (q && q.trim()) {
+          params.push(`%${q.toLowerCase()}%`);
+          where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`);
+        }
+        if (dt_from) { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
+        if (dt_to)   { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
+  
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  
+        const sql = `
+          WITH base AS (
+            SELECT
+              u.id AS user_id,
+              u.full_name,
+              u.email,
+              v.id AS video_id,
+              v.title,
+              v.duration_seconds,
+              MAX(e.video_time) AS max_time
+            FROM sessions s
+            JOIN events e   ON e.session_id = s.id
+            JOIN users u    ON u.id = s.user_id
+            JOIN videos v   ON v.id = s.video_id
+            ${whereSql}
+            GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+          )
+          SELECT *,
+            CASE
+              WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+              ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+            END AS pct
+          FROM base
+          ORDER BY full_name, title
+        `;
+        rows = (await pool.query(sql, params)).rows;
+      }
+  
+      // HTML da página
+      const courseOptions = ['<option value="">(Todos)</option>']
+        .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
+        .join('');
+      const videoOptions = ['<option value="">(Todos)</option>']
+        .concat(videos.map(v => `<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
+        .join('');
+  
+      const table = !hasAnyFilter
+        ? '<tr><td colspan="6" class="mut">Escolha pelo menos um filtro e clique em “Aplicar filtros”.</td></tr>'
+        : (rows.map(r => `
+            <tr>
+              <td>${r.full_name}</td>
+              <td>${r.email}</td>
+              <td>${r.title}</td>
+              <td>${r.duration_seconds ?? '—'}</td>
+              <td>${r.max_time ?? 0}</td>
+              <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="6" class="mut">Sem dados para os filtros selecionados.</td></tr>');
+  
+      const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+        course_id: course_id || '',
+        video_id: video_id || '',
+        q: (q || '').trim(),
+        dt_from: dt_from || '',
+        dt_to: dt_to || ''
+      }).toString();
+  
+      const html = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <h1>Relatórios</h1>
+            <div><a href="/aulas">Voltar</a></div>
           </div>
-          <div>
-            <label>Aula (vídeo)</label>
-            <select name="video_id">${videoOptions}</select>
-          </div>
+  
+          <form method="GET" action="/admin/relatorios" class="mt2">
+            <div class="row">
+              <div>
+                <label>Curso</label>
+                <select name="course_id" onchange="this.form.submit()">${courseOptions}</select>
+              </div>
+              <div>
+                <label>Aula (vídeo)</label>
+                <select name="video_id">${videoOptions}</select>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label>Aluno (nome ou email)</label>
+                <input name="q" value="${(q||'')}" placeholder="ex.: maria@ / João">
+              </div>
+              <div>
+                <label>De (client_ts)</label>
+                <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
+              </div>
+              <div>
+                <label>Até (client_ts)</label>
+                <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
+              </div>
+            </div>
+            <button class="mt">Aplicar filtros</button>
+            <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+          </form>
+  
+          <table>
+            <tr>
+              <th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th>
+            </tr>
+            ${table}
+          </table>
         </div>
-        <div class="row">
-          <div>
-            <label>Aluno (nome ou email)</label>
-            <input name="q" value="${q||''}" placeholder="ex.: maria@ / João">
-          </div>
-          <div>
-            <label>De (client_ts)</label>
-            <input name="dt_from" value="${dt_from||''}" placeholder="2025-08-01T00:00:00-03:00">
-          </div>
-          <div>
-            <label>Até (client_ts)</label>
-            <input name="dt_to" value="${dt_to||''}" placeholder="2025-08-31T23:59:59-03:00">
-          </div>
-        </div>
-        <button class="mt">Aplicar filtros</button>
-        <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
-      </form>
-
-      <table>
-        <tr>
-          <th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th>
-        </tr>
-        ${table || '<tr><td colspan="6" class="mut">Sem dados para os filtros selecionados.</td></tr>'}
-      </table>
-    </div>
-  `;
-  res.send(renderShell('Relatórios', html));
-});
-
+      `;
+      res.send(renderShell('Relatórios', html));
+    } catch (err) {
+      console.error('ADMIN/RELATORIOS ERROR', err);
+      res.status(500).send(renderShell('Erro', `
+        <div class="card">
+          <h1>Falha ao carregar relatórios</h1>
+          <p class="mut">${err.message || err}</p>
+          <p><a href="/aulas">Voltar</a></p>
+        </div>`));
+    }
+  });
 // CSV com os mesmos filtros (separador ; para Excel BR)
 app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
   const { course_id, video_id, q, dt_from, dt_to } = req.query;

@@ -984,7 +984,9 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
           <a href="/aula/${v.id}" target="_blank">ver</a> ·
           <a href="/admin/relatorio/${v.id}">relatório (web)</a> ·
           <a href="/admin/relatorio/${v.id}.csv">CSV</a> ·
-          <a href="/admin/relatorio/${v.id}/clear" onclick="return confirm('Remover todos os eventos/sessões deste vídeo?');">limpar relatório</a> ·
+          <form method="POST" action="/admin/relatorio/${v.id}/clear" style="display:inline" onsubmit="return confirm('Remover TODOS os eventos e sessões deste vídeo?');">
+  <button style="background:none;border:0;padding:0;color:#007bff;cursor:pointer">limpar relatório</button>
+</form> ·
           <a href="/admin/videos/${v.id}/edit">editar</a>
         </td>
       </tr>`).join('');
@@ -1153,27 +1155,76 @@ app.post('/admin/videos/availability', authRequired, adminRequired, async (req,r
   }
 });
 
-// ====== Admin: limpar relatórios (por vídeo ou por curso) ======
-app.get('/admin/relatorio/:videoId/clear', adminRequired, async (req,res)=>{
-  try{
-    const videoId = parseInt(req.params.videoId,10);
-    await pool.query('DELETE FROM sessions WHERE video_id=$1', [videoId]); // events caem por cascade
-    res.redirect('/admin/videos');
-  }catch(err){
-    console.error('ADMIN CLEAR VIDEO ERROR', err);
-    res.status(500).send('Falha ao limpar');
-  }
-});
-app.get('/admin/relatorio/curso/:courseId/clear', adminRequired, async (req,res)=>{
-  try{
-    const courseId = parseInt(req.params.courseId,10);
-    await pool.query('DELETE FROM sessions WHERE video_id IN (SELECT id FROM videos WHERE course_id=$1)', [courseId]);
-    res.redirect('/admin/videos');
-  }catch(err){
-    console.error('ADMIN CLEAR COURSE ERROR', err);
-    res.status(500).send('Falha ao limpar');
-  }
-});
+// ====== Admin: limpar relatórios (por vídeo) — POST ======
+app.post('/admin/relatorio/:videoId/clear', adminRequired, async (req, res) => {
+    const videoId = parseInt(req.params.videoId, 10);
+    if (!Number.isFinite(videoId)) return res.status(400).send('VideoId inválido');
+  
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+  
+      // apaga events das sessões do vídeo
+      await client.query(
+        `DELETE FROM events
+           WHERE session_id IN (SELECT id FROM sessions WHERE video_id = $1)`,
+        [videoId]
+      );
+      // apaga as próprias sessões do vídeo
+      await client.query(`DELETE FROM sessions WHERE video_id = $1`, [videoId]);
+  
+      await client.query('COMMIT');
+  
+      // volta para o relatório web desse vídeo (ou para /admin/videos se preferir)
+      res.redirect(`/admin/relatorio/${videoId}`);
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      console.error('ADMIN CLEAR VIDEO ERROR', e);
+      res.status(500).send('Falha ao limpar');
+    } finally {
+      client.release();
+    }
+  });
+  
+  // ====== Admin: limpar relatórios (por curso) — POST ======
+  app.post('/admin/relatorio/curso/:courseId/clear', adminRequired, async (req, res) => {
+    const courseId = parseInt(req.params.courseId, 10);
+    if (!Number.isFinite(courseId)) return res.status(400).send('CourseId inválido');
+  
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+  
+      // apaga events de todas as sessões de todos os vídeos do curso
+      await client.query(
+        `DELETE FROM events
+           WHERE session_id IN (
+             SELECT s.id
+               FROM sessions s
+               JOIN videos v ON v.id = s.video_id
+              WHERE v.course_id = $1
+           )`,
+        [courseId]
+      );
+      // apaga sessões dos vídeos do curso
+      await client.query(
+        `DELETE FROM sessions
+           WHERE video_id IN (SELECT id FROM videos WHERE course_id = $1)`,
+        [courseId]
+      );
+  
+      await client.query('COMMIT');
+  
+      // redireciona para a listagem de vídeos (ou para /admin/cursos/:id se preferir)
+      res.redirect('/admin/videos');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      console.error('ADMIN CLEAR COURSE ERROR', e);
+      res.status(500).send('Falha ao limpar');
+    } finally {
+      client.release();
+    }
+  });
 
 // ====== Admin: Alunos (listar, filtrar, seleção múltipla, criar, editar, matrículas) ======
 app.get('/admin/alunos', adminRequired, async (req, res) => {
@@ -1425,56 +1476,213 @@ app.post('/admin/alunos', adminRequired, async (req,res)=>{
     res.status(500).send('Falha ao criar aluno');
   }
 });
+// ====== Admin: editar aluno + progresso por aula (compatível com schema atual) ======
 app.get('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
-  try{
     const id = parseInt(req.params.id,10);
-    const { rows:urows } = await pool.query('SELECT id,full_name,email,expires_at FROM users WHERE id=$1',[id]);
-    const u = urows[0];
-    if(!u) return res.status(404).send(renderShell('Editar aluno', `<div class="card"><h1>Aluno não encontrado</h1><a href="/admin/alunos">Voltar</a></div>`));
-
-    const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name ASC');
-    const { rows:mrows } = await pool.query('SELECT cm.course_id, cm.expires_at, c.name, c.slug FROM course_members cm JOIN courses c ON c.id=cm.course_id WHERE cm.user_id=$1 ORDER BY c.name',[id]);
-    const memList = mrows.map(m=>`
-      <tr>
-        <td>[${safe(m.slug)}] ${safe(m.name)}</td>
-        <td>${fmt(m.expires_at) || '<span class="mut">—</span>'}</td>
-        <td>
-          <form class="inline" method="POST" action="/admin/alunos/${id}/matricula/${m.course_id}/validade">
-            <input name="member_expires_at" type="datetime-local">
-            <button>Atualizar validade</button>
+    if(!Number.isFinite(id)) return res.status(400).send('ID inválido');
+  
+    try{
+      // dados do aluno (mantém colunas que você já usa hoje)
+      const ures = await pool.query(
+        'SELECT id, full_name, email, expires_at FROM users WHERE id=$1',
+        [id]
+      );
+      const u = ures.rows[0];
+      if(!u){
+        return res.status(404).send(
+          renderShell('Editar aluno', `<div class="card"><h1>Aluno não encontrado</h1><a href="/admin/alunos">Voltar</a></div>`)
+        );
+      }
+  
+      // matrículas do aluno
+      const mres = await pool.query(`
+        SELECT cm.course_id, cm.expires_at, c.name, c.slug
+        FROM course_members cm
+        JOIN courses c ON c.id=cm.course_id
+        WHERE cm.user_id=$1
+        ORDER BY c.name
+      `,[id]);
+      const memberships = mres.rows;
+  
+      // cursos para combo
+      const cres = await pool.query('SELECT id, name, slug FROM courses ORDER BY name ASC');
+      const courses = cres.rows;
+      const courseOpts = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
+  
+      // ===== PROGRESSO CONSOLIDADO POR AULA (do aluno) =====
+      const prog = (await pool.query(`
+        WITH base AS (
+          SELECT
+            v.id                AS video_id,
+            v.title             AS video_title,
+            v.duration_seconds  AS duration_seconds,
+            MAX(e.video_time)   AS max_time,
+            MAX(e.client_ts)    AS last_ts,
+            COUNT(*) FILTER (WHERE e.type='play')   AS plays,
+            COUNT(*) FILTER (WHERE e.type='pause')  AS pauses,
+            COUNT(*) FILTER (WHERE e.type='ended')  AS ends,
+            COUNT(*)                                   AS events
+          FROM sessions s
+          JOIN events   e ON e.session_id = s.id
+          JOIN videos   v ON v.id = s.video_id
+          WHERE s.user_id = $1
+          GROUP BY v.id, v.title, v.duration_seconds
+        )
+        SELECT *,
+          CASE WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+               ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+          END AS pct
+        FROM base
+        ORDER BY video_title ASC
+      `,[id])).rows;
+  
+      const membershipsHtml = memberships.length
+        ? memberships.map(x=>`<tr>
+              <td>[${safe(x.slug)}] ${safe(x.name)}</td>
+              <td>${fmt(x.expires_at) || '<span class="mut">—</span>'}</td>
+              <td>
+                <form class="inline" method="POST" action="/admin/alunos/${u.id}/matricula/${x.course_id}/validade">
+                  <input name="member_expires_at" type="datetime-local">
+                  <button>Atualizar validade</button>
+                </form>
+                <form class="inline" method="POST" action="/admin/alunos/${u.id}/matricula/${x.course_id}/remover" onsubmit="return confirm('Remover matrícula deste curso?');">
+                  <button class="linkbutton" type="submit">remover</button>
+                </form>
+              </td>
+            </tr>`).join('')
+        : '<tr><td colspan="3" class="mut">Sem matrículas.</td></tr>';
+  
+      const progRows = prog.map(r => `
+        <tr>
+          <td>${r.video_id}</td>
+          <td><a href="/aula/${r.video_id}" target="_blank">${safe(r.video_title)}</a></td>
+          <td>${r.duration_seconds ?? '—'}</td>
+          <td>${r.max_time ?? 0}</td>
+          <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
+          <td>${fmt(r.last_ts) || '—'}</td>
+          <td>${r.plays||0}/${r.pauses||0}/${r.ends||0}</td>
+          <td><a href="/admin/relatorios?video_id=${r.video_id}&q=${encodeURIComponent(u.email)}" target="_blank">ver detalhes</a></td>
+        </tr>
+      `).join('');
+  
+      const body = `
+        <div class="card">
+          <div class="right" style="justify-content:space-between">
+            <h1>Editar aluno #${u.id}</h1>
+            <div><a href="/admin/alunos">Voltar</a></div>
+          </div>
+          <form method="POST" action="/admin/alunos/${u.id}/edit" class="mt2">
+            <label>Nome</label><input name="full_name" value="${safe(u.full_name).replace(/"/g,'&quot;')}">
+            <label>Email</label><input name="email" type="email" value="${safe(u.email)}">
+            <label>Nova senha (opcional)</label><input name="password" type="text" placeholder="deixe em branco para não alterar">
+            <label>Validade do usuário</label><input name="user_expires_at" type="datetime-local">
+            <button class="mt">Salvar</button>
           </form>
-          <form class="inline" method="POST" action="/admin/alunos/${id}/matricula/${m.course_id}/remover" onsubmit="return confirm('Remover matrícula deste curso?');">
-            <button style="background:#b32d2e">Remover</button>
+        </div>
+  
+        <div class="card">
+          <h2>Matrículas</h2>
+          <table class="mt2">
+            <thead><tr><th>Curso</th><th>Validade</th><th>Ações</th></tr></thead>
+            <tbody>${membershipsHtml}</tbody>
+          </table>
+  
+          <h3 class="mt2">Matricular em curso</h3>
+          <form method="POST" action="/admin/alunos/${u.id}/matricular" class="mt2">
+            <label>Curso</label><select name="course_id" required>${courseOpts}</select>
+            <label>Validade (opcional)</label><input name="member_expires_at" type="datetime-local">
+            <button class="mt">Matricular</button>
           </form>
-        </td>
-      </tr>`).join('');
-    const courseOpts = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
+        </div>
+  
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <h2>Progresso por aula</h2>
+            <div>
+              <a href="/admin/alunos/${u.id}/relatorio.csv" target="_blank">Exportar CSV</a>
+            </div>
+          </div>
+          <table class="mt2">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Vídeo</th>
+                <th>Duração (s)</th>
+                <th>Max pos (s)</th>
+                <th>% assistido</th>
+                <th>Último evento</th>
+                <th>plays/pauses/ends</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${progRows || '<tr><td colspan="8" class="mut">Sem eventos para este aluno.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+  
+      res.send(renderShell('Editar aluno', body));
+    }catch(err){
+      console.error('ADMIN STUDENT EDIT ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${safe(err.message||err)}</p></div>`));
+    }
+  });
 
-    const body = `
-      <div class="card">
-        <div class="right" style="justify-content:space-between"><h1>Editar aluno #${u.id}</h1><div><a href="/admin/alunos">Voltar</a></div></div>
-        <form method="POST" action="/admin/alunos/${u.id}/edit" class="mt2">
-          <label>Nome</label><input name="full_name" value="${safe(u.full_name).replace(/"/g,'&quot;')}">
-          <label>Email</label><input name="email" type="email" value="${safe(u.email)}">
-          <label>Nova senha (opcional)</label><input name="password" type="text" placeholder="deixe em branco para não alterar">
-          <label>Validade do usuário</label><input name="user_expires_at" type="datetime-local">
-          <button class="mt">Salvar</button>
-        </form>
-        <h2 class="mt2">Matrículas</h2>
-        <table><thead><tr><th>Curso</th><th>Validade</th><th>Ações</th></tr></thead><tbody>${memList || '<tr><td colspan="3" class="mut">Sem matrículas.</td></tr>'}</tbody></table>
-        <h3 class="mt2">Matricular em curso</h3>
-        <form method="POST" action="/admin/alunos/${u.id}/matricular">
-          <label>Curso</label><select name="course_id" required>${courseOpts}</select>
-          <label>Validade (opcional)</label><input name="member_expires_at" type="datetime-local">
-          <button class="mt">Matricular</button>
-        </form>
-      </div>`;
-    res.send(renderShell('Editar aluno', body));
-  }catch(err){
-    console.error('ADMIN STUDENT EDIT GET ERROR', err);
-    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
-  }
-});
+  // ====== Admin: CSV consolidado por aluno (resumo por aula) ======
+app.get('/admin/alunos/:id/relatorio.csv', adminRequired, async (req,res)=>{
+    const id = parseInt(req.params.id,10);
+    if(!Number.isFinite(id)) return res.status(400).send('ID inválido');
+  
+    try{
+      const rows = (await pool.query(`
+        WITH base AS (
+          SELECT
+            v.id                AS video_id,
+            v.title             AS video_title,
+            v.duration_seconds  AS duration_seconds,
+            MAX(e.video_time)   AS max_time,
+            MAX(e.client_ts)    AS last_ts,
+            COUNT(*) FILTER (WHERE e.type='play')   AS plays,
+            COUNT(*) FILTER (WHERE e.type='pause')  AS pauses,
+            COUNT(*) FILTER (WHERE e.type='ended')  AS ends,
+            COUNT(*)                                   AS events
+          FROM sessions s
+          JOIN events   e ON e.session_id = s.id
+          JOIN videos   v ON v.id = s.video_id
+          WHERE s.user_id = $1
+          GROUP BY v.id, v.title, v.duration_seconds
+        )
+        SELECT *,
+          CASE WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+               ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+          END AS pct
+        FROM base
+        ORDER BY video_title ASC
+      `,[id])).rows;
+  
+      res.setHeader('Content-Type','text/csv; charset=utf-8');
+      const header = 'video_id;video_title;duration_seconds;max_time;pct;last_ts;plays;pauses;ends;events\n';
+      const body = rows.map(r =>
+        [
+          r.video_id,
+          (r.video_title||'').replace(/;/g, ','),
+          r.duration_seconds ?? '',
+          r.max_time ?? '',
+          r.pct ?? '',
+          r.last_ts ?? '',
+          r.plays ?? 0,
+          r.pauses ?? 0,
+          r.ends ?? 0,
+          r.events ?? 0
+        ].join(';')
+      ).join('\n');
+      res.send(header + body);
+    }catch(err){
+      console.error('ADMIN STUDENT CSV ERROR', err);
+      res.status(500).send('Falha ao gerar CSV');
+    }
+  });
 app.post('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
   try{
     const id = parseInt(req.params.id,10);

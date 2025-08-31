@@ -1363,7 +1363,7 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
     res.status(500).send('Falha ao remover matrícula');
   }
 });
-// ====== Admin: Importação de alunos (CSV ou colar colunas) — com atualização seletiva ======
+// ====== Admin: Importação de alunos (CSV ou colar colunas) — atualização seletiva (nome/senha/validade/e-mail) ======
 app.get('/admin/import', adminRequired, async (req,res)=>{
     const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name');
     const courseOpts = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
@@ -1376,13 +1376,14 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
           <select name="course_id" required>${courseOpts}</select>
   
           <label>Dados (CSV ou colar colunas)</label>
-          <textarea name="data" rows="12" placeholder="Exemplos:
+          <textarea name="data" rows="14" placeholder="Exemplos:
   Nome completo, email, senha, validade
   João Silva,joao@ex.com,Senha123,2025-12-31
   Maria Souza,maria@ex.com,123456,2025-12-30
   
-  Separador pode ser vírgula ou ponto-e-vírgula.
-  Primeira linha cabeçalho (se presente) é ignorada."></textarea>
+  • Separador pode ser vírgula ou ponto-e-vírgula.
+  • Aspas ao redor de campos com vírgulas são aceitas.
+  • A primeira linha de cabeçalho (se presente) é ignorada."></textarea>
   
           <fieldset style="margin-top:12px;border:1px solid #ddd;padding:12px;border-radius:6px">
             <legend>Quando o aluno já existir:</legend>
@@ -1398,115 +1399,203 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
               <input type="checkbox" name="overwrite_expires" value="1">
               Atualizar <b>validade</b> (expires_at) com a do CSV
             </label>
+            <label style="display:block;margin-top:6px">
+              <input type="checkbox" name="overwrite_email" value="1">
+              Atualizar <b>e-mail</b> com o do CSV (se mudar; falha caso entre em conflito com outro usuário)
+            </label>
           </fieldset>
   
           <button class="mt">Importar</button>
         </form>
   
-        <p class="mut mt">
-          Dica: você pode manter senhas existentes intactas (deixe a opção de senha desmarcada)
-          e apenas atualizar nomes/matrículas.
-        </p>
+        <p class="mut mt">Dica: reimporte sem medo — só atualiza o que você marcar acima.</p>
         <div class="mt"><a href="/aulas">Voltar</a></div>
       </div>`;
     res.send(renderShell('Importar alunos', body));
   });
   
   app.post('/admin/import', adminRequired, async (req,res)=>{
+    let client;
     try{
-      let { data, course_id, overwrite_name, overwrite_password, overwrite_expires } = req.body||{};
-      if (!data || !course_id) return res.status(400).send('Dados e curso são obrigatórios');
-  
-      const lines = String(data).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  
-      // separa por ; se existir ; na linha, senão por ,
-      const splitSmart = (line) => {
-        const parts = (line.includes(';') ? line.split(';') : line.split(','))
-          .map(s => s.trim().replace(/^"(.*)"$/, '$1')); // tira aspas externas
-        while (parts.length < 4) parts.push('');
-        return parts.slice(0,4); // [full_name, email, password, expires]
-      };
-  
-      // ignora cabeçalho se detectar
-      const maybeHeader = splitSmart(lines[0]).map(s => s.toLowerCase());
-      const isHeader =
-        maybeHeader.includes('nome') ||
-        maybeHeader.includes('full_name') ||
-        maybeHeader.includes('email') ||
-        maybeHeader.includes('senha') ||
-        maybeHeader.includes('password') ||
-        maybeHeader.includes('validade') ||
-        maybeHeader.includes('expires_at');
-  
-      const rows = isHeader ? lines.slice(1) : lines;
+      let { data, course_id, overwrite_name, overwrite_password, overwrite_expires, overwrite_email } = req.body||{};
+      if (!data || !course_id) {
+        return res.status(400).send(renderShell('Importar alunos', `<div class="card"><h1>Erro</h1><p>Dados e curso são obrigatórios.</p><p><a href="/admin/import">Voltar</a></p></div>`));
+      }
   
       const owName = String(overwrite_name||'') === '1';
       const owPass = String(overwrite_password||'') === '1';
       const owExpr = String(overwrite_expires||'') === '1';
+      const owMail = String(overwrite_email||'') === '1';
   
-      for (const line of rows){
-        const [full_name_raw, email_raw, password_raw, userExp_raw] = splitSmart(line);
-        const full_name = (full_name_raw || '').trim();
-        const email = (email_raw || '').trim().toLowerCase();
-        const expiresAt = normalizeDateStr(userExp_raw) || null;
+      // Parser robusto: separa por ; se existir ; na linha, senão por ,; remove aspas externas
+      const splitSmart = (line) => {
+        // suporta campos entre aspas com vírgula dentro
+        const sep = line.includes(';') ? ';' : ',';
+        const parts = [];
+        let cur = '';
+        let inQ = false;
   
-        if (!email) continue;
+        for (let i=0;i<line.length;i++){
+          const ch = line[i];
+          if (ch === '"') {
+            // toggle aspas (dupla aspa "" vira aspas literal)
+            if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+            else inQ = !inQ;
+          } else if (ch === sep && !inQ) {
+            parts.push(cur.trim());
+            cur = '';
+          } else {
+            cur += ch;
+          }
+        }
+        parts.push(cur.trim());
   
-        const existing = await pool.query('SELECT id FROM users WHERE email=$1',[email]);
-        let userId;
+        while (parts.length < 4) parts.push('');
+        return parts.slice(0,4); // [full_name, email, password, expires]
+      };
   
-        if (existing.rows[0]) {
-          // ---- já existe: atualização seletiva ----
-          userId = existing.rows[0].id;
+      const lines = String(data).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+      if (!lines.length) {
+        return res.status(400).send(renderShell('Importar alunos', `<div class="card"><h1>Erro</h1><p>Nenhuma linha encontrada.</p><p><a href="/admin/import">Voltar</a></p></div>`));
+      }
   
-          if (owName && full_name) {
-            await pool.query('UPDATE users SET full_name=$1 WHERE id=$2',[full_name, userId]);
+      // detectar cabeçalho
+      const maybeHeader = splitSmart(lines[0]).map(s => s.toLowerCase());
+      const isHeader =
+        maybeHeader.some(s => ['nome','full_name'].includes(s)) ||
+        maybeHeader.includes('email') ||
+        maybeHeader.some(s => ['senha','password'].includes(s)) ||
+        maybeHeader.some(s => ['validade','expires_at','expira','vencimento'].includes(s));
+      const workLines = isHeader ? lines.slice(1) : lines;
+  
+      client = await pool.connect();
+      await client.query('BEGIN');
+  
+      const results = []; // {lineNo, email, action, ok, message}
+  
+      for (let idx=0; idx<workLines.length; idx++){
+        const line = workLines[idx];
+        const lineNo = isHeader ? idx+2 : idx+1;
+  
+        try{
+          const [full_name_raw, email_raw, password_raw, userExp_raw] = splitSmart(line);
+          const full_name = (full_name_raw || '').trim();
+          const emailCsv  = (email_raw  || '').trim().toLowerCase();
+          const expiresAt = normalizeDateStr(userExp_raw) || null;
+  
+          if (!emailCsv) {
+            results.push({ lineNo, email:'', action:'skip', ok:false, message:'Linha sem e-mail' });
+            continue;
           }
   
-          if (owExpr) {
-            await pool.query('UPDATE users SET expires_at=$1 WHERE id=$2',[expiresAt, userId]);
-          }
+          const existing = await client.query('SELECT id, email FROM users WHERE email=$1',[emailCsv]);
+          let userId;
+          let action = 'create';
   
-          if (owPass) {
-            // se o CSV trouxer senha vazia, geramos uma aleatória
+          if (existing.rows[0]) {
+            // ---- já existe: atualização seletiva ----
+            userId = existing.rows[0].id;
+            action = 'update';
+  
+            // nome
+            if (owName && full_name) {
+              await client.query('UPDATE users SET full_name=$1 WHERE id=$2',[full_name, userId]);
+            }
+  
+            // validade
+            if (owExpr) {
+              await client.query('UPDATE users SET expires_at=$1 WHERE id=$2',[expiresAt, userId]);
+            }
+  
+            // senha
+            if (owPass) {
+              const plain = (password_raw && String(password_raw).trim().length)
+                ? String(password_raw).trim()
+                : crypto.randomBytes(5).toString('base64url');
+              const hash = await bcrypt.hash(plain,10);
+              await client.query(
+                'UPDATE users SET password_hash=$1, temp_password=$2 WHERE id=$3',
+                [hash, plain, userId]
+              );
+            }
+  
+            // e-mail (se permitido e diferente)
+            if (owMail) {
+              const newMail = emailCsv; // aqui usamos o mesmo valor do CSV; se quiser permitir “mudar de A para B”, troque a origem
+              // Se quiser permitir que a 1ª coluna contenha um novo email, troque para:
+              // const newMail = (email_novo_raw || email_raw).toLowerCase();
+              if (newMail && newMail !== existing.rows[0].email) {
+                // checa conflito
+                const conflict = await client.query('SELECT 1 FROM users WHERE email=$1 AND id<>$2',[newMail, userId]);
+                if (conflict.rows[0]) throw new Error(`E-mail ${newMail} já usado por outro usuário`);
+                await client.query('UPDATE users SET email=$1 WHERE id=$2',[newMail, userId]);
+              }
+            }
+  
+          } else {
+            // ---- novo usuário ----
             const plain = (password_raw && String(password_raw).trim().length)
               ? String(password_raw).trim()
               : crypto.randomBytes(5).toString('base64url');
             const hash = await bcrypt.hash(plain,10);
-            await pool.query(
-              'UPDATE users SET password_hash=$1, temp_password=$2 WHERE id=$3',
-              [hash, plain, userId]
+  
+            const ins = await client.query(
+              'INSERT INTO users(full_name,email,password_hash,expires_at,temp_password) VALUES($1,$2,$3,$4,$5) RETURNING id',
+              [full_name || emailCsv, emailCsv, hash, expiresAt, plain]
             );
+            userId = ins.rows[0].id;
           }
   
-        } else {
-          // ---- novo usuário ----
-          const plain = (password_raw && String(password_raw).trim().length)
-            ? String(password_raw).trim()
-            : crypto.randomBytes(5).toString('base64url');
-          const hash = await bcrypt.hash(plain,10);
-  
-          const ins = await pool.query(
-            'INSERT INTO users(full_name,email,password_hash,expires_at,temp_password) VALUES($1,$2,$3,$4,$5) RETURNING id',
-            [full_name || email, email, hash, expiresAt, plain]
+          // matrícula (ignora se já existir)
+          await client.query(
+            'INSERT INTO course_members(user_id,course_id,role) VALUES($1,$2,$3) ON CONFLICT (user_id,course_id) DO NOTHING',
+            [userId, course_id, 'student']
           );
-          userId = ins.rows[0].id;
-        }
   
-        // matricula no curso (ignora se já existir)
-        await pool.query(
-          'INSERT INTO course_members(user_id,course_id,role) VALUES($1,$2,$3) ON CONFLICT (user_id,course_id) DO NOTHING',
-          [userId, course_id, 'student']
-        );
+          results.push({ lineNo, email: emailCsv, action, ok:true, message:'OK' });
+  
+        } catch (lineErr) {
+          results.push({ lineNo, email:'', action:'', ok:false, message: lineErr.message || String(lineErr) });
+        }
       }
   
-      res.redirect('/admin/alunos');
+      await client.query('COMMIT');
+  
+      // Renderiza relatório da importação
+      const okRows  = results.filter(r=>r.ok);
+      const badRows = results.filter(r=>!r.ok);
+  
+      const tableOk = okRows.map(r=>`<tr><td>${r.lineNo}</td><td>${safe(r.email)}</td><td>${r.action}</td><td>OK</td></tr>`).join('');
+      const tableBad= badRows.map(r=>`<tr><td>${r.lineNo}</td><td>${safe(r.email)}</td><td>${r.action||'-'}</td><td style="color:#b00">${safe(r.message)}</td></tr>`).join('');
+  
+      const html = `
+        <div class="card">
+          <h1>Resultado da importação</h1>
+          <p>${okRows.length} linha(s) OK, ${badRows.length} com erro.</p>
+  
+          ${tableBad ? `
+            <h3>Com erro</h3>
+            <table><tr><th>Linha</th><th>Email</th><th>Ação</th><th>Erro</th></tr>${tableBad}</table>
+          ` : ''}
+  
+          ${tableOk ? `
+            <h3>Sucesso</h3>
+            <table><tr><th>Linha</th><th>Email</th><th>Ação</th><th>Status</th></tr>${tableOk}</table>
+          ` : ''}
+  
+          <div class="mt"><a href="/admin/alunos">Voltar para Alunos</a> · <a href="/admin/import">Nova importação</a></div>
+        </div>
+      `;
+      return res.send(renderShell('Importação', html));
+  
     }catch(err){
+      if (client) try{ await client.query('ROLLBACK'); }catch{}
       console.error('ADMIN IMPORT ERROR', err);
-      res.status(500).send('Falha ao importar alunos');
+      return res.status(500).send(renderShell('Importar alunos', `<div class="card"><h1>Falha ao importar</h1><p class="mut">${safe(err.message||String(err))}</p><p><a href="/admin/import">Voltar</a></p></div>`));
+    } finally {
+      if (client) client.release();
     }
   });
-  
 // ====== Player (admin bypass de matrícula) ======
 app.get('/aula/:id', authRequired, async (req,res)=>{
   try{

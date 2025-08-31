@@ -341,6 +341,7 @@ app.get('/aulas', authRequired, async (req,res)=>{
           AND (cm.expires_at IS NULL OR cm.expires_at > now())
           AND (c.start_date IS NULL OR c.start_date <= now())
           AND (v.available_from IS NULL OR v.available_from <= now())
+          AND c.archived = false
         ORDER BY v.id DESC`;
       const paramsAluno = slug ? [req.user.id, slug] : [req.user.id];
       ({ rows } = await pool.query(sqlAluno, paramsAluno));
@@ -549,24 +550,58 @@ app.get('/debug/signed/:id', authRequired, async (req,res)=>{
 // ====== Admin: Cursos (listar/criar/editar) ======
 app.get('/admin/cursos', adminRequired, async (req,res)=>{
   try{
-    const { rows } = await pool.query('SELECT id,name,slug,enroll_code,expires_at,start_date FROM courses ORDER BY name ASC');
-    const list = rows.map(c=>
-      `<tr>
-        <td>${c.id}</td>
-        <td>${safe(c.name)}</td>
-        <td><code>${safe(c.slug)}</code></td>
-        <td>${safe(c.enroll_code)||'<span class="mut">—</span>'}</td>
-        <td>${fmt(c.start_date)||'<span class="mut">—</span>'}</td>
-        <td>${fmt(c.expires_at)||'<span class="mut">—</span>'}</td>
-        <td><a href="/admin/cursos/${c.id}/edit">editar</a></td>
-        <td><a href="/admin/cursos/${c.id}/clone">Clonar</a><td>
-      </tr>`
-    ).join('');
+    const show = req.query.show || 'active'; // 'active' | 'all' | 'archived'
+    let whereSql = '';
+    if (show === 'active')      whereSql = 'WHERE archived=false';
+    else if (show === 'archived') whereSql = 'WHERE archived=true';
+    // 'all' não filtra
+
+    const { rows } = await pool.query(
+      `SELECT id,name,slug,enroll_code,start_date,expires_at,archived
+         FROM courses
+         ${whereSql}
+         ORDER BY name ASC`
+    );
+
+    const list = rows.map(c => {
+      const tag = c.archived ? ' <span class="mut">[ARQUIVADO]</span>' : '';
+      const actions = `
+        <a href="/admin/cursos/${c.id}/edit">editar</a> ·
+        ${c.archived
+          ? `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/unarchive"><button>desarquivar</button></form>`
+          : `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/archive"><button>arquivar</button></form>`
+        }
+        · <form style="display:inline" method="POST" action="/admin/cursos/${c.id}/delete" onsubmit="return confirm('Apagar curso? Só permitido se não tiver aulas/matrículas.');"><button>apagar</button></form>
+      `;
+      return `
+        <tr>
+          <td>${c.id}</td>
+          <td>${safe(c.name)}${tag}</td>
+          <td><code>${safe(c.slug)}</code></td>
+          <td>${safe(c.enroll_code)||'<span class="mut">—</span>'}</td>
+          <td>${fmt(c.start_date)||'<span class="mut">—</span>'}</td>
+          <td>${fmt(c.expires_at)||'<span class="mut">—</span>'}</td>
+          <td>${actions}</td>
+        </tr>`;
+    }).join('');
+
+    const tabs = `
+      <div class="mut" style="margin:8px 0">
+        Filtro:
+        <a href="/admin/cursos?show=active"${(show==='active')?' style="font-weight:700"':''}>Ativos</a> ·
+        <a href="/admin/cursos?show=archived"${(show==='archived')?' style="font-weight:700"':''}>Arquivados</a> ·
+        <a href="/admin/cursos?show=all"${(show==='all')?' style="font-weight:700"':''}>Todos</a>
+      </div>`;
+
     const form = `
       <div class="card">
         <h1>Cursos</h1>
-        <table class="mt2"><thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Disponível desde</th><th>Validade</th><th></th></tr></thead>
-        <tbody>${list || '<tr><td colspan="6" class="mut">Nenhum curso.</td></tr>'}</tbody></table>
+        ${tabs}
+        <table class="mt2">
+          <thead><tr><th>ID</th><th>Nome</th><th>Slug</th><th>Código</th><th>Disponível desde</th><th>Validade</th><th></th></tr></thead>
+          <tbody>${list || '<tr><td colspan="7" class="mut">Nenhum curso.</td></tr>'}</tbody>
+        </table>
+
         <h2 class="mt2">Novo curso</h2>
         <form method="POST" action="/admin/cursos" class="mt2">
           <label>Nome</label><input name="name" required>
@@ -583,6 +618,52 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
     res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
   }
 });
+
+// Arquivar
+app.post('/admin/cursos/:id/archive', adminRequired, async (req,res)=>{
+  const id = parseInt(req.params.id,10);
+  try{
+    await pool.query('UPDATE courses SET archived=true WHERE id=$1',[id]);
+    res.redirect('/admin/cursos?show=active');
+  }catch(err){
+    console.error('COURSE ARCHIVE ERROR', err);
+    res.status(500).send('Falha ao arquivar');
+  }
+});
+
+// Desarquivar
+app.post('/admin/cursos/:id/unarchive', adminRequired, async (req,res)=>{
+  const id = parseInt(req.params.id,10);
+  try{
+    await pool.query('UPDATE courses SET archived=false WHERE id=$1',[id]);
+    res.redirect('/admin/cursos?show=archived');
+  }catch(err){
+    console.error('COURSE UNARCHIVE ERROR', err);
+    res.status(500).send('Falha ao desarquivar');
+  }
+});
+
+// Apagar (somente se não tiver vídeos nem matrículas)
+app.post('/admin/cursos/:id/delete', adminRequired, async (req,res)=>{
+  const id = parseInt(req.params.id,10);
+  try{
+    const { rows:hasV } = await pool.query('SELECT 1 FROM videos WHERE course_id=$1 LIMIT 1',[id]);
+    const { rows:hasE } = await pool.query('SELECT 1 FROM enrollments WHERE course_id=$1 LIMIT 1',[id]);
+    if (hasV.length || hasE.length){
+      return res.status(400).send(renderShell('Não permitido',
+        `<div class="card"><h1>Não é possível apagar</h1>
+          <p class="mut">O curso ainda possui aulas e/ou matrículas. Remova-as antes.</p>
+          <p><a href="/admin/cursos">Voltar</a></p>
+        </div>`));
+    }
+    await pool.query('DELETE FROM courses WHERE id=$1',[id]);
+    res.redirect('/admin/cursos?show=all');
+  }catch(err){
+    console.error('COURSE DELETE ERROR', err);
+    res.status(500).send('Falha ao apagar');
+  }
+});
+
 app.post('/admin/cursos', adminRequired, async (req,res)=>{
   try{
     let { name, slug, enroll_code, start_date, expires_at } = req.body || {};
@@ -638,11 +719,12 @@ app.post('/admin/cursos/:id/edit', adminRequired, async (req,res)=>{
 // ====== Admin: Vídeos (listar/criar/editar/apagar) ======
 app.get('/admin/videos', adminRequired, async (req,res)=>{
   try{
-    const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name ASC');
+    const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses WHERE archived=false ORDER BY name ASC');
     const options = courses.map(c=>`<option value="${c.id}">[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
 
     const { rows:videos } = await pool.query(`
-      SELECT v.id, v.title, v.r2_key, v.duration_seconds, v.available_from, c.name AS course_name, c.slug
+      SELECT v.id, v.title, v.r2_key, v.duration_seconds, v.available_from,
+             c.name AS course_name, c.slug, c.archived
       FROM videos v
       JOIN courses c ON c.id = v.course_id
       ORDER BY v.id DESC`);
@@ -652,7 +734,7 @@ app.get('/admin/videos', adminRequired, async (req,res)=>{
         <td>${safe(v.title)}</td>
         <td><code>${safe(v.r2_key)}</code></td>
         <td>${v.duration_seconds ?? '-'}</td>
-        <td>[${safe(v.slug)}] ${safe(v.course_name)}</td>
+        <td>[${safe(v.slug)}] ${safe(v.course_name)} ${v.archived ? '<span class="mut">(arquivado)</span>' : ''}</td>
         <td>${fmt(v.available_from) || '<span class="mut">—</span>'}</td>
         <td>
           <a href="/aula/${v.id}" target="_blank">ver</a> ·

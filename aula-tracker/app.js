@@ -548,6 +548,229 @@ app.get('/debug/signed/:id', authRequired, async (req,res)=>{
 });
 
 // ====== Admin: Cursos (listar/criar/editar) ======
+// Página de gerenciamento do curso: lista vídeos, permite editar várias datas e ordem de uma vez
+app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
+    const courseId = parseInt(req.params.id, 10);
+    try {
+      const { rows: cRows } = await pool.query(
+        'SELECT id, name, slug, archived FROM courses WHERE id=$1',
+        [courseId]
+      );
+      if (!cRows[0]) {
+        return res.send(renderShell('Curso', `<div class="card"><h1>Curso não encontrado</h1><p><a href="/admin/cursos">Voltar</a></p></div>`));
+      }
+      const curso = cRows[0];
+  
+      const { rows: videos } = await pool.query(
+        `SELECT id, title, r2_key, duration_seconds, available_from, sort_index
+           FROM videos
+          WHERE course_id = $1
+          ORDER BY sort_index NULLS LAST, id ASC`,
+        [courseId]
+      );
+  
+      const toLocalInput = (ts) => {
+        if (!ts) return '';
+        const s = String(ts).replace('Z','');
+        return s.slice(0,16); // yyyy-mm-ddThh:mm
+      };
+  
+      const rowsHtml = videos.map((v, idx) => `
+        <tr data-row-index="${idx}">
+          <td style="white-space:nowrap">
+            <button type="button" class="btn-up"   style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">↑</button>
+            <button type="button" class="btn-down" style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">↓</button>
+          </td>
+          <td>${v.id}<input type="hidden" name="video_id[]" value="${v.id}"></td>
+          <td>${safe(v.title)}</td>
+          <td><code>${safe(v.r2_key)}</code></td>
+          <td>${v.duration_seconds ?? '—'}</td>
+          <td><input type="datetime-local" name="available_from[]" value="${toLocalInput(v.available_from)}"></td>
+          <td><input type="number" name="sort_index[]" value="${v.sort_index ?? ''}" min="0" step="1" style="width:90px"></td>
+        </tr>
+      `).join('');
+  
+      const html = `
+        <div class="card">
+          <h1>Gerenciar Curso: ${safe(curso.name)} ${curso.archived ? '<span class="mut">(arquivado)</span>' : ''}</h1>
+          <p class="mut">Slug: <code>${safe(curso.slug)}</code></p>
+          <p><a href="/admin/cursos">Voltar</a></p>
+  
+          <form method="POST" action="/admin/cursos/${curso.id}/bulk" id="bulkForm">
+            <div class="row">
+              <div>
+                <label>Intervalo sugerido</label>
+                <select id="intervalSelect" name="__interval">
+                  <option value="P7D">+7 dias</option>
+                  <option value="P15D">+15 dias</option>
+                  <option value="P30D">+30 dias</option>
+                  <option value="custom">Personalizado…</option>
+                </select>
+              </div>
+              <div id="customDaysWrap" style="display:none">
+                <label>Dias (personalizado)</label>
+                <input type="number" id="customDays" min="1" step="1" placeholder="ex.: 10">
+              </div>
+            </div>
+  
+            <div class="mt2">
+              <button type="button" id="btnAutofill">Autopreencher datas a partir da primeira</button>
+              <button type="button" id="btnNormalizeOrder">Reindexar ordem 10,20,30…</button>
+            </div>
+  
+            <table class="mt2" id="videosTable">
+              <thead>
+                <tr>
+                  <th>Ordem</th>
+                  <th>ID</th>
+                  <th>Título</th>
+                  <th>R2 key</th>
+                  <th>Duração (s)</th>
+                  <th>Disponível a partir</th>
+                  <th>sort_index</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml || '<tr><td colspan="7" class="mut">Nenhum vídeo neste curso.</td></tr>'}
+              </tbody>
+            </table>
+  
+            <div class="mt2">
+              <button type="submit">Salvar alterações</button>
+            </div>
+          </form>
+        </div>
+  
+        <script>
+          (function(){
+            const table = document.getElementById('videosTable').querySelector('tbody');
+            const intervalSelect = document.getElementById('intervalSelect');
+            const customWrap = document.getElementById('customDaysWrap');
+            const customDays = document.getElementById('customDays');
+  
+            intervalSelect.addEventListener('change', ()=>{
+              customWrap.style.display = intervalSelect.value === 'custom' ? '' : 'none';
+            });
+  
+            function swapRows(i, j){
+              const rows = Array.from(table.querySelectorAll('tr'));
+              if (i < 0 || j < 0 || i >= rows.length || j >= rows.length) return;
+              if (i === j) return;
+              if (j > i) {
+                table.insertBefore(rows[j], rows[i]);
+              } else {
+                table.insertBefore(rows[i], rows[j]);
+              }
+            }
+  
+            table.addEventListener('click', (ev)=>{
+              const tr = ev.target.closest('tr');
+              if (!tr) return;
+              const rows = Array.from(table.querySelectorAll('tr'));
+              const idx = rows.indexOf(tr);
+  
+              if (ev.target.classList.contains('btn-up'))   swapRows(idx, idx-1);
+              if (ev.target.classList.contains('btn-down')) swapRows(idx+1, idx);
+            });
+  
+            document.getElementById('btnNormalizeOrder').addEventListener('click', ()=>{
+              const rows = Array.from(table.querySelectorAll('tr'));
+              let v = 10;
+              rows.forEach(tr=>{
+                const si = tr.querySelector('input[name="sort_index[]"]');
+                if (si) { si.value = v; v += 10; }
+              });
+            });
+  
+            document.getElementById('btnAutofill').addEventListener('click', ()=>{
+              const rows = Array.from(table.querySelectorAll('tr'));
+              if (rows.length === 0) return;
+  
+              const firstInput = rows[0].querySelector('input[name="available_from[]"]');
+              if (!firstInput || !firstInput.value) {
+                alert('Preencha a data do primeiro vídeo antes de autopreencher.');
+                return;
+              }
+              let base = new Date(firstInput.value);
+              if (isNaN(base.getTime())) { alert('Data inicial inválida.'); return; }
+  
+              let days = 7;
+              const val = intervalSelect.value;
+              if (val === 'P7D') days = 7;
+              else if (val === 'P15D') days = 15;
+              else if (val === 'P30D') days = 30;
+              else if (val === 'custom') {
+                const n = parseInt(customDays.value,10);
+                if (!n || n < 1) { alert('Informe um número de dias válido.'); return; }
+                days = n;
+              }
+  
+              let current = new Date(base.getTime());
+              for (let i=1;i<rows.length;i++){
+                current = new Date(current.getTime());
+                current.setDate(current.getDate() + days);
+                const inp = rows[i].querySelector('input[name="available_from[]"]');
+                if (inp) {
+                  const yyyy = current.getFullYear().toString().padStart(4,'0');
+                  const mm = (current.getMonth()+1).toString().padStart(2,'0');
+                  const dd = current.getDate().toString().padStart(2,'0');
+                  const hh = current.getHours().toString().padStart(2,'0');
+                  const mi = current.getMinutes().toString().padStart(2,'0');
+                  inp.value = \`\${yyyy}-\${mm}-\${dd}T\${hh}:\${mi}\`;
+                }
+              }
+            });
+          })();
+        </script>
+      `;
+      res.send(renderShell('Gerenciar Curso', html));
+    } catch (err) {
+      console.error('ADMIN COURSE MANAGE ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
+    }
+  });
+
+  // Salva em lote: available_from e sort_index dos vídeos do curso
+app.post('/admin/cursos/:id/bulk', adminRequired, async (req, res) => {
+    const courseId = parseInt(req.params.id, 10);
+    try {
+      const ids = Array.isArray(req.body['video_id[]']) ? req.body['video_id[]']
+                 : Array.isArray(req.body.video_id) ? req.body.video_id
+                 : [req.body.video_id].filter(Boolean);
+  
+      const avs = Array.isArray(req.body['available_from[]']) ? req.body['available_from[]']
+                 : Array.isArray(req.body.available_from) ? req.body.available_from
+                 : [req.body.available_from].filter(()=>true);
+  
+      const sis = Array.isArray(req.body['sort_index[]']) ? req.body['sort_index[]']
+                 : Array.isArray(req.body.sort_index) ? req.body.sort_index
+                 : [req.body.sort_index].filter(()=>true);
+  
+      if (!ids || !ids.length) return res.redirect('/admin/cursos/'+courseId);
+  
+      // transação para salvar tudo
+      await pool.query('BEGIN');
+      for (let i=0;i<ids.length;i++){
+        const vid = parseInt(ids[i],10);
+        const avail = (avs[i] && String(avs[i]).trim()) ? avs[i] : null;
+        const siRaw = (sis[i] !== undefined && sis[i] !== null) ? String(sis[i]).trim() : '';
+        const si = siRaw === '' ? null : parseInt(siRaw,10);
+  
+        await pool.query(
+          'UPDATE videos SET available_from = $1::timestamptz, sort_index = $2 WHERE id = $3 AND course_id=$4',
+          [avail, isNaN(si)? null : si, vid, courseId]
+        );
+      }
+      await pool.query('COMMIT');
+      res.redirect('/admin/cursos/'+courseId);
+    } catch (err) {
+      await pool.query('ROLLBACK');
+      console.error('COURSE BULK SAVE ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao salvar</h1><p class="mut">${err.message||err}</p></div>`));
+    }
+  });
+  
+  
 app.get('/admin/cursos', adminRequired, async (req,res)=>{
   try{
     const show = req.query.show || 'active'; // 'active' | 'all' | 'archived'
@@ -566,13 +789,21 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
     const list = rows.map(c => {
       const tag = c.archived ? ' <span class="mut">[ARQUIVADO]</span>' : '';
       const actions = `
-        <a href="/admin/cursos/${c.id}/edit">editar</a> ·
-        ${c.archived
-          ? `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/unarchive"><button>desarquivar</button></form>`
-          : `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/archive"><button>arquivar</button></form>`
-        }
-        · <form style="display:inline" method="POST" action="/admin/cursos/${c.id}/delete" onsubmit="return confirm('Apagar curso? Só permitido se não tiver aulas/matrículas.');"><button>apagar</button></form>
-      `;
+  <a href="/admin/cursos/${c.id}/edit">editar</a> · 
+  <a href="/admin/cursos/${c.id}">Gerenciar</a> ·
+  ${c.archived
+    ? `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/unarchive">
+         <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">desarquivar</button>
+       </form>`
+    : `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/archive">
+         <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">arquivar</button>
+       </form>`
+  }
+  · <form style="display:inline" method="POST" action="/admin/cursos/${c.id}/delete" onsubmit="return confirm('Apagar curso? Só permitido se não tiver aulas/matrículas.');">
+      <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">apagar</button>
+    </form>
+`;
+
       return `
         <tr>
           <td>${c.id}</td>

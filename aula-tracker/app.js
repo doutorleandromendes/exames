@@ -147,6 +147,24 @@ async function migrate(){
   // Novas colunas de disponibilidade (idempotentes)
   await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ`);
+
+    // Trechos efetivamente assistidos por sessão (intervalos em segundos)
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS watch_segments (
+          id SERIAL PRIMARY KEY,
+          session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          start_sec INTEGER NOT NULL,
+          end_sec   INTEGER NOT NULL,
+          CHECK (end_sec >= start_sec)
+        );
+      `);
+    
+      // Índice para facilitar merges/consultas
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS watch_segments_session_idx
+          ON watch_segments(session_id, start_sec, end_sec);
+      `);
+    
 }
 migrate().catch(e=>console.error('migration error', e));
 
@@ -2075,83 +2093,189 @@ app.get('/admin/import', adminRequired, async (req,res)=>{
   });
 // ====== Player (admin bypass de matrícula) ======
 app.get('/aula/:id', authRequired, async (req,res)=>{
-  try{
-    const videoId = parseInt(req.params.id,10);
-    const { rows:vr } = await pool.query(
-      `SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, v.available_from,
-              c.name AS course_name, c.expires_at, c.start_date
-       FROM videos v JOIN courses c ON c.id = v.course_id WHERE v.id=$1`, [videoId]
-    );
-    const v = vr[0];
-    if(!v) return res.status(404).send(renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`));
-
-    const admin = isAdmin(req);
-    if (!admin) {
-      if (v.expires_at && new Date(v.expires_at) <= new Date()){
-        return res.status(403).send(renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">${safe(v.course_name)} expirou.</p><a href="/aulas">Voltar</a></div>`));
+    try{
+      const videoId = parseInt(req.params.id,10);
+      const { rows:vr } = await pool.query(
+        `SELECT v.id, v.title, v.r2_key, v.course_id, v.duration_seconds, v.available_from,
+                c.name AS course_name, c.expires_at, c.start_date
+         FROM videos v JOIN courses c ON c.id = v.course_id WHERE v.id=$1`, [videoId]
+      );
+      const v = vr[0];
+      if(!v) return res.status(404).send(renderShell('Aula', `<div class="card"><h1>Aula não encontrada</h1><a href="/aulas">Voltar</a></div>`));
+  
+      const admin = isAdmin(req);
+      if (!admin) {
+        if (v.expires_at && new Date(v.expires_at) <= new Date()){
+          return res.status(403).send(renderShell('Curso expirado', `<div class="card"><h1>Curso expirado</h1><p class="mut">${safe(v.course_name)} expirou.</p><a href="/aulas">Voltar</a></div>`));
+        }
+        if (v.start_date && new Date(v.start_date) > new Date()){
+          return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.start_date)}.</p></div>`));
+        }
+        if (v.available_from && new Date(v.available_from) > new Date()){
+          return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.available_from)}.</p></div>`));
+        }
+        const { rows:m } = await pool.query('SELECT expires_at FROM course_members WHERE user_id=$1 AND course_id=$2',[req.user.id, v.course_id]);
+        const mem = m[0];
+        if(!mem) return res.status(403).send(renderShell('Sem matrícula', `<div class="card"><h1>Você não está matriculado em "${safe(v.course_name)}"</h1></div>`));
+        if (mem.expires_at && new Date(mem.expires_at) <= new Date()){
+          return res.status(403).send(renderShell('Matrícula expirada', `<div class="card"><h1>Matrícula expirada</h1></div>`));
+        }
       }
-      if (v.start_date && new Date(v.start_date) > new Date()){
-        return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.start_date)}.</p></div>`));
-      }
-      if (v.available_from && new Date(v.available_from) > new Date()){
-        return res.status(403).send(renderShell('Indisponível', `<div class="card"><h1>Aula ainda não liberada</h1><p class="mut">Disponível a partir de ${fmt(v.available_from)}.</p></div>`));
-      }
-      const { rows:m } = await pool.query('SELECT expires_at FROM course_members WHERE user_id=$1 AND course_id=$2',[req.user.id, v.course_id]);
-      const mem = m[0];
-      if(!mem) return res.status(403).send(renderShell('Sem matrícula', `<div class="card"><h1>Você não está matriculado em "${safe(v.course_name)}"</h1></div>`));
-      if (mem.expires_at && new Date(mem.expires_at) <= new Date()){
-        return res.status(403).send(renderShell('Matrícula expirada', `<div class="card"><h1>Matrícula expirada</h1></div>`));
-      }
-    }
-
-    const signedUrl = generateSignedUrlForKey(v.r2_key);
-    const uidForSession = req.user.id; // registra sessão do admin ou aluno
-    const ins = await pool.query('INSERT INTO sessions(user_id,video_id) VALUES($1,$2) RETURNING id', [uidForSession, videoId]);
-    const sessionId = ins.rows[0].id;
-    const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-    const body = `
-      <div class="card">
-        <div class="right" style="justify-content:space-between;gap:12px">
-          <h1 style="margin:0">${safe(v.title)}</h1>
-          <div><a href="/logout">Sair</a></div>
+  
+      const signedUrl = generateSignedUrlForKey(v.r2_key);
+      const uidForSession = req.user.id; // registra sessão do admin ou aluno
+      const ins = await pool.query('INSERT INTO sessions(user_id,video_id) VALUES($1,$2) RETURNING id', [uidForSession, videoId]);
+      const sessionId = ins.rows[0].id;
+      const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  
+      const body = `
+        <div class="card">
+          <div class="right" style="justify-content:space-between;gap:12px">
+            <h1 style="margin:0">${safe(v.title)}</h1>
+            <div><a href="/logout">Sair</a></div>
+          </div>
+          <p class="mut">Curso: ${safe(v.course_name)} ${admin? '· <strong>(ADMIN)</strong>' : ''}</p>
+          <div class="video">
+            <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
+              ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
+            </video>
+            <div class="wm">${wm}</div>
+          </div>
         </div>
-        <p class="mut">Curso: ${safe(v.course_name)} ${admin? '· <strong>(ADMIN)</strong>' : ''}</p>
-        <div class="video">
-          <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
-            ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
-          </video>
-          <div class="wm">${wm}</div>
-        </div>
-      </div>
-      <script>
+  
+        <script>
         (function(){
           const video = document.getElementById('player');
           const sessionId = ${sessionId};
+  
+          // ————— Segmentos efetivamente assistidos —————
+          let playing = false;
+          let segStart = null;   // início do trecho realmente tocado
+          let lastT = 0;
+          let lastSentAt = 0;
+  
+          function now(){ return Date.now(); }
+  
+          function sendSegment(start, end){
+            if (start == null) return;
+            const a = Math.floor(Math.max(0, start));
+            const b = Math.floor(Math.max(0, end));
+            if (b > a) {
+              fetch('/track/segment', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ sessionId, startSec:a, endSec:b })
+              }).catch(()=>{});
+            }
+          }
+  
+          // começou a tocar → abre segmento
+          video.addEventListener('play', ()=>{
+            playing = true;
+            segStart = Math.floor(video.currentTime || 0);
+            lastT = segStart;
+          });
+  
+          // tocando: fecha bloco se houver pulo, e envia parciais a cada ~10s
+          video.addEventListener('timeupdate', ()=>{
+            if (!playing) return;
+            const t = Math.floor(video.currentTime || 0);
+  
+            // salto p/ trás ou p/ frente > 5s → fecha segmento anterior
+            if (segStart != null && (t < lastT || t - lastT > 5)) {
+              sendSegment(segStart, lastT);
+              segStart = t; // reabre a partir do novo ponto
+            }
+            lastT = t;
+  
+            // envia a cada 10s para não acumular demais
+            if (now() - lastSentAt > 10000 && segStart != null && lastT > segStart) {
+              sendSegment(segStart, lastT);
+              segStart = lastT; // novo bloco começa aqui
+              lastSentAt = now();
+            }
+          });
+  
+          // pausou → fecha segmento
+          video.addEventListener('pause', ()=>{
+            playing = false;
+            const t = Math.floor(video.currentTime || 0);
+            if (segStart != null) sendSegment(segStart, t);
+            segStart = null;
+          });
+  
+          // terminou → fecha segmento
+          video.addEventListener('ended', ()=>{
+            const t = Math.floor(video.currentTime || 0);
+            if (segStart != null) sendSegment(segStart, t);
+            segStart = null;
+            playing = false;
+          });
+  
+          // antes do seek → fecha segmento corrente
+          video.addEventListener('seeking', ()=>{
+            if (segStart != null) {
+              const t = Math.floor(video.currentTime || 0);
+              sendSegment(segStart, t);
+              segStart = null;
+            }
+          });
+  
+          // após seek: se continuar tocando, reabre
+          video.addEventListener('seeked', ()=>{
+            if (!video.paused && !video.ended) {
+              segStart = Math.floor(video.currentTime || 0);
+              lastT = segStart;
+              playing = true;
+            }
+          });
+  
+          // ————— Eventos “simples” (mantidos para compatibilidade/telemetria leve) —————
           function send(type){
-            fetch('/track',{method:'POST',headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({sessionId,type,videoTime:Math.floor(video.currentTime||0),clientTs:new Date().toISOString()})});
+            fetch('/track', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({
+                sessionId,
+                type,
+                videoTime: Math.floor(video.currentTime||0),
+                clientTs: new Date().toISOString()
+              })
+            }).catch(()=>{});
           }
           if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2).');
           video.addEventListener('play',  ()=>send('play'));
           video.addEventListener('pause', ()=>send('pause'));
           video.addEventListener('ended', ()=>send('ended'));
           setInterval(()=>send('progress'), 5000);
+  
+          // ao carregar metadata → reporta duração (caso ainda não esteja no banco)
           video.addEventListener('loadedmetadata', ()=>{
             const dur = Math.floor(video.duration || 0);
             if (dur > 0) {
-              fetch('/api/video-duration', {method:'POST',headers:{'Content-Type':'application/json'},body: JSON.stringify({ videoId: ${videoId}, durationSeconds: dur })}).catch(()=>{});
+              fetch('/api/video-duration', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ videoId: ${videoId}, durationSeconds: dur })
+              }).catch(()=>{});
             }
           });
-          video.addEventListener('error', ()=>console.error('HTMLMediaError', video.error));
+  
+          // debug de erros de mídia
+          video.addEventListener('error', ()=>{
+            const err = video.error;
+            console.error('HTMLMediaError', err);
+            alert('Erro no player. Verifique Console/Network. Code: ' + (err && err.code));
+          });
         })();
-      </script>`;
-    res.send(renderShell(v.title, body));
-  }catch(err){
-    console.error('PLAYER ERROR', err);
-    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir player</h1><p class="mut">${err.message||err}</p></div>`));
-  }
-});
+        </script>
+      `;
+      res.send(renderShell(v.title, body));
+    }catch(err){
+      console.error('PLAYER ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir player</h1><p class="mut">${err.message||err}</p></div>`));
+    }
+  });
 
 // ====== API: grava duração do vídeo se ainda não houver ======
 app.post('/api/video-duration', async (req,res)=>{
@@ -2170,6 +2294,36 @@ app.post('/api/video-duration', async (req,res)=>{
     res.status(500).json({error:'falha ao gravar duração'});
   }
 });
+
+// ====== Tracking de trechos assistidos (segmentos) ======
+app.post('/track/segment', async (req, res) => {
+    try {
+      const { sessionId, startSec, endSec } = req.body || {};
+      const sid = parseInt(sessionId, 10);
+      const a = Math.max(0, parseInt(startSec, 10));
+      const b = Math.max(0, parseInt(endSec, 10));
+  
+      if (!Number.isFinite(sid) || !Number.isFinite(a) || !Number.isFinite(b) || b <= a) {
+        return res.status(400).send('segmento inválido');
+      }
+  
+      // Sanitize: limite de tamanho de segmento (evita “um salto” virar tudo)
+      if (b - a > 600) { // 10 minutos num pacote só? corta.
+        return res.status(400).send('segmento muito longo');
+      }
+  
+      await pool.query(
+        'INSERT INTO watch_segments(session_id, start_sec, end_sec) VALUES($1,$2,$3)',
+        [sid, a, b]
+      );
+  
+      res.status(204).end();
+    } catch (e) {
+      console.error('TRACK SEGMENT ERROR', e);
+      res.status(500).send('erro');
+    }
+  });
+  
 
 // ====== Relatório CSV (ordenado por nome) ======
 app.get('/admin/relatorio/:videoId.csv', adminRequired, async (req,res)=>{

@@ -416,7 +416,6 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
   `, [newCourseId, id]);
 
   res.redirect('/admin/cursos');
-});
 
 
 // ====== SigV4 (R2) ======

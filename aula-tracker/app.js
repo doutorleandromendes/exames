@@ -42,6 +42,14 @@ const pool = new Pool({
 
 // ====== HTML helpers ======
 
+function safe(v) {
+    return String(v ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
 function renderShell(title, body) {
   return `<!doctype html>
   <html lang="pt-br">
@@ -169,63 +177,244 @@ async function migrate(){
 }
 migrate().catch(e=>console.error('migration error', e));
 
-// ====== Clonar curso (copia as aulas do curso origem para um novo curso/semestre) ======
+// ====== Clonar curso (formulário com lista de aulas + ferramentas por linha) ======
 app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (!Number.isFinite(id)) {
-        return res.status(400).send(renderShell('Clonar curso', '<div class="card">ID inválido</div>'));
-      }
+    const srcId = parseInt(req.params.id, 10);
   
-      const { rows } = await pool.query('SELECT id, name, slug, start_date FROM courses WHERE id=$1', [id]);
-      const c = rows[0];
-      if (!c) {
-        return res.send(renderShell('Erro', '<div class="card">Curso não encontrado</div>'));
-      }
+    // curso origem
+    const { rows: crs } = await pool.query('SELECT id,name,slug FROM courses WHERE id=$1', [srcId]);
+    const c = crs[0];
+    if (!c) return res.send(renderShell('Erro', '<div class="card">Curso não encontrado</div>'));
   
-      const html = `
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-            <h1>Clonar Curso: ${safe(c.name)}</h1>
-            <div><a href="/admin/cursos">Voltar</a></div>
+    // vídeos do curso origem (ordem por sort_index, depois id)
+    const { rows: vids } = await pool.query(`
+      SELECT id, title, r2_key, duration_seconds, sort_index
+      FROM videos
+      WHERE course_id=$1
+      ORDER BY sort_index NULLS LAST, id ASC
+    `, [srcId]);
+  
+    // linhas da tabela (cada vídeo com input de data e botões de ajuda)
+    const rowsHtml = vids.map((v, i) => `
+      <tr data-idx="${i}">
+        <td style="white-space:nowrap">
+          <strong>${safe(v.title)}</strong>
+          <div class="mut"><code>${safe(v.r2_key)}</code></div>
+        </td>
+        <td style="width:240px">
+          <input type="datetime-local" name="available_from[]" placeholder="(opcional)">
+        </td>
+        <td style="width:120px">
+          <input type="number" name="sort_index[]" value="${v.sort_index ?? ''}" min="0" step="1" placeholder="ordem">
+        </td>
+        <td style="white-space:nowrap;vertical-align:top">
+          <button type="button" class="btn-copy-prev" style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">Copiar de cima</button>
+          &nbsp;·&nbsp;
+          <select class="dd-offset" style="min-width:90px">
+            <option value="">+dias…</option>
+            <option value="7">+7</option>
+            <option value="14">+14</option>
+            <option value="21">+21</option>
+          </select>
+          <button type="button" class="btn-apply" style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">Aplicar</button>
+        </td>
+        <input type="hidden" name="src_video_id[]" value="${v.id}">
+      </tr>
+    `).join('');
+  
+    const html = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+          <h1>Clonar Curso: ${safe(c.name)} <span class="mut">(${safe(c.slug)})</span></h1>
+          <div><a href="/admin/cursos">Voltar</a></div>
+        </div>
+  
+        <form method="POST" action="/admin/cursos/${c.id}/clone" id="cloneForm">
+          <div class="row">
+            <div>
+              <label>Novo nome</label>
+              <input name="name" value="${safe(c.name)} 2" required>
+            </div>
+            <div>
+              <label>Novo slug</label>
+              <input name="slug" value="${safe(c.slug)}-novo" required>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Data de início do novo curso (opcional)</label>
+              <input name="start_date" placeholder="YYYY-MM-DD ou YYYY-MM-DDTHH:mm-03:00">
+            </div>
+            <div class="mut">
+              As aulas serão clonadas com os mesmos títulos e R2 keys.
+              Você pode definir aqui a <em>data de liberação</em> e a <em>ordem (sort_index)</em> de cada uma.
+            </div>
           </div>
   
-          <form method="POST" action="/admin/cursos/${c.id}/clone">
-            <label>Novo nome</label>
-            <input name="name" required value="${safe(c.name)}">
+          <h3 class="mt2">Aulas do curso origem</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Título</th>
+                <th>Disponível a partir</th>
+                <th>Ordem (sort_index)</th>
+                <th>Atalhos</th>
+              </tr>
+            </thead>
+            <tbody id="vidTbody">
+              ${rowsHtml || '<tr><td colspan="4" class="mut">Nenhuma aula neste curso.</td></tr>'}
+            </tbody>
+          </table>
   
-            <label>Novo slug</label>
-            <input name="slug" required value="${safe(c.slug)}-novo">
+          <div class="mt2">
+            <button type="button" id="btnAutofillAll">Autopreencher em cascata (+7d)</button>
+            <span class="mut">— a partir da 1ª linha</span>
+          </div>
   
-            <label>Data de início do novo curso (YYYY-MM-DD ou YYYY-MM-DDTHH:mm-03:00)</label>
-            <input name="start_date" placeholder="2025-02-10">
+          <div class="mt2">
+            <button type="submit">Clonar curso e aulas</button>
+          </div>
+        </form>
+      </div>
   
-            <button class="mt">Clonar curso e aulas</button>
-          </form>
+      <script>
+        (function(){
+          const tbody = document.getElementById('vidTbody');
+          function fmt(dt){
+            const yyyy = dt.getFullYear().toString().padStart(4,'0');
+            const mm   = (dt.getMonth()+1).toString().padStart(2,'0');
+            const dd   = dt.getDate().toString().padStart(2,'0');
+            const hh   = dt.getHours().toString().padStart(2,'0');
+            const mi   = dt.getMinutes().toString().padStart(2,'0');
+            return \`\${yyyy}-\${mm}-\${dd}T\${hh}:\${mi}\`;
+          }
+          function parseInput(val){
+            if(!val) return null;
+            const d = new Date(val);
+            return isNaN(d.getTime()) ? null : d;
+          }
   
-          <p class="mut mt">
-            As aulas serão clonadas com os mesmos títulos e R2 keys. O campo <code>available_from</code>
-            nos vídeos clonados ficará vazio (você define depois). Relatórios e matrículas não são clonados.
-          </p>
-        </div>
-      `;
-      res.send(renderShell('Clonar curso', html));
-    } catch (err) {
-      console.error('ADMIN CLONE GET ERROR', err);
-      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${safe(err.message||err)}</p></div>`));
-    }
+          // Copiar data da linha anterior
+          tbody.addEventListener('click', (ev)=>{
+            if(!ev.target.classList.contains('btn-copy-prev')) return;
+            const tr = ev.target.closest('tr');
+            const idx = Number(tr.dataset.idx);
+            if(idx <= 0) { alert('Não há linha anterior.'); return; }
+            const prev = tbody.querySelector('tr[data-idx="'+(idx-1)+'"] input[name="available_from[]"]');
+            const cur  = tr.querySelector('input[name="available_from[]"]');
+            if(prev && cur){
+              cur.value = prev.value || '';
+            }
+          });
+  
+          // Aplicar +dias baseado na linha anterior
+          tbody.addEventListener('click', (ev)=>{
+            if(!ev.target.classList.contains('btn-apply')) return;
+            const tr = ev.target.closest('tr');
+            const idx = Number(tr.dataset.idx);
+            if(idx <= 0) { alert('Defina a data da linha anterior primeiro.'); return; }
+            const prevVal = tbody.querySelector('tr[data-idx="'+(idx-1)+'"] input[name="available_from[]"]').value;
+            const sel = tr.querySelector('select.dd-offset');
+            const addDays = parseInt(sel.value,10);
+            if(!addDays){ alert('Escolha +7, +14 ou +21d.'); return; }
+            const base = parseInput(prevVal);
+            if(!base){ alert('Linha anterior sem data válida.'); return; }
+            const d = new Date(base.getTime());
+            d.setDate(d.getDate() + addDays);
+            tr.querySelector('input[name="available_from[]"]').value = fmt(d);
+          });
+  
+          // Autopreencher tudo a partir da 1ª linha (+7d)
+          document.getElementById('btnAutofillAll').addEventListener('click', ()=>{
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            if(rows.length < 2) return;
+            const first = rows[0].querySelector('input[name="available_from[]"]').value;
+            const base = parseInput(first);
+            if(!base){ alert('Preencha a data da 1ª aula antes.'); return; }
+            let cur = new Date(base.getTime());
+            for(let i=1;i<rows.length;i++){
+              cur = new Date(cur.getTime());
+              cur.setDate(cur.getDate() + 7);
+              rows[i].querySelector('input[name="available_from[]"]').value = fmt(cur);
+            }
+          });
+        })();
+      </script>
+    `;
+  
+    res.send(renderShell('Clonar curso', html));
   });
 
+// ====== Clonar curso (salvar curso + aulas com datas/ordem por linha) ======
 app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
-  const { id } = req.params;
-  const { name, slug, start_date } = req.body || {};
-
-  // cria novo curso
-  const q1 = await pool.query(
-    'INSERT INTO courses(name,slug,start_date) VALUES($1,$2,$3) RETURNING id',
-    [name, slug, normalizeDateStr(start_date)]
-  );
-  const newCourseId = q1.rows[0].id;
+    const srcCourseId = parseInt(req.params.id, 10);
+    const { name, slug, start_date } = req.body || {};
+  
+    // Os arrays vindos do form (podem vir como string se só 1 item)
+    const toArr = (v) => Array.isArray(v) ? v : (v != null ? [v] : []);
+    const srcIds       = toArr(req.body['src_video_id[]']).map(x => parseInt(x, 10)).filter(Number.isFinite);
+    const availInputs  = toArr(req.body['available_from[]']);
+    const sortInputs   = toArr(req.body['sort_index[]']);
+  
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+  
+      // 1) cria o novo curso
+      const newCourse = await client.query(
+        `INSERT INTO courses(name, slug, start_date)
+         VALUES ($1, $2, $3) RETURNING id`,
+        [name, slug, normalizeDateStr(start_date)]
+      );
+      const newCourseId = newCourse.rows[0].id;
+  
+      // 2) busca os vídeos de origem que foram exibidos no form
+      //    (usamos os ids postados para manter a MESMA ordem exibida)
+      if (srcIds.length) {
+        const { rows: srcVids } = await client.query(
+          `SELECT id, title, r2_key, duration_seconds, sort_index
+             FROM videos
+            WHERE course_id = $1
+              AND id = ANY($2::int[])
+          `,
+          [srcCourseId, srcIds]
+        );
+        const byId = new Map(srcVids.map(v => [v.id, v]));
+  
+        // 3) insere um-a-um na ordem do formulário
+        for (let i = 0; i < srcIds.length; i++) {
+          const srcId = srcIds[i];
+          const src = byId.get(srcId);
+          if (!src) continue; // id inesperado; ignora
+  
+          const rawAvail = (availInputs[i] || '').trim();
+          const rawSort  = (sortInputs[i]  || '').trim();
+  
+          const available_from = normalizeDateStr(rawAvail) || null;
+          const sort_index = Number.isFinite(parseInt(rawSort, 10))
+            ? parseInt(rawSort, 10)
+            : (src.sort_index ?? null);
+  
+          await client.query(
+            `INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from, sort_index)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [src.title, src.r2_key, newCourseId, src.duration_seconds, available_from, sort_index]
+          );
+        }
+      }
+  
+      await client.query('COMMIT');
+  
+      // leva direto para a página do novo curso para você ajustar o que quiser
+      res.redirect(`/admin/cursos/${newCourseId}`);
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      console.error('ADMIN CLONE POST ERROR', e);
+      res.status(500).send('Falha ao clonar curso');
+    } finally {
+      client.release();
+    }
+  });
 
   // copia aulas do curso origem para o novo
   await pool.query(`

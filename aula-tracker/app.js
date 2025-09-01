@@ -404,7 +404,7 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
       client.release();
     }
   });
-  
+
 // ====== SigV4 (R2) ======
 function hmac(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
 function sha256Hex(msg) { return crypto.createHash('sha256').update(msg).digest('hex'); }
@@ -916,6 +916,32 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
         [courseId]
       );
   
+      // --- NOVO: lista alunos matriculados neste curso ---
+      const { rows: members } = await pool.query(
+        `SELECT u.id AS user_id, u.full_name, u.email,
+                cm.expires_at AS member_expires_at
+           FROM course_members cm
+           JOIN users u ON u.id = cm.user_id
+          WHERE cm.course_id = $1
+          ORDER BY u.full_name NULLS LAST, u.email`,
+        [courseId]
+      );
+  
+      const membersRows = members.map(m => `
+        <tr>
+          <td>${safe(m.full_name) || '-'}</td>
+          <td>${safe(m.email)}</td>
+          <td>${fmt(m.member_expires_at) || '<span class="mut">—</span>'}</td>
+          <td style="white-space:nowrap">
+            <form class="inline" method="POST" action="/admin/cursos/${courseId}/matriculas/${m.user_id}/validade" style="display:inline-block;margin-right:8px">
+              <input type="datetime-local" name="member_expires_at" style="max-width:220px">
+              <button>Atualizar validade</button>
+            </form>
+            · <a href="/admin/alunos/${m.user_id}/relatorio?course_id=${courseId}">relatório do aluno</a>
+          </td>
+        </tr>
+      `).join('');
+  
       // Converte timestamptz -> formato aceito por <input type="datetime-local"> (YYYY-MM-DDTHH:mm, sem TZ)
       const tsToLocalInput = (ts) => {
         if (!ts) return '';
@@ -993,6 +1019,40 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
             <div class="mt2">
               <button type="submit">Salvar alterações</button>
             </div>
+          </form>
+        </div>
+  
+        <div class="card">
+          <h2 class="mt0">Alunos matriculados neste curso</h2>
+          <table>
+            <thead>
+              <tr><th>Nome</th><th>Email</th><th>Validade da matrícula</th><th>Ações</th></tr>
+            </thead>
+            <tbody>
+              ${membersRows || '<tr><td colspan="4" class="mut">Nenhum aluno matriculado.</td></tr>'}
+            </tbody>
+          </table>
+  
+          <h3 class="mt2">Adicionar aluno manualmente a este curso</h3>
+          <form method="POST" action="/admin/cursos/${curso.id}/alunos/add">
+            <div class="row">
+              <div>
+                <label>Nome completo</label>
+                <input name="full_name" required>
+                <label>Senha inicial</label>
+                <input name="password" type="text" placeholder="ex.: Abc123456" required>
+                <label>Validade (usuário, opcional)</label>
+                <input name="user_expires_at" type="datetime-local">
+              </div>
+              <div>
+                <label>Email</label>
+                <input name="email" type="email" required>
+                <label>Validade (matrícula no curso, opcional)</label>
+                <input name="member_expires_at" type="datetime-local">
+                <div class="mut" style="margin-top:8px">Se o e-mail já existir, o aluno é reaproveitado e apenas a matrícula é criada/atualizada.</div>
+              </div>
+            </div>
+            <button class="mt">Adicionar aluno ao curso</button>
           </form>
         </div>
   
@@ -1085,6 +1145,101 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
     }
   });
 
+  // ====== Admin: atualizar validade da matrícula de um aluno neste curso ======
+app.post('/admin/cursos/:courseId/matriculas/:userId/validade', adminRequired, async (req, res) => {
+    try {
+      const courseId = parseInt(req.params.courseId, 10);
+      const userId   = parseInt(req.params.userId, 10);
+      if (!Number.isFinite(courseId) || !Number.isFinite(userId)) {
+        return res.status(400).send('Parâmetros inválidos');
+      }
+  
+      const memberExp = normalizeDateStr(req.body?.member_expires_at) || null;
+  
+      // Garante que o curso existe
+      const c = (await pool.query('SELECT id FROM courses WHERE id=$1', [courseId])).rows[0];
+      if (!c) return res.status(404).send('Curso não encontrado');
+  
+      // Se a matrícula não existir, cria; se existir, atualiza validade
+      await pool.query(
+        `INSERT INTO course_members(user_id, course_id, role, expires_at)
+         VALUES ($1,$2,'student',$3)
+         ON CONFLICT (user_id, course_id)
+         DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+        [userId, courseId, memberExp]
+      );
+  
+      res.redirect(`/admin/cursos/${courseId}`);
+    } catch (err) {
+      console.error('ADMIN UPDATE MEMBER VALIDITY ERROR', err);
+      res.status(500).send('Falha ao atualizar validade da matrícula');
+    }
+  });
+
+  // ====== Admin: adicionar aluno manualmente e matricular no curso ======
+app.post('/admin/cursos/:courseId/alunos/add', adminRequired, async (req, res) => {
+    try {
+      const courseId = parseInt(req.params.courseId, 10);
+      if (!Number.isFinite(courseId)) return res.status(400).send('courseId inválido');
+  
+      let { full_name, email, password, user_expires_at, member_expires_at } = req.body || {};
+      if (!full_name || !email || !password) return res.status(400).send('Dados obrigatórios');
+  
+      email = String(email).trim().toLowerCase();
+  
+      // (opcional) Respeita domínio institucional, se você já usa essa env:
+      if (typeof ALLOWED_EMAIL_DOMAIN !== 'undefined' && ALLOWED_EMAIL_DOMAIN) {
+        if (!email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) {
+          return res.status(400).send('Domínio de email inválido');
+        }
+      }
+  
+      const userExp   = normalizeDateStr(user_expires_at)   || null;
+      const memberExp = normalizeDateStr(member_expires_at) || null;
+  
+      // Cria ou reaproveita usuário por email
+      const u = (await pool.query('SELECT id FROM users WHERE email=$1', [email])).rows[0];
+      let userId;
+  
+      if (u) {
+        userId = u.id;
+        // Atualiza nome e (se desejar) a validade do usuário
+        await pool.query(
+          'UPDATE users SET full_name = COALESCE($1, full_name), expires_at = COALESCE($2, expires_at) WHERE id=$3',
+          [full_name || null, userExp, userId]
+        );
+        // Atualiza senha se enviada (conforme seu fluxo atual)
+        if (password && String(password).trim()) {
+          const hash = await bcrypt.hash(password, 10);
+          await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, userId]);
+        }
+      } else {
+        const hash = await bcrypt.hash(password, 10);
+        const ins = await pool.query(
+          'INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id',
+          [full_name, email, hash, userExp]
+        );
+        userId = ins.rows[0].id;
+      }
+  
+      // Matricula (upsert) no curso alvo
+      await pool.query(
+        `INSERT INTO course_members(user_id,course_id,role,expires_at)
+         VALUES ($1,$2,'student',$3)
+         ON CONFLICT (user_id,course_id)
+         DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+        [userId, courseId, memberExp]
+      );
+  
+      res.redirect(`/admin/cursos/${courseId}`);
+    } catch (err) {
+      console.error('ADMIN ADD STUDENT TO COURSE ERROR', err);
+      res.status(500).send('Falha ao adicionar aluno ao curso');
+    }
+  });
+
+
+
  // Salva em lote as datas/ordem do curso
 app.post('/admin/cursos/:id/bulk', adminRequired, async (req, res) => {
   const courseId = parseInt(req.params.id, 10);
@@ -1149,19 +1304,19 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
     const list = rows.map(c => {
       const tag = c.archived ? ' <span class="mut">[ARQUIVADO]</span>' : '';
       const actions = `
-  <a href="/admin/cursos/${c.id}/edit">editar</a> · 
+  <a href="/admin/cursos/${c.id}/edit">editar</a> ·
   <a href="/admin/cursos/${c.id}">Gerenciar</a> ·
   <a href="/admin/cursos/${c.id}/clone">clonar</a> ·
   ${c.archived
     ? `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/unarchive">
-         <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">desarquivar</button>
+         <button style="background:none;border:0;padding:0;color:#007bff;cursor:pointer">desarquivar</button>
        </form>`
     : `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/archive">
-         <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">arquivar</button>
+         <button style="background:none;border:0;padding:0;color:#007bff;cursor:pointer">arquivar</button>
        </form>`
   }
   · <form style="display:inline" method="POST" action="/admin/cursos/${c.id}/delete" onsubmit="return confirm('Apagar curso? Só permitido se não tiver aulas/matrículas.');">
-      <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">apagar</button>
+      <button style="background:none;border:0;padding:0;color:#007bff;cursor:pointer">apagar</button>
     </form>
 `;
 
@@ -2101,6 +2256,190 @@ app.post('/admin/alunos/:id/matricula/:courseId/remover', adminRequired, async (
     res.status(500).send('Falha ao remover matrícula');
   }
 });
+
+// ====== Admin: Relatório WEB por aluno (resumo por aula, com filtro por curso) ======
+app.get('/admin/alunos/:id/relatorio', adminRequired, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).send('ID inválido');
+
+    const course_id = req.query.course_id ? parseInt(req.query.course_id, 10) : null;
+
+    const u = (await pool.query('SELECT id, full_name, email FROM users WHERE id=$1', [id])).rows[0];
+    if (!u) {
+      return res.status(404).send(renderShell('Relatório do aluno', `<div class="card"><h1>Aluno não encontrado</h1><p><a href="/admin/alunos">Voltar</a></p></div>`));
+    }
+
+    const courses = (await pool.query(`
+      SELECT DISTINCT c.id, c.name, c.slug
+        FROM courses c
+        JOIN videos v   ON v.course_id = c.id
+        JOIN sessions s ON s.video_id  = v.id
+       WHERE s.user_id = $1
+       ORDER BY c.name
+    `, [id])).rows;
+
+    const courseOpts = ['<option value="">(Todos os cursos)</option>']
+      .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id||'')?'selected':''}>${safe(c.name)} (${safe(c.slug)})</option>`))
+      .join('');
+
+    const where = ['s.user_id = $1'];
+    const params = [id];
+    if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          v.id               AS video_id,
+          v.title            AS video_title,
+          v.duration_seconds AS duration_seconds,
+          c.name             AS course_name,
+          c.slug             AS course_slug,
+          MAX(e.video_time)  AS max_time,
+          MAX(e.client_ts)   AS last_ts,
+          COUNT(*) FILTER (WHERE e.type='play')  AS plays,
+          COUNT(*) FILTER (WHERE e.type='pause') AS pauses,
+          COUNT(*) FILTER (WHERE e.type='ended') AS ends,
+          COUNT(*)                                  AS events
+        FROM sessions s
+        JOIN videos   v ON v.id = s.video_id
+        JOIN courses  c ON c.id = v.course_id
+        LEFT JOIN events e ON e.session_id = s.id
+        ${whereSql}
+        GROUP BY v.id, v.title, v.duration_seconds, c.name, c.slug
+      )
+      SELECT *,
+        CASE WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+             ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+        END AS pct
+      FROM base
+      ORDER BY course_name, video_title
+    `;
+    const rows = (await pool.query(sql, params)).rows;
+
+    const batchList = rows.map(r =>
+      `<label style="display:block"><input type="checkbox" name="video_ids[]" value="${r.video_id}"> ${safe(r.course_name)} — ${safe(r.video_title)} (ID ${r.video_id})</label>`
+    ).join('');
+
+    const table = rows.map(r => `
+      <tr>
+        <td>${safe(r.course_name)}</td>
+        <td>${safe(r.video_title)}</td>
+        <td>${r.duration_seconds ?? '—'}</td>
+        <td>${r.max_time ?? 0}</td>
+        <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
+        <td class="mut">${safe(r.plays)} / ${safe(r.pauses)} / ${safe(r.ends)} / ${safe(r.events)}</td>
+      </tr>
+    `).join('');
+
+    const csvLink = `/admin/alunos/${id}/relatorio.csv` + (course_id ? `?course_id=${course_id}` : '');
+
+    const html = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <h1>Relatório do aluno — ${safe(u.full_name) || '-'} <span class="mut">(${safe(u.email)})</span></h1>
+          <div><a href="/admin/alunos/${u.id}/edit">Voltar ao aluno</a></div>
+        </div>
+
+        <form method="GET" action="/admin/alunos/${u.id}/relatorio" class="mt2">
+          <label>Curso</label>
+          <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
+          <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+        </form>
+
+        <div class="card mt2" style="border:1px solid #ddd">
+          <h2 class="mt0">Limpar relatórios do aluno (vídeos listados)</h2>
+          <form method="POST" action="/admin/alunos/${u.id}/relatorio/clear-batch" id="batchClearForm">
+            <div class="mt">
+              <button type="button" class="linklike" id="selAll">Selecionar todos</button> ·
+              <button type="button" class="linklike" id="selNone">Limpar seleção</button>
+            </div>
+            <div class="mt" style="columns:2;max-width:720px">
+              ${batchList || '<span class="mut">Nenhum vídeo no resultado atual.</span>'}
+            </div>
+            <input type="hidden" name="redirect" value="/admin/alunos/${u.id}/relatorio${course_id ? `?course_id=${course_id}` : ''}">
+            <div class="mt">
+              <button ${rows.length ? '' : 'disabled'} onclick="return confirm('Remover TODOS os eventos e sessões deste aluno nos vídeos selecionados?');">Limpar selecionados</button>
+            </div>
+          </form>
+        </div>
+
+        <table class="mt2">
+          <tr><th>Curso</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th><th class="mut">plays/pauses/ends/events</th></tr>
+          ${table || '<tr><td colspan="6" class="mut">Sem dados para este aluno.</td></tr>'}
+        </table>
+      </div>
+      <style>.linklike{background:none;border:0;padding:0;color:#007bff;cursor:pointer}</style>
+      <script>
+        (function(){
+          const root = document.getElementById('batchClearForm');
+          if(!root) return;
+          const selAll = document.getElementById('selAll');
+          const selNone = document.getElementById('selNone');
+          selAll && selAll.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=true); });
+          selNone && selNone.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=false); });
+        })();
+      </script>
+    `;
+    res.send(renderShell('Relatório do aluno', html));
+  } catch (err) {
+    console.error('ADMIN STUDENT REPORT WEB ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao gerar relatório</h1><p class="mut">${safe(err.message||err)}</p></div>`));
+  }
+});
+
+// ====== Admin: Limpar relatórios do aluno (em lote por vídeos selecionados) ======
+app.post('/admin/alunos/:id/relatorio/clear-batch', adminRequired, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).send('ID inválido');
+  
+    const redirect = req.body?.redirect || `/admin/alunos/${id}/relatorio`;
+    const selected = []
+      .concat(req.body['video_ids[]'] || req.body.video_ids || [])
+      .flat()
+      .map(x => parseInt(x, 10))
+      .filter(n => Number.isFinite(n));
+  
+    if (selected.length === 0) return res.redirect(redirect);
+  
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+  
+      await client.query(`
+        DELETE FROM events
+          WHERE session_id IN (
+            SELECT id FROM sessions
+             WHERE user_id = $1
+               AND video_id = ANY($2::int[])
+          )`, [id, selected]);
+  
+      try {
+        await client.query(`
+          DELETE FROM watch_segments
+            WHERE session_id IN (
+              SELECT id FROM sessions
+               WHERE user_id = $1
+                 AND video_id = ANY($2::int[])
+            )`, [id, selected]);
+      } catch {}
+  
+      await client.query(`
+        DELETE FROM sessions
+         WHERE user_id = $1
+           AND video_id = ANY($2::int[])`, [id, selected]);
+  
+      await client.query('COMMIT');
+      res.redirect(redirect);
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      console.error('ADMIN STUDENT CLEAR BATCH ERROR', e);
+      res.status(500).send('Falha ao limpar');
+    } finally {
+      client.release();
+    }
+  });
 // ====== Admin: Importação de alunos (CSV ou colar colunas) — atualização seletiva (nome/senha/validade/e-mail) ======
 app.get('/admin/import', adminRequired, async (req,res)=>{
     const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name');

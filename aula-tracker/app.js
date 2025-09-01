@@ -342,7 +342,7 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
     const srcCourseId = parseInt(req.params.id, 10);
     const { name, slug, start_date } = req.body || {};
   
-    // Os arrays vindos do form (podem vir como string se só 1 item)
+    // Arrays vindos do form (podem vir como string se só 1 item)
     const toArr = (v) => Array.isArray(v) ? v : (v != null ? [v] : []);
     const srcIds       = toArr(req.body['src_video_id[]']).map(x => parseInt(x, 10)).filter(Number.isFinite);
     const availInputs  = toArr(req.body['available_from[]']);
@@ -352,7 +352,7 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
     try {
       await client.query('BEGIN');
   
-      // 1) cria o novo curso
+      // 1) cria o novo curso e OBTÉM newCourseId
       const newCourse = await client.query(
         `INSERT INTO courses(name, slug, start_date)
          VALUES ($1, $2, $3) RETURNING id`,
@@ -360,24 +360,22 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
       );
       const newCourseId = newCourse.rows[0].id;
   
-      // 2) busca os vídeos de origem que foram exibidos no form
-      //    (usamos os ids postados para manter a MESMA ordem exibida)
+      // 2) busca os vídeos de origem selecionados no formulário
       if (srcIds.length) {
         const { rows: srcVids } = await client.query(
           `SELECT id, title, r2_key, duration_seconds, sort_index
              FROM videos
             WHERE course_id = $1
-              AND id = ANY($2::int[])
-          `,
+              AND id = ANY($2::int[])`,
           [srcCourseId, srcIds]
         );
         const byId = new Map(srcVids.map(v => [v.id, v]));
   
-        // 3) insere um-a-um na ordem do formulário
+        // 3) insere um-a-um na ORDEM do formulário
         for (let i = 0; i < srcIds.length; i++) {
           const srcId = srcIds[i];
           const src = byId.get(srcId);
-          if (!src) continue; // id inesperado; ignora
+          if (!src) continue;
   
           const rawAvail = (availInputs[i] || '').trim();
           const rawSort  = (sortInputs[i]  || '').trim();
@@ -396,8 +394,7 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
       }
   
       await client.query('COMMIT');
-  
-      // leva direto para a página do novo curso para você ajustar o que quiser
+      // Vai direto para a página do novo curso
       res.redirect(`/admin/cursos/${newCourseId}`);
     } catch (e) {
       try { await client.query('ROLLBACK'); } catch {}
@@ -407,17 +404,7 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
       client.release();
     }
   });
-
-  // copia aulas do curso origem para o novo
-  await pool.query(`
-    INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from)
-    SELECT title, r2_key, $1, duration_seconds, NULL
-    FROM videos WHERE course_id = $2
-  `, [newCourseId, id]);
-
-  res.redirect('/admin/cursos');
-
-
+  
 // ====== SigV4 (R2) ======
 function hmac(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
 function sha256Hex(msg) { return crypto.createHash('sha256').update(msg).digest('hex'); }

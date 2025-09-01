@@ -1151,6 +1151,7 @@ app.get('/admin/cursos', adminRequired, async (req,res)=>{
       const actions = `
   <a href="/admin/cursos/${c.id}/edit">editar</a> · 
   <a href="/admin/cursos/${c.id}">Gerenciar</a> ·
+  <a href="/admin/cursos/${c.id}/clone">clonar</a> ·
   ${c.archived
     ? `<form style="display:inline" method="POST" action="/admin/cursos/${c.id}/unarchive">
          <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0;text-decoration:underline">desarquivar</button>

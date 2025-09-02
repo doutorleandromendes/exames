@@ -2354,6 +2354,63 @@ app.post('/admin/alunos/:id/resend', adminRequired, async (req, res) => {
   }
 });
 
+// Cadastro manual de aluno + envio de credenciais
+app.post('/admin/alunos', adminRequired, async (req, res) => {
+    try {
+      let { full_name, email, password, user_expires_at, course_id, member_expires_at } = req.body || {};
+      if (!full_name || !email || !password) return res.status(400).send('Dados obrigatórios');
+  
+      email = String(email).trim().toLowerCase();
+      if (ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) {
+        return res.status(400).send('Domínio inválido');
+      }
+  
+      const userExp = normalizeDateStr(user_expires_at) || SEMESTER_END || null;
+  
+      const plain = String(password).trim();         // senha em claro
+      const hash  = await bcrypt.hash(plain, 10);    // hash para login
+  
+      // grava temp_password para poder enviar por e-mail
+      const ins = await pool.query(
+        `INSERT INTO users (full_name, email, password_hash, expires_at, temp_password)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [full_name, email, hash, userExp, plain]
+      );
+      const userId = ins.rows[0].id;
+  
+      if (course_id) {
+        await pool.query(
+          `INSERT INTO course_members (user_id, course_id, role, expires_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, course_id) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+          [userId, course_id, 'student', normalizeDateStr(member_expires_at) || null]
+        );
+      }
+  
+      // dispara o e-mail (controlado por env)
+      if (process.env.SEND_WELCOME_ON_CREATE === '1') {
+        try {
+          await sendWelcomeAndMark({
+            userId,
+            email,
+            name: full_name,
+            login: email,
+            plain
+          });
+        } catch (e) {
+          console.error('WELCOME EMAIL (manual) ERROR', e);
+          // segue o fluxo mesmo que falhe o envio
+        }
+      }
+  
+      res.redirect('/admin/alunos');
+    } catch (err) {
+      console.error('ADMIN STUDENTS CREATE ERROR', err);
+      res.status(500).send('Falha ao criar aluno');
+    }
+  });
+  
 
 // ====== Admin: Relatório WEB por aluno (resumo por aula, com filtro por curso) ======
 app.get('/admin/alunos/:id/relatorio', adminRequired, async (req, res) => {

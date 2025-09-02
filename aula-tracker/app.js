@@ -2061,15 +2061,17 @@ app.post('/admin/alunos', adminRequired, async (req, res) => {
 });
 
   
-// ====== Admin: editar aluno + progresso por aula (compatível com schema atual) ======
+// ====== Admin: editar aluno + progresso por aula (com opção de Reenviar credenciais) ======
 app.get('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
     const id = parseInt(req.params.id,10);
     if(!Number.isFinite(id)) return res.status(400).send('ID inválido');
   
     try{
-      // dados do aluno (mantém colunas que você já usa hoje)
+      // dados do aluno (agora inclui temp_password e welcome_email_sent_at)
       const ures = await pool.query(
-        'SELECT id, full_name, email, expires_at FROM users WHERE id=$1',
+        `SELECT id, full_name, email, expires_at, temp_password, welcome_email_sent_at, created_at
+           FROM users
+          WHERE id=$1`,
         [id]
       );
       const u = ures.rows[0];
@@ -2150,6 +2152,24 @@ app.get('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
         </tr>
       `).join('');
   
+      // Bloco de credenciais (mostra botão de Reenviar só se houver temp_password)
+      const credsBlock = `
+        <h3 class="mt2">Credenciais</h3>
+        ${
+          u.temp_password
+            ? `
+              <div class="mut">Um <code>temp_password</code> está armazenado para este aluno.</div>
+              <form method="POST" action="/admin/alunos/${u.id}/resend" class="mt2">
+                <button type="submit">Reenviar credenciais</button>
+              </form>
+              ${u.welcome_email_sent_at ? `<div class="mut" style="margin-top:6px">Último envio: ${fmt(u.welcome_email_sent_at)}</div>` : ''}
+            `
+            : `
+              <div class="mut">Sem <code>temp_password</code> armazenado. Para habilitar o reenvio, defina uma nova senha no formulário acima.</div>
+            `
+        }
+      `;
+  
       const body = `
         <div class="card">
           <div class="right" style="justify-content:space-between">
@@ -2163,6 +2183,8 @@ app.get('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
             <label>Validade do usuário</label><input name="user_expires_at" type="datetime-local">
             <button class="mt">Salvar</button>
           </form>
+  
+          ${credsBlock}
         </div>
   
         <div class="card">
@@ -2213,7 +2235,7 @@ app.get('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
       res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${safe(err.message||err)}</p></div>`));
     }
   });
-
+  
   // ====== Admin: CSV consolidado por aluno (resumo por aula) ======
 app.get('/admin/alunos/:id/relatorio.csv', adminRequired, async (req,res)=>{
     const id = parseInt(req.params.id,10);

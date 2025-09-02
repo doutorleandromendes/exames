@@ -12,6 +12,7 @@ import cookieParser from 'cookie-parser';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { Pool } from 'pg';
+import { sendWelcomeEmail } from './mailer.js';
 
 
 const app = express();
@@ -145,6 +146,16 @@ async function migrate(){
       video_time INTEGER,
       client_ts TIMESTAMPTZ
     );`);
+    await pool.query(`
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS temp_password TEXT
+      `);
+      await pool.query(`
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ
+      `);
+      
+      
 
   // Novas colunas de disponibilidade (idempotentes)
   await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
@@ -1974,26 +1985,68 @@ app.post('/admin/alunos/bulk', adminRequired, async (req, res) => {
     return res.redirect('/admin/alunos');
   });
   
-app.post('/admin/alunos', adminRequired, async (req,res)=>{
-  try{
-    let { full_name, email, password, user_expires_at, course_id, member_expires_at } = req.body || {};
-    if(!full_name || !email || !password) return res.status(400).send('Dados obrigatórios');
-    email = String(email).trim().toLowerCase();
-    if (ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) return res.status(400).send('Domínio inválido');
-    const userExp = normalizeDateStr(user_expires_at) || SEMESTER_END || null;
-    const hash = await bcrypt.hash(password, 10);
-    const ins = await pool.query('INSERT INTO users(full_name,email,password_hash,expires_at) VALUES($1,$2,$3,$4) RETURNING id', [full_name,email,hash,userExp]);
-    const userId = ins.rows[0].id;
-    if (course_id) {
-      await pool.query('INSERT INTO course_members(user_id,course_id,role,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT (user_id,course_id) DO UPDATE SET expires_at=EXCLUDED.expires_at',
-        [userId, course_id, 'student', normalizeDateStr(member_expires_at) || null]);
+// Se for enviar e-mail já no cadastro manual, garanta este import no topo do arquivo:
+// import { sendWelcomeEmail } from './mailer.js';
+
+app.post('/admin/alunos', adminRequired, async (req, res) => {
+    try {
+      let { full_name, email, password, user_expires_at, course_id, member_expires_at } = req.body || {};
+      if (!full_name || !email || !password) return res.status(400).send('Dados obrigatórios');
+  
+      email = String(email).trim().toLowerCase();
+      if (ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) {
+        return res.status(400).send('Domínio inválido');
+      }
+  
+      const userExp = normalizeDateStr(user_expires_at) || SEMESTER_END || null;
+  
+      // senha em claro para registrar em temp_password e (opcional) enviar por e-mail
+      const plain = String(password).trim();
+  
+      // mantém o custo original (10) do seu código
+      const hash = await bcrypt.hash(plain, 10);
+  
+      // >>> aqui incluímos temp_password no INSERT <<<
+      const ins = await pool.query(
+        `INSERT INTO users (full_name, email, password_hash, expires_at, temp_password)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [full_name, email, hash, userExp, plain]
+      );
+      const userId = ins.rows[0].id;
+  
+      if (course_id) {
+        await pool.query(
+          `INSERT INTO course_members (user_id, course_id, role, expires_at)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id, course_id) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+          [userId, course_id, 'student', normalizeDateStr(member_expires_at) || null]
+        );
+      }
+  
+      // (opcional) enviar e-mail já no cadastro manual
+      if (process.env.SEND_WELCOME_ON_CREATE === '1') {
+        try {
+          await sendWelcomeEmail({
+            to: email,
+            name: full_name || email,
+            login: email,
+            password: plain
+          });
+          await pool.query('UPDATE users SET welcome_email_sent_at = now() WHERE id = $1', [userId]);
+        } catch (e) {
+          console.error('WELCOME EMAIL ERROR', e);
+          // segue o fluxo mesmo que o e-mail falhe
+        }
+      }
+  
+      res.redirect('/admin/alunos');
+    } catch (err) {
+      console.error('ADMIN STUDENTS CREATE ERROR', err);
+      res.status(500).send('Falha ao criar aluno');
     }
-    res.redirect('/admin/alunos');
-  }catch(err){
-    console.error('ADMIN STUDENTS CREATE ERROR', err);
-    res.status(500).send('Falha ao criar aluno');
-  }
-});
+  });
+  
 // ====== Admin: editar aluno + progresso por aula (compatível com schema atual) ======
 app.get('/admin/alunos/:id/edit', adminRequired, async (req,res)=>{
     const id = parseInt(req.params.id,10);

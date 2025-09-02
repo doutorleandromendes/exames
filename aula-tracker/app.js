@@ -12,6 +12,8 @@ import cookieParser from 'cookie-parser';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { Pool } from 'pg';
+import { sendWelcomeEmail } from './mailer.js';
+
 
 const app = express();
 app.set('trust proxy', 1);

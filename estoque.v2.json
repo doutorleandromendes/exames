@@ -25,7 +25,7 @@
       {
         "sku": "CLAM",
         "nome": "Clamídia - Antígeno",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {
@@ -37,7 +37,7 @@
       {
         "sku": "C-A",
         "nome": "Cryptococcus - Antígeno",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {
@@ -55,7 +55,7 @@
       {
         "sku": "DI",
         "nome": "Dengue (IgG/IgM)",
-        "estoque": "",
+        "estoque": 3,
         "alerta": 5
       },
       {
@@ -79,7 +79,7 @@
       {
         "sku": "FAI",
         "nome": "Febre Amarela - Anticorpos IgM",
-        "estoque": 4,
+        "estoque": 5,
         "alerta": 5
       },
       {
@@ -91,13 +91,13 @@
       {
         "sku": "HL-A",
         "nome": "Hanseníase (Lepra) - Antígeno",
-        "estoque": "",
+        "estoque": 1,
         "alerta": 10
       },
       {
         "sku": "HP-A",
         "nome": "Helicobacter pylori - Antígeno",
-        "estoque": "",
+        "estoque": 1,
         "alerta": 10
       },
       {
@@ -109,7 +109,7 @@
       {
         "sku": "HAI",
         "nome": "Hepatite A - Anticorpos IgM",
-        "estoque": 2,
+        "estoque": 5,
         "alerta": 5
       },
       {
@@ -169,7 +169,7 @@
       {
         "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 5
       },
       {
@@ -199,7 +199,7 @@
       {
         "sku": "LEPTO",
         "nome": "Leptospirose - Anticorpos IgM",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 5
       },
       {
@@ -289,7 +289,7 @@
       {
         "sku": "PCRDS",
         "nome": "Proteína C Reativa – Dosagem sérica",
-        "estoque": 3,
+        "estoque": 1,
         "alerta": 5
       },
       {
@@ -319,13 +319,13 @@
       {
         "sku": "PNEUMO",
         "nome": "Streptococcus pneumoniae - Antígeno",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {
         "sku": "PYOGENES",
         "nome": "Streptococcus pyogenes - Antígeno",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {

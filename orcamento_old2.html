@@ -90,177 +90,6 @@
       printWindow.document.close();
     }
     
-    <!-- Add-on: Preço fixo de Pacote (v2, robusto) -->
-<script>
-(() => {
-  'use strict';
-
-  // ===== Config =====
-  const PRECO_FIXO_CARTAO = 2000;
-  const PRECO_FIXO_PIX    = 1800;
-
-  // ===== Utils =====
-  const cssEscape = (window.CSS && CSS.escape) ? CSS.escape : s => String(s).replace(/"/g,'\\"');
-  const f = v => `R$ ${Math.round(Number(v)||0).toLocaleString('pt-BR')}`;
-
-  // Tenta achar o input de desconto por ID, name, placeholder ou label
-  function findDiscountInput(){
-    // 1) ids óbvios
-    let el = document.getElementById('desconto');
-    if (el) return el;
-
-    // 2) name contém "desconto"
-    el = document.querySelector('input[name*="desconto" i]');
-    if (el) return el;
-
-    // 3) placeholder menciona "Desconto"
-    el = Array.from(document.querySelectorAll('input')).find(i => /desconto/i.test(i.placeholder||''));
-    if (el) return el;
-
-    // 4) label por texto
-    const label = Array.from(document.querySelectorAll('label')).find(l => /desconto/i.test(l.textContent||''));
-    if (label) {
-      // <label><input ...></label> ou for="id"
-      const byNest = label.querySelector('input');
-      if (byNest) return byNest;
-      const forId = label.getAttribute('for');
-      if (forId) {
-        const byFor = document.getElementById(forId);
-        if (byFor) return byFor;
-      }
-    }
-    return null;
-  }
-
-  // Acha a tabela principal (a que lista Exame/Preços)
-  function findBudgetTable(){
-    const tables = Array.from(document.querySelectorAll('table'));
-    return tables.find(t => /exame/i.test(t.textContent||'') && /pre\u00e7o/i.test(t.textContent||'')) || tables[0] || null;
-  }
-
-  // Coleta alvos de "Total" para riscar: tenta IDs usuais e, se não, procura em linhas com rótulo.
-  function findTotalTargets(table){
-    const byId = ['total','subtotal','valorDesconto']
-      .map(id => document.getElementById(id))
-      .filter(Boolean);
-
-    if (byId.length) return byId;
-
-    if (!table) return [];
-
-    // procurar em linhas que tenham "Total", "Subtotal" ou "Desconto"
-    const labels = /(total|subtotal|desconto)/i;
-    const cells = [];
-    Array.from(table.querySelectorAll('tr')).forEach(tr => {
-      const tds = Array.from(tr.children);
-      const labelIdx = tds.findIndex(td => labels.test(td.textContent||''));
-      if (labelIdx >= 0) {
-        // pega células numéricas após o rótulo
-        for (let i = labelIdx+1; i < tds.length; i++) {
-          const txt = (tds[i].textContent||'').replace(/\s/g,'');
-          if (/[0-9]/.test(txt)) cells.push(tds[i]);
-        }
-      }
-    });
-    return cells;
-  }
-
-  // ===== UI: checkbox + “linha” destacada logo abaixo da tabela =====
-  document.addEventListener('DOMContentLoaded', () => {
-    const table = findBudgetTable();
-    const descontoInput = findDiscountInput();
-
-    // 1) Checkbox perto do desconto (fallback: topo do body)
-    const ctrl = document.createElement('div');
-    ctrl.id = 'pacote-fixo-ctrl';
-    ctrl.style.margin = '8px 0';
-    ctrl.innerHTML = `
-      <label>
-        <input type="checkbox" id="usarPrecoFixoPacote">
-        Usar preço fixo do pacote
-      </label>
-    `;
-    if (descontoInput) {
-      const anchor = descontoInput.closest('label, .row, div, p') || descontoInput.parentElement || document.body;
-      anchor.insertAdjacentElement('afterend', ctrl);
-    } else {
-      document.body.insertAdjacentElement('afterbegin', ctrl);
-    }
-
-    const chk = ctrl.querySelector('#usarPrecoFixoPacote');
-
-    // 2) Bloco “como linha de tabela”, separado da principal
-    const bloco = document.createElement('table');
-    bloco.id = 'linha-preco-fixo';
-    bloco.style.cssText = 'display:none;margin-top:8px;border-collapse:collapse;width:100%';
-    bloco.innerHTML = `
-      <tbody>
-        <tr style="background:yellow;color:#0a58f5;font-weight:700;border:1px dashed #0a58f5;">
-          <td style="padding:8px 10px;">
-            Pacote - Consulta/Exames - Preço Fixo:
-            <span id="pf-cartao"></span> cartão /
-            <span id="pf-pix"></span> Pix/Dinheiro
-            <span id="pf-desc" style="font-weight:700;"></span>
-          </td>
-        </tr>
-      </tbody>
-    `;
-    if (table) table.insertAdjacentElement('afterend', bloco); else document.body.appendChild(bloco);
-
-    // 3) Alvos de total para riscar
-    const totalTargets = findTotalTargets(table);
-
-    function getDescontoPct(){
-      const v = descontoInput ? Number(descontoInput.value||0) : 0;
-      return Math.max(0, Math.min(100, v));
-    }
-
-    function renderLinha(){
-      const d = getDescontoPct();
-      const cartaoDesc = PRECO_FIXO_CARTAO * (1 - d/100);
-      const pixDesc    = PRECO_FIXO_PIX    * (1 - d/100);
-
-      bloco.querySelector('#pf-cartao').textContent = f(PRECO_FIXO_CARTAO);
-      bloco.querySelector('#pf-pix').textContent    = f(PRECO_FIXO_PIX);
-      bloco.querySelector('#pf-desc').textContent   = d > 0 ? ` (com ${d}%: ${f(cartaoDesc)} / ${f(pixDesc)})` : '';
-    }
-
-    function applyStrike(on){
-      totalTargets.forEach(el => {
-        el.style.textDecoration = on ? 'line-through' : '';
-        el.style.opacity = on ? '.85' : '';
-      });
-    }
-
-    function toggle(){
-      if (chk.checked){
-        renderLinha();
-        bloco.style.display = '';
-        applyStrike(true);
-      } else {
-        bloco.style.display = 'none';
-        applyStrike(false);
-      }
-    }
-
-    chk.addEventListener('change', toggle);
-
-    // Se o desconto mudar, reflita no preço fixo
-    if (descontoInput){
-      const reRender = () => { if (chk.checked) renderLinha(); };
-      descontoInput.addEventListener('input', reRender);
-      descontoInput.addEventListener('change', reRender);
-    }
-
-    // Fallback extra: se algum script atualizar descontos/totais de outra forma,
-    // um MutationObserver garante que a “linha” replique a mudança quando ativo.
-    if (descontoInput){
-      const mo = new MutationObserver(() => { if (chk.checked) renderLinha(); });
-      mo.observe(descontoInput, { attributes:true, attributeFilter:['value'] });
-    }
-  });
-})();
-</script>
 
 function adicionarExameExtra() {
   const nome = document.getElementById('extraNome').value.trim();
@@ -510,5 +339,177 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById('extraPix').value = "";
   };
 });
+<!-- Add-on: Preço fixo de Pacote (v2, robusto) -->
+<script>
+(() => {
+  'use strict';
+
+  // ===== Config =====
+  const PRECO_FIXO_CARTAO = 2000;
+  const PRECO_FIXO_PIX    = 1800;
+
+  // ===== Utils =====
+  const cssEscape = (window.CSS && CSS.escape) ? CSS.escape : s => String(s).replace(/"/g,'\\"');
+  const f = v => `R$ ${Math.round(Number(v)||0).toLocaleString('pt-BR')}`;
+
+  // Tenta achar o input de desconto por ID, name, placeholder ou label
+  function findDiscountInput(){
+    // 1) ids óbvios
+    let el = document.getElementById('desconto');
+    if (el) return el;
+
+    // 2) name contém "desconto"
+    el = document.querySelector('input[name*="desconto" i]');
+    if (el) return el;
+
+    // 3) placeholder menciona "Desconto"
+    el = Array.from(document.querySelectorAll('input')).find(i => /desconto/i.test(i.placeholder||''));
+    if (el) return el;
+
+    // 4) label por texto
+    const label = Array.from(document.querySelectorAll('label')).find(l => /desconto/i.test(l.textContent||''));
+    if (label) {
+      // <label><input ...></label> ou for="id"
+      const byNest = label.querySelector('input');
+      if (byNest) return byNest;
+      const forId = label.getAttribute('for');
+      if (forId) {
+        const byFor = document.getElementById(forId);
+        if (byFor) return byFor;
+      }
+    }
+    return null;
+  }
+
+  // Acha a tabela principal (a que lista Exame/Preços)
+  function findBudgetTable(){
+    const tables = Array.from(document.querySelectorAll('table'));
+    return tables.find(t => /exame/i.test(t.textContent||'') && /pre\u00e7o/i.test(t.textContent||'')) || tables[0] || null;
+  }
+
+  // Coleta alvos de "Total" para riscar: tenta IDs usuais e, se não, procura em linhas com rótulo.
+  function findTotalTargets(table){
+    const byId = ['total','subtotal','valorDesconto']
+      .map(id => document.getElementById(id))
+      .filter(Boolean);
+
+    if (byId.length) return byId;
+
+    if (!table) return [];
+
+    // procurar em linhas que tenham "Total", "Subtotal" ou "Desconto"
+    const labels = /(total|subtotal|desconto)/i;
+    const cells = [];
+    Array.from(table.querySelectorAll('tr')).forEach(tr => {
+      const tds = Array.from(tr.children);
+      const labelIdx = tds.findIndex(td => labels.test(td.textContent||''));
+      if (labelIdx >= 0) {
+        // pega células numéricas após o rótulo
+        for (let i = labelIdx+1; i < tds.length; i++) {
+          const txt = (tds[i].textContent||'').replace(/\s/g,'');
+          if (/[0-9]/.test(txt)) cells.push(tds[i]);
+        }
+      }
+    });
+    return cells;
+  }
+
+  // ===== UI: checkbox + “linha” destacada logo abaixo da tabela =====
+  document.addEventListener('DOMContentLoaded', () => {
+    const table = findBudgetTable();
+    const descontoInput = findDiscountInput();
+
+    // 1) Checkbox perto do desconto (fallback: topo do body)
+    const ctrl = document.createElement('div');
+    ctrl.id = 'pacote-fixo-ctrl';
+    ctrl.style.margin = '8px 0';
+    ctrl.innerHTML = `
+      <label>
+        <input type="checkbox" id="usarPrecoFixoPacote">
+        Usar preço fixo do pacote
+      </label>
+    `;
+    if (descontoInput) {
+      const anchor = descontoInput.closest('label, .row, div, p') || descontoInput.parentElement || document.body;
+      anchor.insertAdjacentElement('afterend', ctrl);
+    } else {
+      document.body.insertAdjacentElement('afterbegin', ctrl);
+    }
+
+    const chk = ctrl.querySelector('#usarPrecoFixoPacote');
+
+    // 2) Bloco “como linha de tabela”, separado da principal
+    const bloco = document.createElement('table');
+    bloco.id = 'linha-preco-fixo';
+    bloco.style.cssText = 'display:none;margin-top:8px;border-collapse:collapse;width:100%';
+    bloco.innerHTML = `
+      <tbody>
+        <tr style="background:yellow;color:#0a58f5;font-weight:700;border:1px dashed #0a58f5;">
+          <td style="padding:8px 10px;">
+            Pacote - Consulta/Exames - Preço Fixo:
+            <span id="pf-cartao"></span> cartão /
+            <span id="pf-pix"></span> Pix/Dinheiro
+            <span id="pf-desc" style="font-weight:700;"></span>
+          </td>
+        </tr>
+      </tbody>
+    `;
+    if (table) table.insertAdjacentElement('afterend', bloco); else document.body.appendChild(bloco);
+
+    // 3) Alvos de total para riscar
+    const totalTargets = findTotalTargets(table);
+
+    function getDescontoPct(){
+      const v = descontoInput ? Number(descontoInput.value||0) : 0;
+      return Math.max(0, Math.min(100, v));
+    }
+
+    function renderLinha(){
+      const d = getDescontoPct();
+      const cartaoDesc = PRECO_FIXO_CARTAO * (1 - d/100);
+      const pixDesc    = PRECO_FIXO_PIX    * (1 - d/100);
+
+      bloco.querySelector('#pf-cartao').textContent = f(PRECO_FIXO_CARTAO);
+      bloco.querySelector('#pf-pix').textContent    = f(PRECO_FIXO_PIX);
+      bloco.querySelector('#pf-desc').textContent   = d > 0 ? ` (com ${d}%: ${f(cartaoDesc)} / ${f(pixDesc)})` : '';
+    }
+
+    function applyStrike(on){
+      totalTargets.forEach(el => {
+        el.style.textDecoration = on ? 'line-through' : '';
+        el.style.opacity = on ? '.85' : '';
+      });
+    }
+
+    function toggle(){
+      if (chk.checked){
+        renderLinha();
+        bloco.style.display = '';
+        applyStrike(true);
+      } else {
+        bloco.style.display = 'none';
+        applyStrike(false);
+      }
+    }
+
+    chk.addEventListener('change', toggle);
+
+    // Se o desconto mudar, reflita no preço fixo
+    if (descontoInput){
+      const reRender = () => { if (chk.checked) renderLinha(); };
+      descontoInput.addEventListener('input', reRender);
+      descontoInput.addEventListener('change', reRender);
+    }
+
+    // Fallback extra: se algum script atualizar descontos/totais de outra forma,
+    // um MutationObserver garante que a “linha” replique a mudança quando ativo.
+    if (descontoInput){
+      const mo = new MutationObserver(() => { if (chk.checked) renderLinha(); });
+      mo.observe(descontoInput, { attributes:true, attributeFilter:['value'] });
+    }
+  });
+})();
+</script>
+
 </script></body>
 </html>

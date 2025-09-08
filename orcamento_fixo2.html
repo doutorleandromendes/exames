@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<title>Orçamento de Exames - Clínica</title>
+<style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    h2 { margin-top: 30px; }
+    label { display: block; margin-top: 10px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    .hidden { display: none; }
+    .print-area { margin-top: 30px; border-top: 1px solid #000; padding-top: 20px; }
+    .btn { margin-top: 20px; padding: 10px 20px; cursor: pointer; background: #007BFF; color: white; border: none; border-radius: 4px; }
+    .btn:hover { background: #0056b3; }
+    @media print {
+  html, body {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #resultado, #resultado * {
+    visibility: visible;
+  }
+  #resultado {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .no-print {
+    display: none !important;
+  } .no-print { display: none; } }
+  </style>
+
+  <!-- Add-on: Preço fixo de Pacote (não-invasivo) -->
+<script>
+  (() => {
+    'use strict';
+  
+    // ===== Configuração =====
+    const PRECO_FIXO_CARTAO = 2000;
+    const PRECO_FIXO_PIX    = 1800;
+  
+    // util: normaliza texto e acha <label> de um input
+    const cssEscape = (CSS && CSS.escape) ? CSS.escape : s => String(s).replace(/"/g,'\\"');
+    const norm = s => (s||"").normalize("NFD").replace(/\p{Diacritic}/gu,"").toLowerCase().trim();
+    function labelTextFor(input){
+      let lab = input.closest('label');
+      if(!lab && input.id) lab = document.querySelector('label[for="'+cssEscape(input.id)+'"]');
+      let txt = lab ? lab.textContent : (input.parentElement ? input.parentElement.textContent : "");
+      return (txt||"").replace(/\s{2,}/g," ").trim();
+    }
+  
+    // acha a tabela principal (cabecalho com "Exame" e "Preço")
+    function findBudgetTable(){
+      const tables = Array.from(document.querySelectorAll('table'));
+      return tables.find(t => /Exame/i.test(t.textContent||"") && /Preço/i.test(t.textContent||""));
+    }
+  
+    // encontra input de desconto (procura por label "Desconto")
+    function findDiscountInput(){
+      const inputs = Array.from(document.querySelectorAll('input'));
+      return inputs.find(el => /desconto/i.test(labelTextFor(el)) || /desconto/i.test(el.placeholder||""));
+    }
+  
+    // encontra células de valor na(s) linha(s) cujo rótulo contenha "Total"
+    function findTotalValueCells(table){
+      const cells = [];
+      Array.from(table.querySelectorAll('tr')).forEach(tr => {
+        const tds = Array.from(tr.children);
+        const labIdx = tds.findIndex(td => /total/i.test(td.textContent||""));
+        if(labIdx >= 0){
+          for(let i=labIdx+1; i<tds.length; i++){
+            if(/\d/.test(tds[i].textContent||"")) cells.push(tds[i]);
+          }
+        }
+      });
+      return cells;
+    }
+  
+    // formatação simples BRL sem casas decimais
+    const f = v => `R$ ${Math.round(Number(v)||0).toLocaleString('pt-BR')}`;
+  
+    document.addEventListener('DOMContentLoaded', () => {
+      const table = findBudgetTable();
+      if(!table) return;
+  
+      const descontoInput = findDiscountInput();
+  
+      // 1) Checkbox próximo do campo Desconto (ou no topo, fallback)
+      const ctrl = document.createElement('div');
+      ctrl.id = 'pacote-fixo-ctrl';
+      ctrl.style.margin = '8px 0';
+      ctrl.innerHTML = `
+        <label>
+          <input type="checkbox" id="usarPrecoFixoPacote">
+          Usar preço fixo do pacote
+        </label>
+      `;
+      if (descontoInput) {
+        const anchor = descontoInput.closest('label, div, p') || descontoInput.parentElement || document.body;
+        anchor.insertAdjacentElement('afterend', ctrl);
+      } else {
+        document.body.insertAdjacentElement('afterbegin', ctrl);
+      }
+  
+      const chk = ctrl.querySelector('#usarPrecoFixoPacote');
+  
+      // 2) Linha destacada logo abaixo da TABELA
+      const linha = document.createElement('div');
+      linha.id = 'linha-preco-fixo';
+      Object.assign(linha.style, {
+        display: 'none',
+        marginTop: '8px',
+        padding: '6px 8px',
+        background: 'yellow',
+        color: '#0a58f5',
+        fontWeight: '700',
+        border: '1px dashed #0a58f5'
+      });
+      table.insertAdjacentElement('afterend', linha);
+  
+      // 3) Referências às células de TOTAL para aplicar strikethrough
+      const totalCells = findTotalValueCells(table);
+  
+      function getDescontoPct(){
+        const v = descontoInput ? Number(descontoInput.value||0) : 0;
+        return Math.max(0, Math.min(100, v));
+      }
+  
+      function renderLinha(){
+        const d = getDescontoPct();
+        const cartaoDesc = PRECO_FIXO_CARTAO * (1 - d/100);
+        const pixDesc    = PRECO_FIXO_PIX    * (1 - d/100);
+        // mostra base + valor com desconto entre parênteses
+        linha.textContent =
+          `Pacote - Consulta/Exames - Preço Fixo: ${f(PRECO_FIXO_CARTAO)} cartão / ${f(PRECO_FIXO_PIX)} Pix/Dinheiro` +
+          (d > 0 ? `  (com ${d}% de desconto: ${f(cartaoDesc)} / ${f(pixDesc)})` : '');
+      }
+  
+      function applyStrike(on){
+        totalCells.forEach(td => {
+          td.style.textDecoration = on ? 'line-through' : '';
+          td.style.opacity = on ? '.8' : '';
+        });
+      }
+  
+      function toggleLinha(){
+        if (chk.checked){
+          renderLinha();
+          linha.style.display = '';
+          applyStrike(true);
+        } else {
+          linha.style.display = 'none';
+          applyStrike(false);
+        }
+      }
+  
+      chk.addEventListener('change', toggleLinha);
+      if (descontoInput){
+        descontoInput.addEventListener('input', () => { if (chk.checked) renderLinha(); });
+        descontoInput.addEventListener('change', () => { if (chk.checked) renderLinha(); });
+      }
+    });
+  })();
+  </script>
+  
+</head>
+<body>
+<h1>Orçamento de Exames</h1>
+<label>Nome do paciente: <input id="nome" type="text"/></label>
+<label>Data: <input id="data" type="date" value=""/></label>
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const today = new Date().toISOString().split("T")[0];
+      document.getElementById("data").value = today;
+    });
+  
+    function salvarComoPDF() {
+      const printWindow = window.open('', '', 'width=800,height=600');
+      const resultadoHTML = document.getElementById('resultado').innerHTML;
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Salvar PDF</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 40px; }
+              table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+              th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+              th { background-color: #f2f2f2; }
+              img { max-width: 150px; }
+              .assinatura { margin-top: 50px; }
+              @media print {
+  html, body {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
+                body { margin: 20px; }
+              }
+            </style>
+          </head>
+          <body onload="window.print(); setTimeout(() => window.close(), 500);">
+            ${resultadoHTML}
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+    
+
+function adicionarExameExtra() {
+  const nome = document.getElementById('extraNome').value.trim();
+  const preco = parseFloat(document.getElementById('extraPreco').value);
+  const pix = parseFloat(document.getElementById('extraPix').value);
+  if (!nome || isNaN(preco) || isNaN(pix)) {
+    alert("Preencha todos os campos do exame extra corretamente.");
+    return;
+  }
+  const container = document.getElementById("exames");
+  const label = document.createElement("label");
+  label.classList.add("exame-item");
+  label.innerHTML = `<input type="checkbox" value="${nome}" data-preco="${preco}" data-pix="${pix}" checked> ${nome} (R$ ${preco.toFixed(2)} / Pix R$ ${pix.toFixed(2)})`;
+  container.appendChild(label);
+  document.getElementById('extraNome').value = "";
+  document.getElementById('extraPreco').value = "";
+  document.getElementById('extraPix').value = "";
+}
+
+document.getElementById("extraPreco").addEventListener("input", () => {
+  const preco = parseFloat(document.getElementById("extraPreco").value);
+  if (!isNaN(preco)) {
+    document.getElementById("extraPix").value = (preco * 0.9).toFixed(2);
+  } else {
+    document.getElementById("extraPix").value = "";
+  }
+});
+
+function adicionarExameExtra() {
+  const nome = document.getElementById('extraNome').value.trim();
+  const preco = parseFloat(document.getElementById('extraPreco').value);
+  const pix = parseFloat(document.getElementById('extraPix').value);
+  if (!nome || isNaN(preco) || isNaN(pix)) {
+    alert("Preencha todos os campos do exame extra corretamente.");
+    return;
+  }
+  const container = document.getElementById("exames");
+  const label = document.createElement("label");
+  label.classList.add("exame-item");
+  label.innerHTML = `<input type="checkbox" value="${nome}" data-preco="${preco}" data-pix="${pix}" checked> ${nome} (R$ ${preco.toFixed(2)} / Pix R$ ${pix.toFixed(2)})`;
+  container.appendChild(label);
+  document.getElementById('extraNome').value = "";
+  document.getElementById('extraPreco').value = "";
+  document.getElementById('extraPix').value = "";
+}
+</script>
+<h2>Selecione os exames:</h2>
+<input id="filtro" placeholder="Buscar exame..." style="width: 100%; padding: 8px; margin-bottom: 10px;" type="text"/>
+<div id="exames" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"></div>
+<label style="margin-top: 20px; display: block;">Desconto (%): <input id="desconto" max="100" min="0" style="width: 80px;" type="number" value="0"/></label>
+<div style="margin-top: 30px;">
+<h3>Adicionar exame extra:</h3>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<input id="extraNome" placeholder="Nome do exame" style="flex: 2; padding: 6px;" type="text"/>
+<input id="extraPreco" placeholder="Preço (Crédito/Débito)" style="width: 150px; padding: 6px;" type="number"/>
+<input id="extraPix" placeholder="Preço (Pix/Dinheiro)" style="width: 150px; padding: 6px;" type="number"/>
+<button class="btn no-print" onclick="adicionarExameExtra()">Adicionar</button>
+</div>
+</div>
+<button class="btn no-print" onclick="gerarOrcamento()">Gerar Orçamento</button>
+<button class="btn no-print" onclick="window.print()">Imprimir</button>
+<button class="btn no-print" onclick="salvarComoPDF()">Salvar como PDF</button>
+<div class="print-area hidden" id="resultado">
+<div style="display: flex; align-items: center; margin-bottom: 20px;">
+<img alt="Logo da Clínica" src="logo_clinica.png" style="height: 80px; margin-right: 20px;"/>
+<h2 style="margin: 0;">Consultório - Dr Leandro Mendes</h2>
+</div>
+<h2>Orçamento de Testes Complementares</h2>
+<p><strong>Nome do paciente:</strong> <span id="outNome"></span></p>
+<p><strong>Data:</strong> <span id="outData"></span></p>
+<table>
+<thead>
+<tr><th>Exame</th><th>Preço (Crédito/Débito)</th><th>Preço (Pix/Dinheiro)</th></tr>
+</thead>
+<tbody id="tabelaExames"></tbody>
+<tfoot>
+<tr><th>Total</th><th id="total"></th><th id="totalPix"></th></tr>
+</tfoot>
+</table>
+<p id="descontoInfo" style="font-weight: bold; color: green;"></p>
+<p style="margin-top: 30px;">
+      Declaro que fui informado(a) sobre os exames listados acima, seus preços e finalidade diagnóstica.<br/>
+      Autorizo sua realização conforme descrito.
+    </p>
+<div style="margin-top: 30px;">
+<strong>Forma de pagamento:</strong><br/>
+<label><input type="checkbox"/> Pix</label>
+<label><input type="checkbox"/> Dinheiro</label>
+<label><input type="checkbox"/> Cartão</label>
+</div>
+<p style="margin-top: 50px;">Assinatura do paciente: ____________________________</p>
+<div style="margin-top: 20px; text-align: right;">
+<p style="margin-bottom: 5px; font-weight: bold;">Pagamento via Pix:</p>
+<img alt="QR Code Pix" src="qrcode_pix.png" style="width: 150px; height: 150px;"/>
+</div>
+</div>
+<script>
+    const URL_CSV = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
+
+    function csvToArray(str, delimiter = ";") {
+      const rows = str.split(/\r?\n/).filter(r => r.trim() !== "");
+      const headers = rows.shift().split(delimiter);
+      return rows.map(row => {
+        const values = row.split(delimiter);
+        if (values.length < headers.length) return null;
+        const obj = {};
+        headers.forEach((header, i) => {
+          obj[header.trim()] = (values[i] || "").trim();
+        });
+        return obj;
+      }).filter(row => row && row["Product Name"] && row["Price"] && row["Pix Price"]);
+    }
+
+    async function carregarExames() {
+      const response = await fetch(URL_CSV);
+      let data = await response.text();
+      
+    let linhas = data.trim().split("\n");
+    if (!linhas[0].toLowerCase().includes("product name")) {
+      linhas.unshift("Product Name;Price;Pix Price;Description");
+      data = linhas.join("\n");
+    }
+    const exames = csvToArray(data);
+    
+      const container = document.getElementById("exames");
+      exames.forEach(exame => {
+        const label = document.createElement("label");
+        label.title = exame["Description"] || "";
+        label.innerHTML = `<input type="checkbox" value="${exame["Product Name"]}" data-preco="${exame["Price"]}" data-pix="${exame["Pix Price"]}"> ${exame["Product Name"]} (R$ ${exame["Price"]} / Pix R$ ${exame["Pix Price"]})`;
+        container.appendChild(label);
+        label.classList.add("exame-item");
+      });
+    }
+
+    carregarExames();
+
+    document.getElementById('filtro').addEventListener('input', function () {
+      const termo = this.value.toLowerCase();
+      document.querySelectorAll('.exame-item').forEach(item => {
+        const texto = item.textContent.toLowerCase();
+        item.style.display = texto.includes(termo) ? '' : 'none';
+      });
+    });
+
+    function gerarOrcamento() {
+      const nome = document.getElementById('nome').value;
+      const data = document.getElementById('data').value;
+      const checkboxes = document.querySelectorAll('#exames input[type=checkbox]:checked');
+      const tabela = document.getElementById('tabelaExames');
+      const totalSpan = document.getElementById('total');
+      const totalPixSpan = document.getElementById('totalPix');
+
+      document.getElementById('outNome').textContent = nome;
+      const [ano, mes, dia] = data.split("-");
+      document.getElementById('outData').textContent = `${dia}/${mes}/${ano}`;
+
+      tabela.innerHTML = '';
+      let total = 0;
+      let totalPix = 0;
+      const desconto = parseFloat(document.getElementById('desconto').value) || 0;
+
+      checkboxes.forEach(cb => {
+        const preco = parseFloat(cb.dataset.preco);
+        const pix = parseFloat(cb.dataset.pix);
+        total += preco;
+        totalPix += pix;
+
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${cb.value}</td><td>R$ ${preco.toFixed(2)}</td><td>R$ ${pix.toFixed(2)}</td>`;
+        tabela.appendChild(row);
+      });
+
+      totalSpan.textContent = `R$ ${total.toFixed(2)}`;
+      totalPixSpan.textContent = `R$ ${totalPix.toFixed(2)}`;
+      const totalComDesconto = total * (1 - desconto / 100);
+      const totalPixComDesconto = totalPix * (1 - desconto / 100);
+      document.getElementById('descontoInfo').textContent = desconto > 0 ? `Total com desconto de ${desconto}%: R$ ${totalComDesconto.toFixed(2)} (Crédito/Débito), R$ ${totalPixComDesconto.toFixed(2)} (Pix/Dinheiro)` : '';
+      document.getElementById('resultado').classList.remove('hidden');
+    }
+  
+    function salvarComoPDF() {
+      const printWindow = window.open('', '', 'width=800,height=600');
+      const resultadoHTML = document.getElementById('resultado').innerHTML;
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Salvar PDF</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 40px; }
+              table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+              th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+              th { background-color: #f2f2f2; }
+              img { max-width: 150px; }
+              .assinatura { margin-top: 50px; }
+              @media print {
+  html, body {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
+                body { margin: 20px; }
+              }
+            </style>
+          </head>
+          <body onload="window.print(); setTimeout(() => window.close(), 500);">
+            ${resultadoHTML}
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+    </script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const precoInput = document.getElementById("extraPreco");
+  if (precoInput) {
+    precoInput.addEventListener("input", () => {
+      const preco = parseFloat(precoInput.value);
+      const pixField = document.getElementById("extraPix");
+      if (!isNaN(preco)) {
+        pixField.value = (preco * 0.9).toFixed(2);
+      } else {
+        pixField.value = "";
+      }
+    });
+  }
+
+  window.adicionarExameExtra = function () {
+    const nome = document.getElementById('extraNome').value.trim();
+    const preco = parseFloat(document.getElementById('extraPreco').value);
+    const pix = parseFloat(document.getElementById('extraPix').value);
+    if (!nome || isNaN(preco) || isNaN(pix)) {
+      alert("Preencha todos os campos do exame extra corretamente.");
+      return;
+    }
+    const container = document.getElementById("exames");
+    const label = document.createElement("label");
+    label.classList.add("exame-item");
+    label.innerHTML = `<input type="checkbox" value="${nome}" data-preco="${preco}" data-pix="${pix}" checked> ${nome} (R$ ${preco.toFixed(2)} / Pix R$ ${pix.toFixed(2)})`;
+    container.appendChild(label);
+    document.getElementById('extraNome').value = "";
+    document.getElementById('extraPreco').value = "";
+    document.getElementById('extraPix').value = "";
+  };
+});
+</script></body>
+</html>

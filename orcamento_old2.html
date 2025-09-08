@@ -1,9 +1,10 @@
 <!DOCTYPE html>
+
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Orçamento de Exames - Clínica</title>
-  <style>
+<meta charset="utf-8"/>
+<title>Orçamento de Exames - Clínica</title>
+<style>
     body { font-family: Arial, sans-serif; margin: 40px; }
     h2 { margin-top: 30px; }
     label { display: block; margin-top: 10px; }
@@ -15,6 +16,15 @@
     .btn { margin-top: 20px; padding: 10px 20px; cursor: pointer; background: #007BFF; color: white; border: none; border-radius: 4px; }
     .btn:hover { background: #0056b3; }
     @media print {
+  html, body {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
   body * {
     visibility: hidden;
   }
@@ -33,57 +43,321 @@
   </style>
 </head>
 <body>
-  <h1>Orçamento de Exames</h1>
-
-  <label>Nome do paciente: <input type="text" id="nome"></label>
-  <label>Data: <input type="date" id="data" value=""></label>
-  <script>
+<h1>Orçamento de Exames</h1>
+<label>Nome do paciente: <input id="nome" type="text"/></label>
+<label>Data: <input id="data" type="date" value=""/></label>
+<script>
     document.addEventListener("DOMContentLoaded", () => {
       const today = new Date().toISOString().split("T")[0];
       document.getElementById("data").value = today;
     });
-  </script>
+  
+    function salvarComoPDF() {
+      const printWindow = window.open('', '', 'width=800,height=600');
+      const resultadoHTML = document.getElementById('resultado').innerHTML;
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Salvar PDF</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 40px; }
+              table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+              th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+              th { background-color: #f2f2f2; }
+              img { max-width: 150px; }
+              .assinatura { margin-top: 50px; }
+              @media print {
+  html, body {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
+                body { margin: 20px; }
+              }
+            </style>
+          </head>
+          <body onload="window.print(); setTimeout(() => window.close(), 500);">
+            ${resultadoHTML}
+          </body>
 
-  <h2>Selecione os exames:</h2>
-  <input type="text" id="filtro" placeholder="Buscar exame..." style="width: 100%; padding: 8px; margin-bottom: 10px;">
-  <div id="exames" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"></div>
+          
+        </html>
+      `);
+      printWindow.document.close();
+    }
+    
+    <!-- Add-on: Preço fixo de Pacote (v2, robusto) -->
+<script>
+(() => {
+  'use strict';
 
-  <label style="margin-top: 20px; display: block;">Desconto (%): <input type="number" id="desconto" min="0" max="100" value="0" style="width: 80px;"></label>
+  // ===== Config =====
+  const PRECO_FIXO_CARTAO = 2000;
+  const PRECO_FIXO_PIX    = 1800;
 
-  <button class="btn no-print" onclick="gerarOrcamento()">Gerar Orçamento</button>
-  <button class="btn no-print" onclick="window.print()">Imprimir</button>
+  // ===== Utils =====
+  const cssEscape = (window.CSS && CSS.escape) ? CSS.escape : s => String(s).replace(/"/g,'\\"');
+  const f = v => `R$ ${Math.round(Number(v)||0).toLocaleString('pt-BR')}`;
 
-  <div id="resultado" class="print-area hidden">
-    <h2>Orçamento</h2>
-    <p><strong>Nome do paciente:</strong> <span id="outNome"></span></p>
-    <p><strong>Data:</strong> <span id="outData"></span></p>
+  // Tenta achar o input de desconto por ID, name, placeholder ou label
+  function findDiscountInput(){
+    // 1) ids óbvios
+    let el = document.getElementById('desconto');
+    if (el) return el;
 
-    <table>
-      <thead>
-        <tr><th>Exame</th><th>Preço (Crédito/Débito)</th><th>Preço (Pix/Dinheiro)</th></tr>
-      </thead>
-      <tbody id="tabelaExames"></tbody>
-      <tfoot>
-        <tr><th>Total</th><th id="total"></th><th id="totalPix"></th></tr>
-      </tfoot>
-    </table>
+    // 2) name contém "desconto"
+    el = document.querySelector('input[name*="desconto" i]');
+    if (el) return el;
 
-    <p id="descontoInfo" style="font-weight: bold; color: green;"></p>
+    // 3) placeholder menciona "Desconto"
+    el = Array.from(document.querySelectorAll('input')).find(i => /desconto/i.test(i.placeholder||''));
+    if (el) return el;
 
-    <p style="margin-top: 30px;">
-      Declaro que fui informado(a) sobre os exames listados acima, seus preços e finalidade diagnóstica.<br>
+    // 4) label por texto
+    const label = Array.from(document.querySelectorAll('label')).find(l => /desconto/i.test(l.textContent||''));
+    if (label) {
+      // <label><input ...></label> ou for="id"
+      const byNest = label.querySelector('input');
+      if (byNest) return byNest;
+      const forId = label.getAttribute('for');
+      if (forId) {
+        const byFor = document.getElementById(forId);
+        if (byFor) return byFor;
+      }
+    }
+    return null;
+  }
+
+  // Acha a tabela principal (a que lista Exame/Preços)
+  function findBudgetTable(){
+    const tables = Array.from(document.querySelectorAll('table'));
+    return tables.find(t => /exame/i.test(t.textContent||'') && /pre\u00e7o/i.test(t.textContent||'')) || tables[0] || null;
+  }
+
+  // Coleta alvos de "Total" para riscar: tenta IDs usuais e, se não, procura em linhas com rótulo.
+  function findTotalTargets(table){
+    const byId = ['total','subtotal','valorDesconto']
+      .map(id => document.getElementById(id))
+      .filter(Boolean);
+
+    if (byId.length) return byId;
+
+    if (!table) return [];
+
+    // procurar em linhas que tenham "Total", "Subtotal" ou "Desconto"
+    const labels = /(total|subtotal|desconto)/i;
+    const cells = [];
+    Array.from(table.querySelectorAll('tr')).forEach(tr => {
+      const tds = Array.from(tr.children);
+      const labelIdx = tds.findIndex(td => labels.test(td.textContent||''));
+      if (labelIdx >= 0) {
+        // pega células numéricas após o rótulo
+        for (let i = labelIdx+1; i < tds.length; i++) {
+          const txt = (tds[i].textContent||'').replace(/\s/g,'');
+          if (/[0-9]/.test(txt)) cells.push(tds[i]);
+        }
+      }
+    });
+    return cells;
+  }
+
+  // ===== UI: checkbox + “linha” destacada logo abaixo da tabela =====
+  document.addEventListener('DOMContentLoaded', () => {
+    const table = findBudgetTable();
+    const descontoInput = findDiscountInput();
+
+    // 1) Checkbox perto do desconto (fallback: topo do body)
+    const ctrl = document.createElement('div');
+    ctrl.id = 'pacote-fixo-ctrl';
+    ctrl.style.margin = '8px 0';
+    ctrl.innerHTML = `
+      <label>
+        <input type="checkbox" id="usarPrecoFixoPacote">
+        Usar preço fixo do pacote
+      </label>
+    `;
+    if (descontoInput) {
+      const anchor = descontoInput.closest('label, .row, div, p') || descontoInput.parentElement || document.body;
+      anchor.insertAdjacentElement('afterend', ctrl);
+    } else {
+      document.body.insertAdjacentElement('afterbegin', ctrl);
+    }
+
+    const chk = ctrl.querySelector('#usarPrecoFixoPacote');
+
+    // 2) Bloco “como linha de tabela”, separado da principal
+    const bloco = document.createElement('table');
+    bloco.id = 'linha-preco-fixo';
+    bloco.style.cssText = 'display:none;margin-top:8px;border-collapse:collapse;width:100%';
+    bloco.innerHTML = `
+      <tbody>
+        <tr style="background:yellow;color:#0a58f5;font-weight:700;border:1px dashed #0a58f5;">
+          <td style="padding:8px 10px;">
+            Pacote - Consulta/Exames - Preço Fixo:
+            <span id="pf-cartao"></span> cartão /
+            <span id="pf-pix"></span> Pix/Dinheiro
+            <span id="pf-desc" style="font-weight:700;"></span>
+          </td>
+        </tr>
+      </tbody>
+    `;
+    if (table) table.insertAdjacentElement('afterend', bloco); else document.body.appendChild(bloco);
+
+    // 3) Alvos de total para riscar
+    const totalTargets = findTotalTargets(table);
+
+    function getDescontoPct(){
+      const v = descontoInput ? Number(descontoInput.value||0) : 0;
+      return Math.max(0, Math.min(100, v));
+    }
+
+    function renderLinha(){
+      const d = getDescontoPct();
+      const cartaoDesc = PRECO_FIXO_CARTAO * (1 - d/100);
+      const pixDesc    = PRECO_FIXO_PIX    * (1 - d/100);
+
+      bloco.querySelector('#pf-cartao').textContent = f(PRECO_FIXO_CARTAO);
+      bloco.querySelector('#pf-pix').textContent    = f(PRECO_FIXO_PIX);
+      bloco.querySelector('#pf-desc').textContent   = d > 0 ? ` (com ${d}%: ${f(cartaoDesc)} / ${f(pixDesc)})` : '';
+    }
+
+    function applyStrike(on){
+      totalTargets.forEach(el => {
+        el.style.textDecoration = on ? 'line-through' : '';
+        el.style.opacity = on ? '.85' : '';
+      });
+    }
+
+    function toggle(){
+      if (chk.checked){
+        renderLinha();
+        bloco.style.display = '';
+        applyStrike(true);
+      } else {
+        bloco.style.display = 'none';
+        applyStrike(false);
+      }
+    }
+
+    chk.addEventListener('change', toggle);
+
+    // Se o desconto mudar, reflita no preço fixo
+    if (descontoInput){
+      const reRender = () => { if (chk.checked) renderLinha(); };
+      descontoInput.addEventListener('input', reRender);
+      descontoInput.addEventListener('change', reRender);
+    }
+
+    // Fallback extra: se algum script atualizar descontos/totais de outra forma,
+    // um MutationObserver garante que a “linha” replique a mudança quando ativo.
+    if (descontoInput){
+      const mo = new MutationObserver(() => { if (chk.checked) renderLinha(); });
+      mo.observe(descontoInput, { attributes:true, attributeFilter:['value'] });
+    }
+  });
+})();
+</script>
+
+function adicionarExameExtra() {
+  const nome = document.getElementById('extraNome').value.trim();
+  const preco = parseFloat(document.getElementById('extraPreco').value);
+  const pix = parseFloat(document.getElementById('extraPix').value);
+  if (!nome || isNaN(preco) || isNaN(pix)) {
+    alert("Preencha todos os campos do exame extra corretamente.");
+    return;
+  }
+  const container = document.getElementById("exames");
+  const label = document.createElement("label");
+  label.classList.add("exame-item");
+  label.innerHTML = `<input type="checkbox" value="${nome}" data-preco="${preco}" data-pix="${pix}" checked> ${nome} (R$ ${preco.toFixed(2)} / Pix R$ ${pix.toFixed(2)})`;
+  container.appendChild(label);
+  document.getElementById('extraNome').value = "";
+  document.getElementById('extraPreco').value = "";
+  document.getElementById('extraPix').value = "";
+}
+
+document.getElementById("extraPreco").addEventListener("input", () => {
+  const preco = parseFloat(document.getElementById("extraPreco").value);
+  if (!isNaN(preco)) {
+    document.getElementById("extraPix").value = (preco * 0.9).toFixed(2);
+  } else {
+    document.getElementById("extraPix").value = "";
+  }
+});
+
+function adicionarExameExtra() {
+  const nome = document.getElementById('extraNome').value.trim();
+  const preco = parseFloat(document.getElementById('extraPreco').value);
+  const pix = parseFloat(document.getElementById('extraPix').value);
+  if (!nome || isNaN(preco) || isNaN(pix)) {
+    alert("Preencha todos os campos do exame extra corretamente.");
+    return;
+  }
+  const container = document.getElementById("exames");
+  const label = document.createElement("label");
+  label.classList.add("exame-item");
+  label.innerHTML = `<input type="checkbox" value="${nome}" data-preco="${preco}" data-pix="${pix}" checked> ${nome} (R$ ${preco.toFixed(2)} / Pix R$ ${pix.toFixed(2)})`;
+  container.appendChild(label);
+  document.getElementById('extraNome').value = "";
+  document.getElementById('extraPreco').value = "";
+  document.getElementById('extraPix').value = "";
+}
+</script>
+<h2>Selecione os exames:</h2>
+<input id="filtro" placeholder="Buscar exame..." style="width: 100%; padding: 8px; margin-bottom: 10px;" type="text"/>
+<div id="exames" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;"></div>
+<label style="margin-top: 20px; display: block;">Desconto (%): <input id="desconto" max="100" min="0" style="width: 80px;" type="number" value="0"/></label>
+<div style="margin-top: 30px;">
+<h3>Adicionar exame extra:</h3>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<input id="extraNome" placeholder="Nome do exame" style="flex: 2; padding: 6px;" type="text"/>
+<input id="extraPreco" placeholder="Preço (Crédito/Débito)" style="width: 150px; padding: 6px;" type="number"/>
+<input id="extraPix" placeholder="Preço (Pix/Dinheiro)" style="width: 150px; padding: 6px;" type="number"/>
+<button class="btn no-print" onclick="adicionarExameExtra()">Adicionar</button>
+</div>
+</div>
+<button class="btn no-print" onclick="gerarOrcamento()">Gerar Orçamento</button>
+<button class="btn no-print" onclick="window.print()">Imprimir</button>
+<button class="btn no-print" onclick="salvarComoPDF()">Salvar como PDF</button>
+<div class="print-area hidden" id="resultado">
+<div style="display: flex; align-items: center; margin-bottom: 20px;">
+<img alt="Logo da Clínica" src="logo_clinica.png" style="height: 80px; margin-right: 20px;"/>
+<h2 style="margin: 0;">Consultório - Dr Leandro Mendes</h2>
+</div>
+<h2>Orçamento de Testes Complementares</h2>
+<p><strong>Nome do paciente:</strong> <span id="outNome"></span></p>
+<p><strong>Data:</strong> <span id="outData"></span></p>
+<table>
+<thead>
+<tr><th>Exame</th><th>Preço (Crédito/Débito)</th><th>Preço (Pix/Dinheiro)</th></tr>
+</thead>
+<tbody id="tabelaExames"></tbody>
+<tfoot>
+<tr><th>Total</th><th id="total"></th><th id="totalPix"></th></tr>
+</tfoot>
+</table>
+<p id="descontoInfo" style="font-weight: bold; color: green;"></p>
+<p style="margin-top: 30px;">
+      Declaro que fui informado(a) sobre os exames listados acima, seus preços e finalidade diagnóstica.<br/>
       Autorizo sua realização conforme descrito.
     </p>
-
-    <p style="margin-top: 50px;">Assinatura do paciente: ____________________________</p>
-
-    <div style="margin-top: 20px; text-align: right;">
-      <p style="margin-bottom: 5px; font-weight: bold;">Pagamento via Pix:</p>
-      <img src="qrcode_pix.png" alt="QR Code Pix" style="width: 150px; height: 150px;">
-    </div>
-  </div>
-
-  <script>
+<div style="margin-top: 30px;">
+<strong>Forma de pagamento:</strong><br/>
+<label><input type="checkbox"/> Pix</label>
+<label><input type="checkbox"/> Dinheiro</label>
+<label><input type="checkbox"/> Cartão</label>
+</div>
+<p style="margin-top: 50px;">Assinatura do paciente: ____________________________</p>
+<div style="margin-top: 20px; text-align: right;">
+<p style="margin-bottom: 5px; font-weight: bold;">Pagamento via Pix:</p>
+<img alt="QR Code Pix" src="qrcode_pix.png" style="width: 150px; height: 150px;"/>
+</div>
+</div>
+<script>
     const URL_CSV = "https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv";
 
     function csvToArray(str, delimiter = ";") {
@@ -140,7 +414,8 @@
       const totalPixSpan = document.getElementById('totalPix');
 
       document.getElementById('outNome').textContent = nome;
-      document.getElementById('outData').textContent = data;
+      const [ano, mes, dia] = data.split("-");
+      document.getElementById('outData').textContent = `${dia}/${mes}/${ano}`;
 
       tabela.innerHTML = '';
       let total = 0;
@@ -165,6 +440,75 @@
       document.getElementById('descontoInfo').textContent = desconto > 0 ? `Total com desconto de ${desconto}%: R$ ${totalComDesconto.toFixed(2)} (Crédito/Débito), R$ ${totalPixComDesconto.toFixed(2)} (Pix/Dinheiro)` : '';
       document.getElementById('resultado').classList.remove('hidden');
     }
-  </script>
-</body>
+  
+    function salvarComoPDF() {
+      const printWindow = window.open('', '', 'width=800,height=600');
+      const resultadoHTML = document.getElementById('resultado').innerHTML;
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Salvar PDF</title>
+            <style>
+              body { font-family: Arial, sans-serif; margin: 40px; }
+              table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+              th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+              th { background-color: #f2f2f2; }
+              img { max-width: 150px; }
+              .assinatura { margin-top: 50px; }
+              @media print {
+  html, body {
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .print-area {
+    page-break-inside: avoid;
+  }
+                body { margin: 20px; }
+              }
+            </style>
+          </head>
+          <body onload="window.print(); setTimeout(() => window.close(), 500);">
+            ${resultadoHTML}
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+    </script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const precoInput = document.getElementById("extraPreco");
+  if (precoInput) {
+    precoInput.addEventListener("input", () => {
+      const preco = parseFloat(precoInput.value);
+      const pixField = document.getElementById("extraPix");
+      if (!isNaN(preco)) {
+        pixField.value = (preco * 0.9).toFixed(2);
+      } else {
+        pixField.value = "";
+      }
+    });
+  }
+
+  window.adicionarExameExtra = function () {
+    const nome = document.getElementById('extraNome').value.trim();
+    const preco = parseFloat(document.getElementById('extraPreco').value);
+    const pix = parseFloat(document.getElementById('extraPix').value);
+    if (!nome || isNaN(preco) || isNaN(pix)) {
+      alert("Preencha todos os campos do exame extra corretamente.");
+      return;
+    }
+    const container = document.getElementById("exames");
+    const label = document.createElement("label");
+    label.classList.add("exame-item");
+    label.innerHTML = `<input type="checkbox" value="${nome}" data-preco="${preco}" data-pix="${pix}" checked> ${nome} (R$ ${preco.toFixed(2)} / Pix R$ ${pix.toFixed(2)})`;
+    container.appendChild(label);
+    document.getElementById('extraNome').value = "";
+    document.getElementById('extraPreco').value = "";
+    document.getElementById('extraPix').value = "";
+  };
+});
+</script></body>
 </html>

@@ -429,13 +429,13 @@
       {
         "sku": "DSDP",
         "nome": "Dosagem sérica de Procalcitonina",
-        "estoque": 53,
+        "estoque": 52,
         "alerta": 5
       },
       {
         "sku": "EV",
         "nome": "Epstein-Barr - Anticorpos Heterófilos",
-        "estoque": 36,
+        "estoque": 35,
         "alerta": 5
       },
       {
@@ -513,7 +513,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 71,
+        "estoque": 70,
         "alerta": 5
       },
       {
@@ -651,7 +651,7 @@
       {
         "sku": "PCRDS",
         "nome": "Proteína C Reativa – Dosagem sérica",
-        "estoque": 20,
+        "estoque": 19,
         "alerta": 5
       },
       {

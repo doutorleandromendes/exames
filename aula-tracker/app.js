@@ -471,20 +471,16 @@ function generateSignedUrlForKey(key, opts = {}) {
   const service = 's3';
   const region = 'auto';
 
-  // Encode key path segments (RFC3986)
   const encodedKey = String(key).split('/').map(encodeURIComponent).join('/');
   const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${encodedKey}`;
 
-  // Timestamps
   const now = new Date();
   const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
   const datestamp = amzdate.slice(0,8);
   const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
 
-  // RFC3986 encoder for query (space -> %20, also encode ! ' ( ) *)
   const encodeRFC3986 = s => encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 
-  // Query params (include response-* when set)
   const qp = [
     ['X-Amz-Algorithm','AWS4-HMAC-SHA256'],
     ['X-Amz-Credential', `${R2_ACCESS_KEY_ID}/${credentialScope}`],
@@ -495,7 +491,6 @@ function generateSignedUrlForKey(key, opts = {}) {
   if (contentType) qp.push(['response-content-type', contentType]);
   if (disposition) qp.push(['response-content-disposition', disposition]);
 
-  // Sort by param name and build canonical query string with RFC3986 encoding
   qp.sort((a,b)=> a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
   const canonicalQuerystring = qp.map(([k,v]) => `${encodeRFC3986(k)}=${encodeRFC3986(v)}`).join('&');
 
@@ -512,16 +507,15 @@ function generateSignedUrlForKey(key, opts = {}) {
     payloadHash
   ].join('\\n');
 
+  const crypto = require('crypto');
   const algorithm = 'AWS4-HMAC-SHA256';
   const stringToSign = [
     algorithm,
     amzdate,
     credentialScope,
-    require('crypto').createHash('sha256').update(canonicalRequest).digest('hex')
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex')
   ].join('\\n');
 
-  // Derive signing key
-  const crypto = require('crypto');
   const kDate = crypto.createHmac('sha256', 'AWS4' + R2_SECRET_ACCESS_KEY).update(datestamp).digest();
   const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
   const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
@@ -529,7 +523,6 @@ function generateSignedUrlForKey(key, opts = {}) {
 
   const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
 
-  // Final presigned URL must reuse the exact canonicalQuerystring
   return `${R2_ENDPOINT.replace(/\/+$/,'')}/${encodeURIComponent(R2_BUCKET)}/${encodedKey}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
 
@@ -3016,217 +3009,171 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
       return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
     }).join('');
     const pdfBlock = files.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
-    app.get('/aula/:id', authRequired, async (req, res) => {
-      try{
-        const videoId = parseInt(req.params.id, 10);
-        const admin = isAdmin(req);
-    
-        // carrega dados da aula e do curso
-        const { rows } = await pool.query(`
-          SELECT v.id, v.title, v.r2_key, v.duration_seconds, v.available_from,
-                 c.name AS course_name, c.slug, c.start_date
-            FROM videos v
-            LEFT JOIN courses c ON c.id = v.course_id
-           WHERE v.id = $1`, [videoId]);
-        const v = rows[0];
-        if (!v) return res.status(404).send('Aula não encontrada');
-    
-        // gate por disponibilidade p/ aluno
-        if (!admin) {
-          if ((v.available_from && new Date(v.available_from) > new Date()) ||
-              (v.start_date     && new Date(v.start_date)     > new Date())) {
-            return res.send(renderShell('Aula', `<div class="card"><h1>${safe(v.title)}</h1><p class="mut">Esta aula ainda não está liberada.</p></div>`));
+
+    // Materiais (PDFs)
+    const { rows: files } = await pool.query(
+      'SELECT id, label, r2_key FROM video_files WHERE video_id=$1 ORDER BY sort_index NULLS LAST, id ASC',
+      [v.id]
+    );
+    const pdfList = files.map(f => {
+      const safeName = (f.label || 'material').replace(/["]+/g, '').trim() || 'material';
+      const href = generateSignedUrlForKey(f.r2_key, {
+        contentType: 'application/pdf',
+        disposition: `attachment; filename="${encodeURIComponent(safeName)}.pdf"`
+      });
+      return `<li><a href="${href}" download>Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
+    }).join('');
+    const pdfBlock = files.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
+const body = `
+        <div class="card">
+          <div class="right" style="justify-content:space-between;gap:12px">
+            <h1 style="margin:0">${safe(v.title)}</h1>
+            <div><a href="/logout">Sair</a></div>
+          </div>
+          <p class="mut">Curso: ${safe(v.course_name)} ${admin? '· <strong>(ADMIN)</strong>' : ''}</p>
+          <div class="video">
+            <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
+              ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
+            </video>
+            <div class="wm">${wm}</div>
+          </div>
+
+          ${pdfBlock}
+        </div>
+  
+        <script>
+        (function(){
+          const video = document.getElementById('player');
+          const sessionId = ${sessionId};
+  
+          // ————— Segmentos efetivamente assistidos —————
+          let playing = false;
+          let segStart = null;   // início do trecho realmente tocado
+          let lastT = 0;
+          let lastSentAt = 0;
+  
+          function now(){ return Date.now(); }
+  
+          function sendSegment(start, end){
+            if (start == null) return;
+            const a = Math.floor(Math.max(0, start));
+            const b = Math.floor(Math.max(0, end));
+            if (b > a) {
+              fetch('/track/segment', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ sessionId, startSec:a, endSec:b })
+              }).catch(()=>{});
+            }
           }
-        }
-    
-        // URL assinada do vídeo (stream)
-        const signedUrl = generateSignedUrlForKey(v.r2_key, { contentType: 'video/mp4' });
-    
-        // watermark com nome/e-mail do usuário
-        const wm = req.user ? safe(req.user.full_name || req.user.email) : '';
-    
-        // cria sessão p/ tracking
-        const { rows: srows } = await pool.query(
-          `INSERT INTO sessions(user_id, video_id) VALUES ($1,$2) RETURNING id`,
-          [req.user.id, videoId]
-        );
-        const sessionId = srows[0].id;
-    
-        // ===== Materiais (PDFs) =====
-        const { rows: files } = await pool.query(
-          `SELECT id, label, r2_key
-             FROM video_files
-            WHERE video_id = $1
-         ORDER BY sort_index NULLS LAST, id`,
-          [v.id]
-        );
-    
-        const pdfList = files.map(f => {
-          const safeName = (f.label || 'material').replace(/["]+/g, '').trim() || 'material';
-          const href = generateSignedUrlForKey(f.r2_key, {
-            contentType: 'application/pdf',
-            disposition: `attachment; filename="${encodeURIComponent(safeName)}.pdf"`
+  
+          // começou a tocar → abre segmento
+          video.addEventListener('play', ()=>{
+            playing = true;
+            segStart = Math.floor(video.currentTime || 0);
+            lastT = segStart;
           });
-          return `<li><a href="${href}" download>Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
-        }).join('');
-    
-        const pdfBlock = files.length ? `
-          <h3 class="mt2">Materiais (PDFs)</h3>
-          <ul>${pdfList}</ul>
-        ` : '';
-    
-        // ===== HTML =====
-        const body = `
-            <div class="card">
-              <div class="right" style="justify-content:space-between;gap:12px">
-                <h1 style="margin:0">${safe(v.title)}</h1>
-                <div><a href="/logout">Sair</a></div>
-              </div>
-              <p class="mut">Curso: ${safe(v.course_name)} ${admin? '· <strong>(ADMIN)</strong>' : ''}</p>
-              <div class="video">
-                <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
-                  ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
-                </video>
-                <div class="wm">${wm}</div>
-              </div>
-    
-              ${pdfBlock}
-            </div>
-    
-            <script>
-            (function(){
-              const video = document.getElementById('player');
-              const sessionId = ${sessionId};
-    
-              // ————— Segmentos efetivamente assistidos —————
-              let playing = false;
-              let segStart = null;   // início do trecho realmente tocado
-              let lastT = 0;
-              let lastSentAt = 0;
-    
-              function now(){ return Date.now(); }
-    
-              function sendSegment(start, end){
-                if (start == null) return;
-                const a = Math.floor(Math.max(0, start));
-                const b = Math.floor(Math.max(0, end));
-                if (b > a) {
-                  fetch('/track/segment', {
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ sessionId, startSec:a, endSec:b })
-                  }).catch(()=>{});
-                }
-              }
-    
-              // começou a tocar → abre segmento
-              video.addEventListener('play', ()=>{
-                playing = true;
-                segStart = Math.floor(video.currentTime || 0);
-                lastT = segStart;
-              });
-    
-              // tocando: fecha bloco se houver pulo, e envia parciais a cada ~10s
-              video.addEventListener('timeupdate', ()=>{
-                if (!playing) return;
-                const t = Math.floor(video.currentTime || 0);
-    
-                // salto p/ trás ou p/ frente > 5s → fecha segmento anterior
-                if (segStart != null && (t < lastT || t - lastT > 5)) {
-                  sendSegment(segStart, lastT);
-                  segStart = t; // reabre a partir do novo ponto
-                }
-                lastT = t;
-    
-                // envia a cada 10s para não acumular demais
-                if (now() - lastSentAt > 10000 && segStart != null && lastT > segStart) {
-                  sendSegment(segStart, lastT);
-                  segStart = lastT; // novo bloco começa aqui
-                  lastSentAt = now();
-                }
-              });
-    
-              // pausou → fecha segmento
-              video.addEventListener('pause', ()=>{
-                playing = false;
-                const t = Math.floor(video.currentTime || 0);
-                if (segStart != null) sendSegment(segStart, t);
-                segStart = null;
-              });
-    
-              // terminou → fecha segmento
-              video.addEventListener('ended', ()=>{
-                const t = Math.floor(video.currentTime || 0);
-                if (segStart != null) sendSegment(segStart, t);
-                segStart = null;
-                playing = false;
-              });
-    
-              // antes do seek → fecha segmento corrente
-              video.addEventListener('seeking', ()=>{
-                if (segStart != null) {
-                  const t = Math.floor(video.currentTime || 0);
-                  sendSegment(segStart, t);
-                  segStart = null;
-                }
-              });
-    
-              // após seek: se continuar tocando, reabre
-              video.addEventListener('seeked', ()=>{
-                if (!video.paused && !video.ended) {
-                  segStart = Math.floor(video.currentTime || 0);
-                  lastT = segStart;
-                  playing = true;
-                }
-              });
-    
-              // ————— Eventos “simples” (compatibilidade/telemetria leve) —————
-              function send(type){
-                fetch('/track', {
-                  method:'POST',
-                  headers:{'Content-Type':'application/json'},
-                  body: JSON.stringify({
-                    sessionId,
-                    type,
-                    videoTime: Math.floor(video.currentTime||0),
-                    clientTs: new Date().toISOString()
-                  })
-                }).catch(()=>{});
-              }
-              if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2).');
-              video.addEventListener('play',  ()=>send('play'));
-              video.addEventListener('pause', ()=>send('pause'));
-              video.addEventListener('ended', ()=>send('ended'));
-              setInterval(()=>send('progress'), 5000);
-    
-              // ao carregar metadata → reporta duração (caso ainda não esteja no banco)
-              video.addEventListener('loadedmetadata', ()=>{
-                const dur = Math.floor(video.duration || 0);
-                if (dur > 0) {
-                  fetch('/api/video-duration', {
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ videoId: ${videoId}, durationSeconds: dur })
-                  }).catch(()=>{});
-                }
-              });
-    
-              // debug de erros de mídia
-              video.addEventListener('error', ()=>{
-                const err = video.error;
-                console.error('HTMLMediaError', err);
-                alert('Erro no player. Verifique Console/Network. Code: ' + (err && err.code));
-              });
-            })();
-            </script>
-          `;
-        res.send(renderShell(v.title, body));
-      }catch(err){
-        console.error('PLAYER ERROR', err);
-        res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir player</h1><p class="mut">${err.message||err}</p></div>`));
-      }
-    });
-    
+  
+          // tocando: fecha bloco se houver pulo, e envia parciais a cada ~10s
+          video.addEventListener('timeupdate', ()=>{
+            if (!playing) return;
+            const t = Math.floor(video.currentTime || 0);
+  
+            // salto p/ trás ou p/ frente > 5s → fecha segmento anterior
+            if (segStart != null && (t < lastT || t - lastT > 5)) {
+              sendSegment(segStart, lastT);
+              segStart = t; // reabre a partir do novo ponto
+            }
+            lastT = t;
+  
+            // envia a cada 10s para não acumular demais
+            if (now() - lastSentAt > 10000 && segStart != null && lastT > segStart) {
+              sendSegment(segStart, lastT);
+              segStart = lastT; // novo bloco começa aqui
+              lastSentAt = now();
+            }
+          });
+  
+          // pausou → fecha segmento
+          video.addEventListener('pause', ()=>{
+            playing = false;
+            const t = Math.floor(video.currentTime || 0);
+            if (segStart != null) sendSegment(segStart, t);
+            segStart = null;
+          });
+  
+          // terminou → fecha segmento
+          video.addEventListener('ended', ()=>{
+            const t = Math.floor(video.currentTime || 0);
+            if (segStart != null) sendSegment(segStart, t);
+            segStart = null;
+            playing = false;
+          });
+  
+          // antes do seek → fecha segmento corrente
+          video.addEventListener('seeking', ()=>{
+            if (segStart != null) {
+              const t = Math.floor(video.currentTime || 0);
+              sendSegment(segStart, t);
+              segStart = null;
+            }
+          });
+  
+          // após seek: se continuar tocando, reabre
+          video.addEventListener('seeked', ()=>{
+            if (!video.paused && !video.ended) {
+              segStart = Math.floor(video.currentTime || 0);
+              lastT = segStart;
+              playing = true;
+            }
+          });
+  
+          // ————— Eventos “simples” (mantidos para compatibilidade/telemetria leve) —————
+          function send(type){
+            fetch('/track', {
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({
+                sessionId,
+                type,
+                videoTime: Math.floor(video.currentTime||0),
+                clientTs: new Date().toISOString()
+              })
+            }).catch(()=>{});
+          }
+          if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2).');
+          video.addEventListener('play',  ()=>send('play'));
+          video.addEventListener('pause', ()=>send('pause'));
+          video.addEventListener('ended', ()=>send('ended'));
+          setInterval(()=>send('progress'), 5000);
+  
+          // ao carregar metadata → reporta duração (caso ainda não esteja no banco)
+          video.addEventListener('loadedmetadata', ()=>{
+            const dur = Math.floor(video.duration || 0);
+            if (dur > 0) {
+              fetch('/api/video-duration', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ videoId: ${videoId}, durationSeconds: dur })
+              }).catch(()=>{});
+            }
+          });
+  
+          // debug de erros de mídia
+          video.addEventListener('error', ()=>{
+            const err = video.error;
+            console.error('HTMLMediaError', err);
+            alert('Erro no player. Verifique Console/Network. Code: ' + (err && err.code));
+          });
+        })();
+        </script>
+      `;
+      res.send(renderShell(v.title, body));
+    }catch(err){
+      console.error('PLAYER ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir player</h1><p class="mut">${err.message||err}</p></div>`));
+    }
+  });
 
 // ====== API: grava duração do vídeo se ainda não houver ======
 app.post('/api/video-duration', async (req,res)=>{

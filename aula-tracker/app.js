@@ -2930,6 +2930,8 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
 });
 
 // ====== Player (admin bypass de matrícula) ======
+// REMOVED duplicate /aula/:id route (commented out)
+/*
 app.get('/aula/:id', authRequired, async (req,res)=>{
     try{
       const videoId = parseInt(req.params.id,10);
@@ -2981,7 +2983,9 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
       return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
     }).join('');
     const pdfBlock = files.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
-    app.get('/aula/:id', authRequired, async (req, res) => {
+    
+*/
+app.get('/aula/:id', authRequired, async (req, res) => {
       try{
         const videoId = parseInt(req.params.id, 10);
         const admin = isAdmin(req);

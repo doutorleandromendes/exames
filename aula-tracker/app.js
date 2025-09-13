@@ -505,16 +505,16 @@ function generateSignedUrlForKey(key, opts = {}) {
     canonicalHeaders,
     signedHeaders,
     payloadHash
-  ].join('\\n');
+  ].join('\n');
 
-  const crypto = require('crypto');
+  // use top-level ESM import: crypto
   const algorithm = 'AWS4-HMAC-SHA256';
   const stringToSign = [
     algorithm,
     amzdate,
     credentialScope,
     crypto.createHash('sha256').update(canonicalRequest).digest('hex')
-  ].join('\\n');
+  ].join('\n');
 
   const kDate = crypto.createHmac('sha256', 'AWS4' + R2_SECRET_ACCESS_KEY).update(datestamp).digest();
   const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();

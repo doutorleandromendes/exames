@@ -3009,21 +3009,6 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
       return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
     }).join('');
     const pdfBlock = pdfFiles.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
-
-    // Materiais (PDFs)
-    const { rows: pdfFiles } = await pool.query(
-      'SELECT id, label, r2_key FROM video_files WHERE video_id=$1 ORDER BY sort_index NULLS LAST, id ASC',
-      [v.id]
-    );
-    const pdfList = pdfFiles.map(f => {
-      const safeName = (f.label || 'material').replace(/["]+/g, '').trim() || 'material';
-      const href = generateSignedUrlForKey(f.r2_key, {
-        contentType: 'application/pdf',
-        disposition: `attachment; filename="${encodeURIComponent(safeName)}.pdf"`
-      });
-      return `<li><a href="${href}" download>Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
-    }).join('');
-    const pdfBlock = pdfFiles.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
 const body = `
         <div class="card">
           <div class="right" style="justify-content:space-between;gap:12px">

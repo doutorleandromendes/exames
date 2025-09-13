@@ -459,45 +459,80 @@ function getV4SigningKey(secretKey, dateStamp, region, service) {
   const kSigning = hmac(kService, 'aws4_request');
   return kSigning;
 }
+
 function generateSignedUrlForKey(key, opts = {}) {
   const { contentType = 'video/mp4', disposition } = opts;
   if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
 
-  const urlObj = new URL(R2_ENDPOINT);
+  const urlObj = new URL(R2_ENDPOINT.replace(/\/+$/,''));
   const host = urlObj.host;
 
+  const method = 'GET';
+  const service = 's3';
+  const region = 'auto';
+
+  // Encode key path segments (RFC3986)
   const encodedKey = String(key).split('/').map(encodeURIComponent).join('/');
   const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${encodedKey}`;
 
-  const method = 'GET', service = 's3', region = 'auto';
+  // Timestamps
   const now = new Date();
   const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
   const datestamp = amzdate.slice(0,8);
   const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
-  const expires = 86400; // 24h
 
+  // RFC3986 encoder for query (space -> %20, also encode ! ' ( ) *)
+  const encodeRFC3986 = s => encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+
+  // Query params (include response-* when set)
   const qp = [
     ['X-Amz-Algorithm','AWS4-HMAC-SHA256'],
     ['X-Amz-Credential', `${R2_ACCESS_KEY_ID}/${credentialScope}`],
     ['X-Amz-Date', amzdate],
-    ['X-Amz-Expires', String(expires)],
-    ['X-Amz-SignedHeaders','host']
+    ['X-Amz-Expires', '86400'],
+    ['X-Amz-SignedHeaders','host'],
   ];
   if (contentType) qp.push(['response-content-type', contentType]);
   if (disposition) qp.push(['response-content-disposition', disposition]);
 
-  const canonicalQuerystring = qp.map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  // Sort by param name and build canonical query string with RFC3986 encoding
+  qp.sort((a,b)=> a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+  const canonicalQuerystring = qp.map(([k,v]) => `${encodeRFC3986(k)}=${encodeRFC3986(v)}`).join('&');
+
   const canonicalHeaders = `host:${host}\n`;
   const signedHeaders = 'host';
   const payloadHash = 'UNSIGNED-PAYLOAD';
 
-  const canonicalRequest = [method, canonicalUri, canonicalQuerystring, canonicalHeaders, signedHeaders, payloadHash].join('\n');
-  const stringToSign = ['AWS4-HMAC-SHA256', amzdate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
-  const signingKey = getV4SigningKey(R2_SECRET_ACCESS_KEY, datestamp, region, service);
-  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQuerystring,
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join('\\n');
 
-  return `https://${host}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const stringToSign = [
+    algorithm,
+    amzdate,
+    credentialScope,
+    require('crypto').createHash('sha256').update(canonicalRequest).digest('hex')
+  ].join('\\n');
+
+  // Derive signing key
+  const crypto = require('crypto');
+  const kDate = crypto.createHmac('sha256', 'AWS4' + R2_SECRET_ACCESS_KEY).update(datestamp).digest();
+  const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
+  const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
+  const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+
+  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+
+  // Final presigned URL must reuse the exact canonicalQuerystring
+  return `${R2_ENDPOINT.replace(/\/+$/,'')}/${encodeURIComponent(R2_BUCKET)}/${encodedKey}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
+
 // ====== Utils ======
 function normalizeDateStr(s) {
   if (!s) return null;
@@ -2930,8 +2965,6 @@ app.post('/admin/import', adminRequired, async (req,res)=>{
 });
 
 // ====== Player (admin bypass de matrícula) ======
-// REMOVED duplicate /aula/:id route (commented out)
-/*
 app.get('/aula/:id', authRequired, async (req,res)=>{
     try{
       const videoId = parseInt(req.params.id,10);
@@ -2983,9 +3016,7 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
       return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
     }).join('');
     const pdfBlock = files.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
-    
-*/
-app.get('/aula/:id', authRequired, async (req, res) => {
+    app.get('/aula/:id', authRequired, async (req, res) => {
       try{
         const videoId = parseInt(req.params.id, 10);
         const admin = isAdmin(req);

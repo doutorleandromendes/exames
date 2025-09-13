@@ -460,15 +460,19 @@ function getV4SigningKey(secretKey, dateStamp, region, service) {
   return kSigning;
 }
 function generateSignedUrlForKey(key, opts = {}) {
+  const { contentType = 'video/mp4', disposition } = opts;
   if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
-  const { contentType, disposition } = opts;
-  const method='GET', service='s3', region='auto';
-  const host = R2_ENDPOINT.replace(/^https?:\/\//,'').replace(/\/$/,'');
-  const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${key.split('/').map(encodeURIComponent).join('/')}`;
 
+  const urlObj = new URL(R2_ENDPOINT);
+  const host = urlObj.host;
+
+  const encodedKey = String(key).split('/').map(encodeURIComponent).join('/');
+  const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${encodedKey}`;
+
+  const method = 'GET', service = 's3', region = 'auto';
   const now = new Date();
   const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
-  const datestamp = amzdate.substring(0,8);
+  const datestamp = amzdate.slice(0,8);
   const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
   const expires = 86400; // 24h
 
@@ -492,7 +496,7 @@ function generateSignedUrlForKey(key, opts = {}) {
   const signingKey = getV4SigningKey(R2_SECRET_ACCESS_KEY, datestamp, region, service);
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
 
-  return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
+  return `https://${host}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
 // ====== Utils ======
 function normalizeDateStr(s) {
@@ -1624,11 +1628,30 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
         <p><button type="submit">Adicionar</button></p>
       </form>`;
 
-    const body = `$1${'${filesHtml}'}<hr class="mt">
+    
+    const body = `
+      <div class="card">
+        <h1>Editar Aula #${v.id}</h1>
+        <form method="POST" action="/admin/videos/${v.id}/edit" class="mt2">
+          <label>Curso</label><select name="course_id" required>${options}</select>
+          <label>Título</label><input name="title" value="${safe(v.title).replace(/"/g,'&quot;')}" required>
+          <label>R2 Key</label><input name="r2_key" value="${safe(v.r2_key).replace(/"/g,'&quot;')}" required>
+          <label>Duração (segundos) — opcional</label>
+          <input name="duration_seconds" type="number" min="1" value="${v.duration_seconds ?? ''}">
+          <label>Disponível a partir de (opcional)</label>
+          <input name="available_from" type="datetime-local" value="${fmtDTLocal(v.available_from)||''}">
+          <div class="mt">
+            <button>Salvar alterações</button>
+            <a href="/admin/videos" style="margin-left:12px">Cancelar</a>
+          </div>
+        </form>
+        ${filesHtml}
+        <hr class="mt">
         <form method="POST" action="/admin/videos/${v.id}/delete" onsubmit="return confirm('Tem certeza que deseja apagar esta aula? Essa ação não pode ser desfeita.');">
           <button style="background:#b32d2e">Apagar aula</button>
         </form>
       </div>`;
+
     res.send(renderShell('Editar Aula', body));
   }catch(err){
     console.error('ADMIN VIDEO EDIT GET ERROR', err);
@@ -2937,13 +2960,28 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
         }
       }
   
-      const signedUrl = generateSignedUrlForKey(v.r2_key);
+      const signedUrl = generateSignedUrlForKey(v.r2_key, { contentType: 'video/mp4' });
       const uidForSession = req.user.id; // registra sessão do admin ou aluno
       const ins = await pool.query('INSERT INTO sessions(user_id,video_id) VALUES($1,$2) RETURNING id', [uidForSession, videoId]);
       const sessionId = ins.rows[0].id;
       const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   
-      const body = `
+      
+    // Materiais (PDFs)
+    const { rows: files } = await pool.query(
+      'SELECT id, label, r2_key FROM video_files WHERE video_id=$1 ORDER BY sort_index NULLS LAST, id ASC',
+      [videoId]
+    );
+    const pdfList = files.map(f => {
+      const safeName = (f.label || 'material').replace(/["]+/g, '').trim() || 'material';
+      const href = generateSignedUrlForKey(f.r2_key, {
+        contentType: 'application/pdf',
+        disposition: `attachment; filename="${encodeURIComponent(safeName)}.pdf"`
+      });
+      return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
+    }).join('');
+    const pdfBlock = files.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
+const body = `
         <div class="card">
           <div class="right" style="justify-content:space-between;gap:12px">
             <h1 style="margin:0">${safe(v.title)}</h1>

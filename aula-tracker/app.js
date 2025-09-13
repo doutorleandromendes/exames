@@ -493,35 +493,7 @@ function generateSignedUrlForKey(key, opts = {}) {
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
 
   return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
-}/${key.split('/').map(encodeURIComponent).join('/')}`;
-
-  const now = new Date();
-  const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
-  const datestamp = amzdate.substring(0,8);
-  const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
-  const expires = 86400; // 24h
-
-  const qp = [
-    ['X-Amz-Algorithm','AWS4-HMAC-SHA256'],
-    ['X-Amz-Credential', `${R2_ACCESS_KEY_ID}/${credentialScope}`],
-    ['X-Amz-Date', amzdate],
-    ['X-Amz-Expires', String(expires)],
-    ['X-Amz-SignedHeaders','host'],
-    ['response-content-type','video/mp4']
-  ];
-  const canonicalQuerystring = qp.map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-  const canonicalHeaders = `host:${host}\n`;
-  const signedHeaders = 'host';
-  const payloadHash = 'UNSIGNED-PAYLOAD';
-
-  const canonicalRequest = [method, canonicalUri, canonicalQuerystring, canonicalHeaders, signedHeaders, payloadHash].join('\n');
-  const stringToSign = ['AWS4-HMAC-SHA256', amzdate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
-  const signingKey = getV4SigningKey(R2_SECRET_ACCESS_KEY, datestamp, region, service);
-  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
-
-  return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
 }
-
 // ====== Utils ======
 function normalizeDateStr(s) {
   if (!s) return null;

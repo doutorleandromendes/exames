@@ -152,7 +152,18 @@ async function migrate(){
       course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
       duration_seconds INTEGER
     );`);
+  
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS video_files (
+      id SERIAL PRIMARY KEY,
+      video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+      label TEXT NOT NULL,
+      r2_key TEXT NOT NULL,
+      sort_index INTEGER
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS video_files_video_idx ON video_files(video_id, sort_index NULLS LAST, id)`);
+await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -448,11 +459,41 @@ function getV4SigningKey(secretKey, dateStamp, region, service) {
   const kSigning = hmac(kService, 'aws4_request');
   return kSigning;
 }
-function generateSignedUrlForKey(key) {
+function generateSignedUrlForKey(key, opts = {}) {
   if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
+  const { contentType, disposition } = opts;
   const method='GET', service='s3', region='auto';
   const host = R2_ENDPOINT.replace(/^https?:\/\//,'').replace(/\/$/,'');
   const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${key.split('/').map(encodeURIComponent).join('/')}`;
+
+  const now = new Date();
+  const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
+  const datestamp = amzdate.substring(0,8);
+  const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
+  const expires = 86400; // 24h
+
+  const qp = [
+    ['X-Amz-Algorithm','AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${R2_ACCESS_KEY_ID}/${credentialScope}`],
+    ['X-Amz-Date', amzdate],
+    ['X-Amz-Expires', String(expires)],
+    ['X-Amz-SignedHeaders','host']
+  ];
+  if (contentType) qp.push(['response-content-type', contentType]);
+  if (disposition) qp.push(['response-content-disposition', disposition]);
+
+  const canonicalQuerystring = qp.map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  const canonicalHeaders = `host:${host}\n`;
+  const signedHeaders = 'host';
+  const payloadHash = 'UNSIGNED-PAYLOAD';
+
+  const canonicalRequest = [method, canonicalUri, canonicalQuerystring, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const stringToSign = ['AWS4-HMAC-SHA256', amzdate, credentialScope, sha256Hex(canonicalRequest)].join('\n');
+  const signingKey = getV4SigningKey(R2_SECRET_ACCESS_KEY, datestamp, region, service);
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+  return `${R2_ENDPOINT}${canonicalUri}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
+}/${key.split('/').map(encodeURIComponent).join('/')}`;
 
   const now = new Date();
   const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
@@ -1582,23 +1623,36 @@ app.get('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
     const { rows:courses } = await pool.query('SELECT id,name,slug FROM courses ORDER BY name ASC');
     const options = courses.map(c=>`<option value="${c.id}" ${c.id===v.course_id?'selected':''}>[${safe(c.slug)}] ${safe(c.name)}</option>`).join('');
 
-    const body = `
-      <div class="card">
-        <h1>Editar Aula #${v.id}</h1>
-        <form method="POST" action="/admin/videos/${v.id}/edit" class="mt2">
-          <label>Curso</label><select name="course_id" required>${options}</select>
-          <label>Título</label><input name="title" value="${safe(v.title).replace(/"/g,'&quot;')}" required>
-          <label>R2 Key</label><input name="r2_key" value="${safe(v.r2_key).replace(/"/g,'&quot;')}" required>
-          <label>Duração (segundos) — opcional</label>
-          <input name="duration_seconds" type="number" min="1" value="${v.duration_seconds ?? ''}">
-          <label>Disponível a partir de (opcional)</label>
-          <input name="available_from" type="datetime-local" value="${fmtDTLocal(v.available_from)||''}">
-          <div class="mt">
-            <button>Salvar alterações</button>
-            <a href="/admin/videos" style="margin-left:12px">Cancelar</a>
-          </div>
-        </form>
-        <hr class="mt">
+    const { rows: files } = await pool.query(
+      `SELECT id, label, r2_key, sort_index FROM video_files WHERE video_id=$1 ORDER BY sort_index NULLS LAST, id ASC`,
+      [id]
+    );
+    const filesRows = files.map(f => `
+      <tr>
+        <td>${safe(f.label)}</td>
+        <td><code>${safe(f.r2_key)}</code></td>
+        <td>${f.sort_index ?? ''}</td>
+        <td>
+          <form method="POST" action="/admin/videos/${id}/pdfs/${f.id}/delete" onsubmit="return confirm('Remover este PDF?')">
+            <button type="submit">remover</button>
+          </form>
+        </td>
+      </tr>`).join('');
+    const filesHtml = `
+      <h3 class="mt">Materiais (PDFs)</h3>
+      <table>
+        <thead><tr><th>Título</th><th>R2 key</th><th>ordem</th><th></th></tr></thead>
+        <tbody>${filesRows || '<tr><td colspan="4" class="mut">Nenhum PDF</td></tr>'}</tbody>
+      </table>
+      <h4 class="mt">Adicionar PDF</h4>
+      <form method="POST" action="/admin/videos/${id}/pdfs">
+        <div>Título<br><input name="label" required></div>
+        <div>R2 key (no mesmo bucket do vídeo)<br><input name="r2_key" required></div>
+        <div>Ordem (opcional)<br><input name="sort_index" type="number"></div>
+        <p><button type="submit">Adicionar</button></p>
+      </form>`;
+
+    const body = `$1${'${filesHtml}'}<hr class="mt">
         <form method="POST" action="/admin/videos/${v.id}/delete" onsubmit="return confirm('Tem certeza que deseja apagar esta aula? Essa ação não pode ser desfeita.');">
           <button style="background:#b32d2e">Apagar aula</button>
         </form>
@@ -1623,6 +1677,34 @@ app.post('/admin/videos/:id/edit', adminRequired, async (req,res)=>{
   }catch(err){
     console.error('ADMIN VIDEO EDIT POST ERROR', err);
     res.status(500).send('Falha ao salvar alterações');
+  }
+});
+
+app.post('/admin/videos/:id/pdfs', adminRequired, async (req, res) => {
+  try{
+    const videoId = parseInt(req.params.id, 10);
+    let { label, r2_key, sort_index } = req.body || {};
+    if (!label || !r2_key) return res.status(400).send('Título e R2 key são obrigatórios');
+    const si = (sort_index === '' || sort_index == null) ? null : parseInt(sort_index, 10);
+    await pool.query(
+      `INSERT INTO video_files (video_id, label, r2_key, sort_index) VALUES ($1, $2, $3, $4)`,
+      [videoId, label, r2_key, Number.isFinite(si) ? si : null]
+    );
+    res.redirect(`/admin/videos/${videoId}/edit`);
+  }catch(err){
+    console.error('ADMIN ADD PDF ERROR', err);
+    res.status(500).send('Falha ao adicionar PDF');
+  }
+});
+app.post('/admin/videos/:videoId/pdfs/:pdfId/delete', adminRequired, async (req, res) => {
+  try{
+    const videoId = parseInt(req.params.videoId, 10);
+    const pdfId   = parseInt(req.params.pdfId, 10);
+    await pool.query('DELETE FROM video_files WHERE id=$1 AND video_id=$2', [pdfId, videoId]);
+    res.redirect(`/admin/videos/${videoId}/edit`);
+  }catch(err){
+    console.error('ADMIN DEL PDF ERROR', err);
+    res.status(500).send('Falha ao remover PDF');
   }
 });
 app.post('/admin/videos/:id/delete', adminRequired, async (req,res)=>{

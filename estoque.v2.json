@@ -387,13 +387,13 @@
       {
         "sku": "CLAM",
         "nome": "Clamídia - Antígeno",
-        "estoque": 16,
+        "estoque": 15,
         "alerta": 10
       },
       {
         "sku": "CI",
         "nome": "CMV (IgG/IgM)",
-        "estoque": 39,
+        "estoque": 38,
         "alerta": 5
       },
       {
@@ -435,7 +435,7 @@
       {
         "sku": "EV",
         "nome": "Epstein-Barr - Anticorpos Heterófilos",
-        "estoque": 35,
+        "estoque": 34,
         "alerta": 5
       },
       {
@@ -447,7 +447,7 @@
       {
         "sku": "G-A",
         "nome": "Gonorreia - Antígeno",
-        "estoque": 16,
+        "estoque": 15,
         "alerta": 10
       },
       {
@@ -471,7 +471,7 @@
       {
         "sku": "HAI",
         "nome": "Hepatite A - Anticorpos IgM",
-        "estoque": 37,
+        "estoque": 36,
         "alerta": 5
       },
       {
@@ -483,13 +483,13 @@
       {
         "sku": "HB-AA",
         "nome": "Hepatite B - Anticorpo AntiHBs",
-        "estoque": 33,
+        "estoque": 32,
         "alerta": 5
       },
       {
         "sku": "HB-ADS",
         "nome": "Hepatite B - Antígeno de Superfície",
-        "estoque": 24,
+        "estoque": 23,
         "alerta": 10
       },
       {
@@ -501,7 +501,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 18,
+        "estoque": 17,
         "alerta": 5
       },
       {
@@ -513,13 +513,13 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 70,
+        "estoque": 69,
         "alerta": 5
       },
       {
         "sku": "H-4G",
         "nome": "HIV - 4a geração",
-        "estoque": 31,
+        "estoque": 30,
         "alerta": 5
       },
       {
@@ -531,7 +531,7 @@
       {
         "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
-        "estoque": 16,
+        "estoque": 15,
         "alerta": 5
       },
       {
@@ -657,7 +657,7 @@
       {
         "sku": "RI",
         "nome": "Rubeola (IgG/IgM)",
-        "estoque": 18,
+        "estoque": 17,
         "alerta": 5
       },
       {
@@ -675,7 +675,7 @@
       {
         "sku": "S-AT",
         "nome": "Sífilis - Anticorpos Totais",
-        "estoque": 29,
+        "estoque": 28,
         "alerta": 5
       },
       {
@@ -693,7 +693,7 @@
       {
         "sku": "TI",
         "nome": "Toxoplasmose - Anticorpos IgM",
-        "estoque": 28,
+        "estoque": 26,
         "alerta": 5
       },
       {

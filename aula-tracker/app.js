@@ -253,8 +253,9 @@ app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res)
             <option value="21">+21</option>
           </select>
           <button type="button" class="btn-apply" style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">Aplicar</button>
+          <input type="hidden" name="src_video_id[]" value="${v.id}">
         </td>
-        <input type="hidden" name="src_video_id[]" value="${v.id}">
+        
       </tr>
     `).join('');
   

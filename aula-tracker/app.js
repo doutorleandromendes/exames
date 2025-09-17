@@ -7,19 +7,19 @@
 // - Filtro em /aulas (aluno) respeitando as datas
 
 import express from 'express';
-import bodyParser from 'body-parser';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { Pool } from 'pg';
 import { sendWelcomeEmail } from './mailer.js';
 
-
 const app = express();
 app.set('trust proxy', 1);
-app.use(bodyParser.json({ limit: '2mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '4mb' }));
+
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use(cookieParser());
+app.use(express.static('public'))
 
 const PORT = process.env.PORT || 3000;
 
@@ -406,15 +406,22 @@ app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res
   // helpers
   const asArr = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
   const trim  = (s) => (s == null ? '' : String(s).trim());
+  // aceita tanto name="campo[]" quanto name="campo"
+  const getArr = (base) => {
+  const v = (req.body?.[`${base}[]`] ?? req.body?.[base] ?? []);
+  return Array.isArray(v) ? v : (v != null ? [v] : []);
+};
+
 
   name = trim(name);
   slug = trim(slug);
   if (!name || !slug) return res.status(400).send('Nome e slug são obrigatórios');
 
   // normaliza arrays vindos do form (quando há 1 item, vêm como string)
-  const srcIds     = asArr(req.body['src_video_id[]']).map(x => parseInt(x, 10)).filter(Number.isFinite);
-  let availInputs  = asArr(req.body['available_from[]']).map(trim);
-  let sortInputs   = asArr(req.body['sort_index[]']).map(trim);
+  const srcIds     = getArr('src_video_id').map(x => parseInt(x, 10)).filter(Number.isFinite);
+let availInputs  = getArr('available_from').map(trim);
+let sortInputs   = getArr('sort_index').map(trim);
+
 
   // alinha comprimentos para evitar desalinhamento por campos faltando
   if (availInputs.length < srcIds.length) availInputs = availInputs.concat(Array(srcIds.length - availInputs.length).fill(''));

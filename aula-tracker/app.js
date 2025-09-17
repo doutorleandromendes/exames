@@ -128,6 +128,7 @@ async function migrate(){
       created_at TIMESTAMPTZ DEFAULT now(),
       expires_at TIMESTAMPTZ
     );`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS courses(
       id SERIAL PRIMARY KEY,
@@ -136,6 +137,7 @@ async function migrate(){
       enroll_code TEXT,
       expires_at TIMESTAMPTZ
     );`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS course_members(
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -144,6 +146,7 @@ async function migrate(){
       expires_at TIMESTAMPTZ,
       PRIMARY KEY (user_id, course_id)
     );`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS videos(
       id SERIAL PRIMARY KEY,
@@ -152,7 +155,7 @@ async function migrate(){
       course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
       duration_seconds INTEGER
     );`);
-  
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS video_files (
       id SERIAL PRIMARY KEY,
@@ -162,14 +165,15 @@ async function migrate(){
       sort_index INTEGER
     );
   `);
-  await pool.query(`CREATE INDEX IF NOT EXISTS video_files_video_idx ON video_files(video_id, sort_index NULLS LAST, id)`);
-await pool.query(`
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       video_id INTEGER REFERENCES videos(id) ON DELETE CASCADE,
       started_at TIMESTAMPTZ DEFAULT now()
     );`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS events(
       id SERIAL PRIMARY KEY,
@@ -178,40 +182,52 @@ await pool.query(`
       video_time INTEGER,
       client_ts TIMESTAMPTZ
     );`);
-    await pool.query(`
-        ALTER TABLE users
-        ADD COLUMN IF NOT EXISTS temp_password TEXT
-      `);
-      await pool.query(`
-        ALTER TABLE users
-        ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ
-      `);
-      
-      
 
-  // Novas colunas de disponibilidade (idempotentes)
+  // ---- colunas novas/idempotentes (antes dos índices) ----
+  await pool.query(`ALTER TABLE users   ADD COLUMN IF NOT EXISTS temp_password TEXT`);
+  await pool.query(`ALTER TABLE users   ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS archived boolean DEFAULT false`);
   await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS sort_index INTEGER`);
 
-    // Trechos efetivamente assistidos por sessão (intervalos em segundos)
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS watch_segments (
-          id SERIAL PRIMARY KEY,
-          session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-          start_sec INTEGER NOT NULL,
-          end_sec   INTEGER NOT NULL,
-          CHECK (end_sec >= start_sec)
-        );
-      `);
-    
-      // Índice para facilitar merges/consultas
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS watch_segments_session_idx
-          ON watch_segments(session_id, start_sec, end_sec);
-      `);
-    
+  // ---- watch_segments ----
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS watch_segments (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      start_sec INTEGER NOT NULL,
+      end_sec   INTEGER NOT NULL,
+      CHECK (end_sec >= start_sec)
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS watch_segments_session_idx
+      ON watch_segments(session_id, start_sec, end_sec);
+  `);
+
+  // ---- índices (depois das colunas existirem) ----
+  await pool.query(`CREATE INDEX IF NOT EXISTS video_files_video_idx
+                      ON video_files(video_id, sort_index NULLS LAST, id)`);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS videos_course_order_idx
+                      ON videos(course_id, sort_index NULLS LAST, id)`);
+
+  // Unicidade por (course_id, r2_key) — e remove possíveis índices antigos em r2_key
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='videos_r2_key_key') THEN
+        EXECUTE 'DROP INDEX videos_r2_key_key';
+      END IF;
+      IF EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='videos_r2_key_idx') THEN
+        EXECUTE 'DROP INDEX videos_r2_key_idx';
+      END IF;
+    END $$;`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS videos_course_r2_key_unique ON videos(course_id, r2_key)`);
 }
 migrate().catch(e=>console.error('migration error', e));
+
 
 // ====== Clonar curso (formulário com lista de aulas + ferramentas por linha) ======
 app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
@@ -382,73 +398,130 @@ app.get('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res)
     res.send(renderShell('Clonar curso', html));
   });
 
-// ====== Clonar curso (salvar curso + aulas com datas/ordem por linha) ======
+// ====== Clonar curso (salvar curso + aulas + PDFs) ======
 app.post('/admin/cursos/:id/clone', authRequired, adminRequired, async (req, res) => {
-    const srcCourseId = parseInt(req.params.id, 10);
-    const { name, slug, start_date } = req.body || {};
-  
-    // Arrays vindos do form (podem vir como string se só 1 item)
-    const toArr = (v) => Array.isArray(v) ? v : (v != null ? [v] : []);
-    const srcIds       = toArr(req.body['src_video_id[]']).map(x => parseInt(x, 10)).filter(Number.isFinite);
-    const availInputs  = toArr(req.body['available_from[]']);
-    const sortInputs   = toArr(req.body['sort_index[]']);
-  
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-  
-      // 1) cria o novo curso e OBTÉM newCourseId
-      const newCourse = await client.query(
-        `INSERT INTO courses(name, slug, start_date)
-         VALUES ($1, $2, $3) RETURNING id`,
-        [name, slug, normalizeDateStr(start_date)]
+  const srcCourseId = parseInt(req.params.id, 10);
+  let { name, slug, start_date } = req.body || {};
+
+  // helpers
+  const asArr = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
+  const trim  = (s) => (s == null ? '' : String(s).trim());
+
+  name = trim(name);
+  slug = trim(slug);
+  if (!name || !slug) return res.status(400).send('Nome e slug são obrigatórios');
+
+  // normaliza arrays vindos do form (quando há 1 item, vêm como string)
+  const srcIds     = asArr(req.body['src_video_id[]']).map(x => parseInt(x, 10)).filter(Number.isFinite);
+  let availInputs  = asArr(req.body['available_from[]']).map(trim);
+  let sortInputs   = asArr(req.body['sort_index[]']).map(trim);
+
+  // alinha comprimentos para evitar desalinhamento por campos faltando
+  if (availInputs.length < srcIds.length) availInputs = availInputs.concat(Array(srcIds.length - availInputs.length).fill(''));
+  if (sortInputs.length  < srcIds.length) sortInputs  = sortInputs.concat(Array(srcIds.length  - sortInputs.length ).fill(''));
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // evitar 23505 em slug duplicado
+    const slugExists = await client.query(`SELECT 1 FROM courses WHERE slug=$1 LIMIT 1`, [slug]);
+    if (slugExists.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(400).send('Slug já existe. Escolha outro.');
+    }
+
+    // 1) cria o novo curso e obtém newCourseId
+    const startDateNorm = trim(start_date) ? (normalizeDateStr(trim(start_date)) || null) : null;
+    const { rows: courseRows } = await client.query(
+      `INSERT INTO courses(name, slug, start_date)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [name, slug, startDateNorm]
+    );
+    const newCourseId = courseRows[0].id;
+
+    // 2) busca os vídeos de origem selecionados
+    if (srcIds.length) {
+      const { rows: srcVids } = await client.query(
+        `SELECT id, title, r2_key, duration_seconds, sort_index, available_from
+           FROM videos
+          WHERE course_id = $1
+            AND id = ANY($2::int[])
+          ORDER BY array_position($2::int[], id)`,
+        [srcCourseId, srcIds]
       );
-      const newCourseId = newCourse.rows[0].id;
-  
-      // 2) busca os vídeos de origem selecionados no formulário
-      if (srcIds.length) {
-        const { rows: srcVids } = await client.query(
-          `SELECT id, title, r2_key, duration_seconds, sort_index
-             FROM videos
-            WHERE course_id = $1
-              AND id = ANY($2::int[])`,
-          [srcCourseId, srcIds]
-        );
-        const byId = new Map(srcVids.map(v => [v.id, v]));
-  
-        // 3) insere um-a-um na ORDEM do formulário
-        for (let i = 0; i < srcIds.length; i++) {
-          const srcId = srcIds[i];
-          const src = byId.get(srcId);
-          if (!src) continue;
-  
-          const rawAvail = (availInputs[i] || '').trim();
-          const rawSort  = (sortInputs[i]  || '').trim();
-  
-          const available_from = normalizeDateStr(rawAvail) || null;
-          const sort_index = Number.isFinite(parseInt(rawSort, 10))
-            ? parseInt(rawSort, 10)
-            : (src.sort_index ?? null);
-  
-          await client.query(
+      const byId = new Map(srcVids.map(v => [v.id, v]));
+
+      // 3) insere um-a-um na ORDEM do formulário e clona PDFs
+      for (let i = 0; i < srcIds.length; i++) {
+        const srcId = srcIds[i];
+        const src = byId.get(srcId);
+        if (!src) continue;
+
+        const rawAvail = availInputs[i];
+        const rawSort  = sortInputs[i];
+
+        const available_from = rawAvail ? (normalizeDateStr(rawAvail) || null) : null;
+        const sort_index = Number.isFinite(parseInt(rawSort, 10))
+          ? parseInt(rawSort, 10)
+          : (src.sort_index ?? null);
+
+        // 3.1 cria o novo vídeo (RETURNING id)
+        let newVideoId = null;
+        try {
+          const ins = await client.query(
             `INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from, sort_index)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id`,
             [src.title, src.r2_key, newCourseId, src.duration_seconds, available_from, sort_index]
+          );
+          newVideoId = ins.rows[0].id;
+        } catch (e) {
+          // fallback para o caso de ainda existir UNIQUE global em r2_key no ambiente atual
+          if (String(e.code) === '23505') {
+            const altKey = `${src.r2_key}-c${newCourseId}`;
+            const ins2 = await client.query(
+              `INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from, sort_index)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               RETURNING id`,
+              [src.title, altKey, newCourseId, src.duration_seconds, available_from, sort_index]
+            );
+            newVideoId = ins2.rows[0].id;
+          } else {
+            throw e;
+          }
+        }
+
+        // 3.2 clona os PDFs (video_files) do vídeo origem
+        const { rows: files } = await client.query(
+          `SELECT label, r2_key, sort_index
+             FROM video_files
+            WHERE video_id = $1
+            ORDER BY sort_index NULLS LAST, id`,
+          [srcId]
+        );
+
+        for (const f of files) {
+          await client.query(
+            `INSERT INTO video_files (video_id, label, r2_key, sort_index)
+             VALUES ($1, $2, $3, $4)`,
+            [newVideoId, f.label, f.r2_key, f.sort_index]
           );
         }
       }
-  
-      await client.query('COMMIT');
-      // Vai direto para a página do novo curso
-      res.redirect(`/admin/cursos/${newCourseId}`);
-    } catch (e) {
-      try { await client.query('ROLLBACK'); } catch {}
-      console.error('ADMIN CLONE POST ERROR', e);
-      res.status(500).send('Falha ao clonar curso');
-    } finally {
-      client.release();
     }
-  });
+
+    await client.query('COMMIT');
+    res.redirect(`/admin/cursos/${newCourseId}`);
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('ADMIN CLONE POST ERROR', e);
+    res.status(500).send('Falha ao clonar curso');
+  } finally {
+    client.release();
+  }
+});
+
 
 // ====== SigV4 (R2) ======
 function hmac(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }

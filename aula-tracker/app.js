@@ -206,6 +206,24 @@ async function migrate(){
       ON watch_segments(session_id, start_sec, end_sec);
   `);
 
+  // Pedidos de acesso (pendentes/aprovados/rejeitados)
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS access_requests (
+    id SERIAL PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    email     TEXT NOT NULL,
+    course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+    justification TEXT,
+    status    TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+    created_at TIMESTAMPTZ DEFAULT now(),
+    processed_at TIMESTAMPTZ,
+    processed_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+`);
+await pool.query(`CREATE INDEX IF NOT EXISTS access_requests_status_idx ON access_requests(status, created_at DESC)`);
+await pool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  ON access_requests(LOWER(email))`);
+
+
   // ---- índices (depois das colunas existirem) ----
   await pool.query(`CREATE INDEX IF NOT EXISTS video_files_video_idx
                       ON video_files(video_id, sort_index NULLS LAST, id)`);
@@ -625,7 +643,13 @@ app.get('/healthz', (req,res)=> res.status(200).send('ok'));
 
 // ====== Público ======
 app.get('/', (req,res)=>{
-  const right = `<div class="card"><h2>Acesso</h2><p class="mut">Use o login/senha fornecidos pela coordenação.</p><p class="mut mt"><a href="/admin">Sou admin</a></p></div>`;
+  const right = `<div class="card">
+  <h2>Acesso</h2>
+  <p class="mut">Use o login/senha fornecidos pela coordenação.</p>
+  <p class="mut mt"><a href="/solicitar-acesso">Não tenho acesso — quero solicitar</a></p>
+  <p class="mut mt"><a href="/admin">Sou admin</a></p>
+</div>`;
+
   const html = `
     <div class="row">
       <div class="card">
@@ -656,6 +680,64 @@ app.get('/', (req,res)=>{
   res.send(renderShell('Acesso', html));
 });
 app.get('/logout', (req,res)=>{ res.clearCookie('uid'); res.clearCookie('adm'); res.redirect('/'); });
+
+// ====== Solicitar acesso (público) ======
+app.get('/solicitar-acesso', async (req, res) => {
+  const { rows: courses } = await pool.query(`SELECT id, name, slug FROM courses WHERE archived=false ORDER BY name`);
+  const options = ['<option value="">(Selecione o curso)</option>']
+    .concat(courses.map(c => `<option value="${c.id}">${safe(c.name)} (${safe(c.slug)})</option>`))
+    .join('');
+  const html = `
+    <div class="card">
+      <h1>Solicitar acesso</h1>
+      <form method="POST" action="/solicitar-acesso" class="mt2">
+        <label>Nome completo</label><input name="full_name" required>
+        <label>E-mail</label><input name="email" type="email" required>
+        <label>Curso</label><select name="course_id" required>${options}</select>
+        <label>Justificativa (opcional)</label><textarea name="justification" rows="4" placeholder="Conte brevemente por que precisa do acesso."></textarea>
+        <button class="mt">Enviar solicitação</button>
+      </form>
+      <p class="mut mt">Nós vamos revisar seu pedido e, se aprovado, você receberá um e-mail com sua senha inicial.</p>
+    </div>`;
+  res.send(renderShell('Solicitar acesso', html));
+});
+
+app.post('/solicitar-acesso', async (req, res) => {
+  try {
+    let { full_name, email, course_id, justification } = req.body || {};
+    full_name = (full_name||'').trim();
+    email = (email||'').trim().toLowerCase();
+    const cid = parseInt(course_id, 10);
+
+    if (!full_name || !email || !Number.isFinite(cid)) {
+      return res.status(400).send(renderShell('Solicitar acesso', `<div class="card"><h1>Dados inválidos</h1><p><a href="/solicitar-acesso">Voltar</a></p></div>`));
+    }
+
+    // (Opcional) restringir domínio se já usa ALLOWED_EMAIL_DOMAIN
+    if (ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${ALLOWED_EMAIL_DOMAIN.toLowerCase()}`)) {
+      return res.status(400).send(renderShell('Solicitar acesso', `<div class="card"><h1>Domínio de e-mail não permitido</h1><p class="mut">Use um endereço @${safe(ALLOWED_EMAIL_DOMAIN)}</p></div>`));
+    }
+
+    await pool.query(
+      `INSERT INTO access_requests(full_name,email,course_id,justification)
+       VALUES ($1,$2,$3,$4)`,
+      [full_name, email, cid, (justification||'').trim() || null]
+    );
+
+    res.send(renderShell('Solicitação enviada', `
+      <div class="card">
+        <h1>Pedido recebido</h1>
+        <p>Obrigado, <strong>${safe(full_name)}</strong>. Sua solicitação será analisada.</p>
+        <p class="mut">Se aprovada, você receberá um e-mail com instruções de acesso.</p>
+        <p><a href="/">Voltar à página inicial</a></p>
+      </div>
+    `));
+  } catch (err) {
+    console.error('ACCESS REQUEST ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao enviar solicitação</h1><p class="mut">${safe(err.message||err)}</p></div>`));
+  }
+});
+
 
 // ====== Admin (ativação por ADMIN_SECRET em cookie) ======
 app.get('/admin', authRequired, (req,res)=>{
@@ -780,6 +862,7 @@ app.get('/aulas', authRequired, async (req,res)=>{
             `<a href="/admin/videos/availability">Disponibilidade de Aulas</a>`,
             `<a href="/admin/alunos">Alunos</a>`,
             `<a href="/admin/relatorios">Relatórios</a>`,
+            `<a href="/admin/pendentes">Solicitações de acesso</a>`,
             `<a href="/admin/import">Importar alunos</a>`,
             (courseForActions ? `<a href="/admin/cursos/${courseForActions.id}/clone">Clonar curso "${safe(courseForActions.name)}"</a>` : null),
             `<a href="/admin/logout">Sair admin</a>`,
@@ -1997,6 +2080,149 @@ app.post('/admin/relatorio/:videoId/clear', adminRequired, async (req, res) => {
       client.release();
     }
   });
+
+  // ====== Admin: Solicitações de acesso ======
+app.get('/admin/pendentes', authRequired, adminRequired, async (req, res) => {
+  try {
+    const { rows: pend } = await pool.query(`
+      SELECT ar.id, ar.full_name, ar.email, ar.justification, ar.created_at,
+             c.id AS course_id, c.name AS course_name, c.slug AS course_slug
+      FROM access_requests ar
+      LEFT JOIN courses c ON c.id = ar.course_id
+      WHERE ar.status = 'pending'
+      ORDER BY ar.created_at ASC
+    `);
+
+    const rows = pend.map(r => `
+      <tr>
+        <td><strong>${safe(r.full_name)}</strong><div class="mut">${safe(r.email)}</div></td>
+        <td>[${safe(r.course_slug||'-')}] ${safe(r.course_name||'(curso removido)')}</td>
+        <td>${safe(r.justification||'—')}</td>
+        <td>${fmt(r.created_at)||'—'}</td>
+        <td style="white-space:nowrap">
+          <form method="POST" action="/admin/pendentes/${r.id}/aprovar" class="inline">
+            <button>Aprovar</button>
+          </form>
+          <form method="POST" action="/admin/pendentes/${r.id}/rejeitar" class="inline" style="margin-left:8px" onsubmit="return confirm('Rejeitar esta solicitação?');">
+            <button style="background:#444">Rejeitar</button>
+          </form>
+        </td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div class="card">
+        <div class="right" style="justify-content:space-between">
+          <h1>Solicitações de acesso</h1>
+          <div><a href="/aulas">Voltar</a></div>
+        </div>
+        <table class="mt2">
+          <thead><tr><th>Aluno</th><th>Curso</th><th>Justificativa</th><th>Enviado em</th><th>Ações</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="mut">Nenhuma solicitação pendente.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+    res.send(renderShell('Pendentes', html));
+  } catch (err) {
+    console.error('ACCESS LIST ERROR', err);
+    res.status(500).send('Falha ao listar solicitações');
+  }
+});
+
+app.post('/admin/pendentes/:id/rejeitar', authRequired, adminRequired, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    await pool.query(
+      `UPDATE access_requests SET status='rejected', processed_at=now() WHERE id=$1 AND status='pending'`,
+      [id]
+    );
+    res.redirect('/admin/pendentes');
+  } catch (err) {
+    console.error('ACCESS REJECT ERROR', err);
+    res.status(500).send('Falha ao rejeitar');
+  }
+});
+
+app.post('/admin/pendentes/:id/aprovar', authRequired, adminRequired, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: rws } = await client.query(
+      `SELECT ar.id, ar.full_name, ar.email, ar.course_id
+         FROM access_requests ar
+        WHERE ar.id=$1 AND ar.status='pending'
+        FOR UPDATE`,
+      [id]
+    );
+    const r = rws[0];
+    if (!r) {
+      await client.query('ROLLBACK');
+      return res.status(404).send('Solicitação não encontrada ou já processada');
+    }
+
+    // upsert de usuário por e-mail
+    const email = r.email.toLowerCase().trim();
+    const existing = (await client.query('SELECT id FROM users WHERE email=$1', [email])).rows[0];
+    let userId;
+    let plain = crypto.randomBytes(4).toString('hex'); // 8 chars
+    const hash = await bcrypt.hash(plain, 10);
+
+    if (existing) {
+      userId = existing.id;
+      // só define senha nova se usuário ainda não tiver (ou se quiser forçar reset)
+      await client.query(`UPDATE users SET full_name = COALESCE($1, full_name) WHERE id=$2`, [r.full_name || null, userId]);
+      const hasPwd = (await client.query('SELECT password_hash FROM users WHERE id=$1', [userId])).rows[0]?.password_hash;
+      if (!hasPwd) {
+        await client.query(`UPDATE users SET password_hash=$1, temp_password=$2 WHERE id=$3`, [hash, plain, userId]);
+      }
+    } else {
+      const ins = await client.query(
+        `INSERT INTO users(full_name,email,password_hash,temp_password)
+         VALUES ($1,$2,$3,$4) RETURNING id`,
+        [r.full_name, email, hash, plain]
+      );
+      userId = ins.rows[0].id;
+    }
+
+    // matrícula (upsert) no curso solicitado
+    if (r.course_id) {
+      await client.query(
+        `INSERT INTO course_members(user_id, course_id, role)
+         VALUES ($1,$2,'student')
+         ON CONFLICT (user_id, course_id) DO NOTHING`,
+        [userId, r.course_id]
+      );
+    }
+
+    // marcar request como aprovado
+    await client.query(
+      `UPDATE access_requests
+          SET status='approved', processed_at=now()
+        WHERE id=$1`,
+      [id]
+    );
+
+    await client.query('COMMIT');
+
+    // envia e-mail de boas-vindas (e marca welcome_email_sent_at)
+    await sendWelcomeAndMark({
+      userId,
+      email,
+      name: r.full_name,
+      login: email,
+      plain
+    });
+
+    res.redirect('/admin/pendentes');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('ACCESS APPROVE ERROR', err);
+    res.status(500).send('Falha ao aprovar');
+  } finally {
+    client.release();
+  }
+});
 
 // ====== Admin: Alunos (listar, filtrar, seleção múltipla, criar, editar, matrículas) ======
 app.get('/admin/alunos', adminRequired, async (req, res) => {

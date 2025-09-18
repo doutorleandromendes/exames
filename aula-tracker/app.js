@@ -3723,6 +3723,13 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
     try {
       const { course_id, video_id, q, dt_from, dt_to } = req.query;
   
+      // flags adicionais usados no HTML/CSV
+      const activeOnly = (req.query.active_only ?? '1') === '1'; // default ligado
+      const rawPctMin = req.query.pct_min;
+      const pctMin = Number.isFinite(parseFloat(rawPctMin))
+        ? Math.max(0, Math.min(100, parseFloat(rawPctMin)))
+        : null;
+  
       // combos de curso e, se houver curso, de vídeo
       const courses = (await pool.query(
         'SELECT id, name, slug FROM courses ORDER BY name'
@@ -3736,7 +3743,7 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
       }
   
       // Se nenhum filtro foi definido, NÃO executa a query pesada; mostra só a UI
-      const hasAnyFilter = Boolean(course_id || video_id || (q && q.trim()) || dt_from || dt_to);
+      const hasAnyFilter = Boolean(course_id || video_id || (q && q.trim()) || dt_from || dt_to || pctMin != null || activeOnly);
   
       let rows = [];
       if (hasAnyFilter) {
@@ -3748,10 +3755,11 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
         if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
         if (q && q.trim()) {
           params.push(`%${q.toLowerCase()}%`);
-          where.push(`(lower(u.full_name) LIKE $${params.length} OR lower(u.email) LIKE $${params.length})`);
+          where.push(`(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length} OR LOWER(v.title) LIKE $${params.length})`);
         }
         if (dt_from) { params.push(dt_from); where.push(`e.client_ts >= $${params.length}`); }
         if (dt_to)   { params.push(dt_to);   where.push(`e.client_ts <= $${params.length}`); }
+        if (activeOnly) { where.push(`c.archived = false`); }
   
         const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   
@@ -3769,35 +3777,45 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
             JOIN events e   ON e.session_id = s.id
             JOIN users u    ON u.id = s.user_id
             JOIN videos v   ON v.id = s.video_id
+            JOIN courses c  ON c.id = v.course_id
             ${whereSql}
             GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+          ),
+          enriched AS (
+            SELECT *,
+              CASE
+                WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+                ELSE LEAST(GREATEST(max_time,0), duration_seconds) * 100.0 / duration_seconds
+              END AS pct
+            FROM base
           )
-          SELECT *,
-            CASE
-              WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
-              ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
-            END AS pct
-          FROM base
+          SELECT
+            user_id, full_name, email, video_id, title, duration_seconds, max_time,
+            CASE WHEN pct IS NULL THEN NULL ELSE ROUND(pct::numeric, 1) END AS pct
+          FROM enriched
+          ${pctMin != null ? `WHERE pct IS NOT NULL AND pct >= $${params.length + 1}` : ``}
           ORDER BY full_name, title
         `;
+        if (pctMin != null) params.push(pctMin);
+  
         rows = (await pool.query(sql, params)).rows;
       }
   
       // HTML da página
       const courseOptions = ['<option value="">(Todos)</option>']
-        .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${c.name}</option>`))
+        .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id)?'selected':''}>${safe(c.name)}</option>`))
         .join('');
       const videoOptions = ['<option value="">(Todos)</option>']
-        .concat(videos.map(v => `<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${v.title}</option>`))
+        .concat(videos.map(v => `<option value="${v.id}" ${String(v.id)===String(video_id)?'selected':''}>${safe(v.title)}</option>`))
         .join('');
   
       const table = !hasAnyFilter
         ? '<tr><td colspan="6" class="mut">Escolha pelo menos um filtro e clique em “Aplicar filtros”.</td></tr>'
         : (rows.map(r => `
             <tr>
-              <td>${r.full_name}</td>
-              <td>${r.email}</td>
-              <td>${r.title}</td>
+              <td>${safe(r.full_name)}</td>
+              <td>${safe(r.email)}</td>
+              <td>${safe(r.title)}</td>
               <td>${r.duration_seconds ?? '—'}</td>
               <td>${r.max_time ?? 0}</td>
               <td>${r.pct == null ? '—' : (r.pct + '%')}</td>
@@ -3809,64 +3827,77 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
         video_id: video_id || '',
         q: (q || '').trim(),
         dt_from: dt_from || '',
-        dt_to: dt_to || ''
+        dt_to: dt_to || '',
+        pct_min: pctMin ?? '',
+        active_only: activeOnly ? '1' : '0'
       }).toString();
   
       const html = `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-          <h1>Relatórios</h1>
-          <div><a href="/aulas">Voltar</a></div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+            <h1>Relatórios</h1>
+            <div><a href="/aulas">Voltar</a></div>
+          </div>
+  
+          <form method="GET" action="/admin/relatorios" class="mt2">
+            <div class="row">
+              <div>
+                <label>Curso</label>
+                <select name="course_id" onchange="this.form.submit()">${courseOptions}</select>
+              </div>
+              <div>
+                <label>Aula (vídeo)</label>
+                <select name="video_id">${videoOptions}</select>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:22px">
+                <input type="checkbox" id="active_only" name="active_only" value="1" ${activeOnly ? 'checked' : ''}>
+                <label for="active_only" style="margin:0">Apenas cursos ativos</label>
+              </div>
+            </div>
+  
+            <div class="row">
+              <div>
+                <label>Aluno (nome ou email)</label>
+                <input name="q" value="${safe(q||'')}" placeholder="ex.: maria@ / João">
+              </div>
+              <div>
+                <label>De (client_ts)</label>
+                <input name="dt_from" value="${safe(dt_from||'')}" placeholder="2025-08-01T00:00:00-03:00">
+              </div>
+              <div>
+                <label>Até (client_ts)</label>
+                <input name="dt_to" value="${safe(dt_to||'')}" placeholder="2025-08-31T23:59:59-03:00">
+              </div>
+              <div>
+                <label>Mínimo % assistido (≥)</label>
+                <input name="pct_min" type="number" min="0" max="100" step="0.1" value="${pctMin ?? ''}">
+              </div>
+            </div>
+  
+            <button class="mt">Aplicar filtros</button>
+            <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+          </form>
+  
+          <table>
+            <tr>
+              <th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th>
+            </tr>
+            ${table}
+          </table>
         </div>
-    
-        <form method="GET" action="/admin/relatorios" class="mt2">
-          <div class="row">
-            <div>
-              <label>Curso</label>
-              <select name="course_id" onchange="this.form.submit()">${courseOptions}</select>
-            </div>
-            <div>
-              <label>Aula (vídeo)</label>
-              <select name="video_id">${videoOptions}</select>
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;margin-top:22px">
-              <input type="checkbox" id="active_only" name="active_only" value="1" ${activeOnly ? 'checked' : ''}>
-              <label for="active_only" style="margin:0">Apenas cursos ativos</label>
-            </div>
-          </div>
-    
-          <div class="row">
-            <div>
-              <label>Aluno (nome ou email)</label>
-              <input name="q" value="${safe(q||'')}" placeholder="ex.: maria@ / João">
-            </div>
-            <div>
-              <label>De (client_ts)</label>
-              <input name="dt_from" value="${safe(dt_from||'')}" placeholder="2025-08-01T00:00:00-03:00">
-            </div>
-            <div>
-              <label>Até (client_ts)</label>
-              <input name="dt_to" value="${safe(dt_to||'')}" placeholder="2025-08-31T23:59:59-03:00">
-            </div>
-            <div>
-              <label>Mínimo % assistido (≥)</label>
-              <input name="pct_min" type="number" min="0" max="100" step="0.1" value="${pctMin ?? ''}">
-            </div>
-          </div>
-    
-          <button class="mt">Aplicar filtros</button>
-          <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
-        </form>
-    
-        <table>
-          <tr>
-            <th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th>
-          </tr>
-          ${table}
-        </table>
-      </div>
-    `;
-    
+      `;
+  
+      res.send(renderShell('Relatórios', html));
+    } catch (err) {
+      console.error('ADMIN/RELATORIOS ERROR', err);
+      res.status(500).send(renderShell('Erro', `
+        <div class="card">
+          <h1>Falha ao carregar relatórios</h1>
+          <p class="mut">${safe(err.message || err)}</p>
+          <p><a href="/aulas">Voltar</a></p>
+        </div>`));
+    }
+  });
 // CSV com os mesmos filtros (separador ; para Excel BR)
 app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
   const { course_id, video_id, q, dt_from, dt_to } = req.query;

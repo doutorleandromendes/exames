@@ -2913,40 +2913,49 @@ app.get('/admin/alunos/:id/relatorio', adminRequired, async (req, res) => {
       .concat(courses.map(c => `<option value="${c.id}" ${String(c.id)===String(course_id||'')?'selected':''}>${safe(c.name)} (${safe(c.slug)})</option>`))
       .join('');
 
-    const where = ['s.user_id = $1'];
-    const params = [id];
-    if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
-    const whereSql = `WHERE ${where.join(' AND ')}`;
-
-    const sql = `
-      WITH base AS (
-        SELECT
-          v.id               AS video_id,
-          v.title            AS video_title,
-          v.duration_seconds AS duration_seconds,
-          c.name             AS course_name,
-          c.slug             AS course_slug,
-          MAX(e.video_time)  AS max_time,
-          MAX(e.client_ts)   AS last_ts,
-          COUNT(*) FILTER (WHERE e.type='play')  AS plays,
-          COUNT(*) FILTER (WHERE e.type='pause') AS pauses,
-          COUNT(*) FILTER (WHERE e.type='ended') AS ends,
-          COUNT(*)                                  AS events
-        FROM sessions s
-        JOIN videos   v ON v.id = s.video_id
-        JOIN courses  c ON c.id = v.course_id
-        LEFT JOIN events e ON e.session_id = s.id
-        ${whereSql}
-        GROUP BY v.id, v.title, v.duration_seconds, c.name, c.slug
-      )
-      SELECT *,
-        CASE WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
-             ELSE ROUND( LEAST(GREATEST(max_time,0), duration_seconds)::numeric * 100.0 / duration_seconds, 1)
-        END AS pct
-      FROM base
-      ORDER BY course_name, video_title
-    `;
-    const rows = (await pool.query(sql, params)).rows;
+      const where = ['s.user_id = $1'];
+      const params = [id];
+      if (course_id) {
+        params.push(course_id);
+        where.push(`v.course_id = $${params.length}`);
+      }
+      const whereSql = `WHERE ${where.join(' AND ')}`;
+      
+      const sql = `
+        WITH base AS (
+          SELECT
+            v.id               AS video_id,
+            v.title            AS video_title,
+            v.duration_seconds AS duration_seconds,
+            c.name             AS course_name,
+            c.slug             AS course_slug,
+            MAX(e.client_ts)   AS last_ts,
+            COUNT(*) FILTER (WHERE e.type='play')  AS plays,
+            COUNT(*) FILTER (WHERE e.type='pause') AS pauses,
+            COUNT(*) FILTER (WHERE e.type='ended') AS ends,
+            COUNT(*)                                  AS events,
+            COALESCE(
+              SUM(
+                GREATEST(0, ws.end_sec - ws.start_sec)
+              ), 0
+            ) AS watched_seconds
+          FROM sessions s
+          JOIN videos   v ON v.id = s.video_id
+          JOIN courses  c ON c.id = v.course_id
+          LEFT JOIN events e ON e.session_id = s.id
+          LEFT JOIN watch_segments ws ON ws.session_id = s.id
+          ${whereSql}
+          GROUP BY v.id, v.title, v.duration_seconds, c.name, c.slug
+        )
+        SELECT *,
+          CASE
+            WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
+            ELSE ROUND(LEAST(watched_seconds, duration_seconds)::numeric * 100.0 / duration_seconds, 1)
+          END AS pct
+        FROM base
+        ORDER BY course_name, video_title
+      `;
+      const rows = (await pool.query(sql, params)).rows;
 
     const batchList = rows.map(r =>
       `<label style="display:block"><input type="checkbox" name="video_ids[]" value="${r.video_id}"> ${safe(r.course_name)} — ${safe(r.video_title)} (ID ${r.video_id})</label>`
@@ -3577,7 +3586,7 @@ app.get('/admin/relatorio/:videoId.csv', adminRequired, async (req,res)=>{
   }
 });
 
-// ====== Relatório WEB (% assistido, ordenado por nome) ======
+// ====== Relatório WEB (% assistido com base em watch_segments, ordenado por nome) ======
 app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
   try{
     const videoId = parseInt(req.params.videoId,10);
@@ -3585,37 +3594,117 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
     const pageSize = 500;
     const offset = (page-1)*pageSize;
 
+    // Metadados do vídeo
     const { rows:vt } = await pool.query(`
       SELECT v.title, v.duration_seconds, c.name AS course_name
       FROM videos v LEFT JOIN courses c ON c.id=v.course_id
       WHERE v.id = $1`, [videoId]);
-    if (!vt[0]) return res.status(404).send(renderShell('Relatório', `<div class="card"><h1>Aula não encontrada</h1><p><a href="/aulas">Voltar</a></p></div>`));
+    if (!vt[0]) {
+      return res.status(404).send(
+        renderShell('Relatório', `<div class="card"><h1>Aula não encontrada</h1><p><a href="/aulas">Voltar</a></p></div>`)
+      );
+    }
     const videoTitle = vt[0].title;
     const courseName = vt[0].course_name || '-';
     const durationSec = vt[0].duration_seconds || null;
 
+    // ===== Resumo por aluno (usa união de segmentos assistidos) =====
     const { rows:summary } = await pool.query(`
+      WITH base AS (  -- um registro por usuário que abriu esse vídeo
+        SELECT
+          u.id          AS user_id,
+          u.full_name,
+          u.email,
+          v.duration_seconds
+        FROM sessions s
+        JOIN users  u ON u.id = s.user_id
+        JOIN videos v ON v.id = s.video_id
+        WHERE s.video_id = $1
+        GROUP BY u.id, u.full_name, u.email, v.duration_seconds
+      ),
+      sess AS (       -- contagem de sessões e primeiro acesso
+        SELECT
+          s.user_id,
+          COUNT(DISTINCT s.id)          AS sessions,
+          MIN(s.started_at)             AS first_access
+        FROM sessions s
+        WHERE s.video_id = $1
+        GROUP BY s.user_id
+      ),
+      ev AS (         -- métricas de eventos (inclui max_time_seen e último evento)
+        SELECT
+          s.user_id,
+          MAX(e.video_time)                                 AS max_time_seen,
+          MAX(e.client_ts)                                  AS last_event,
+          COUNT(*) FILTER (WHERE e.type='ended')            AS finishes
+        FROM sessions s
+        LEFT JOIN events e ON e.session_id = s.id
+        WHERE s.video_id = $1
+        GROUP BY s.user_id
+      ),
+      segs AS (       -- segmentos assistidos (limitados à duração do vídeo)
+        SELECT
+          s.user_id,
+          v.duration_seconds,
+          GREATEST(0, LEAST(ws.start_sec, v.duration_seconds)) AS s,
+          GREATEST(0, LEAST(ws.end_sec,   v.duration_seconds)) AS e
+        FROM sessions s
+        JOIN videos v         ON v.id = s.video_id
+        JOIN watch_segments ws ON ws.session_id = s.id
+        WHERE s.video_id = $1
+      ),
+      ordered AS (    -- ordena segmentos por usuário e marca quebras
+        SELECT *,
+               LAG(e) OVER (PARTITION BY user_id ORDER BY s, e) AS prev_e
+        FROM segs
+      ),
+      grp AS (        -- agrupa segmentos contíguos/sobrepostos
+        SELECT *,
+               SUM(CASE WHEN prev_e IS NULL OR s > prev_e THEN 1 ELSE 0 END)
+               OVER (PARTITION BY user_id ORDER BY s, e) AS g
+        FROM ordered
+      ),
+      merged AS (     -- une os segmentos por grupo
+        SELECT user_id, duration_seconds, MIN(s) AS s, MAX(e) AS e
+        FROM grp
+        GROUP BY user_id, duration_seconds, g
+      ),
+      watched AS (    -- total efetivamente assistido por usuário
+        SELECT user_id, SUM(e - s) AS watched_sec
+        FROM merged
+        GROUP BY user_id
+      )
       SELECT
-        u.full_name,
-        u.email,
-        COUNT(DISTINCT s.id) AS sessions,
-        MIN(s.started_at) AS first_access,
-        MAX(e.client_ts) AS last_event,
-        MAX(e.video_time) AS max_time_seen,
-        SUM(CASE WHEN e.type = 'ended' THEN 1 ELSE 0 END) AS finishes
-      FROM sessions s
-      JOIN users u ON u.id = s.user_id
-      LEFT JOIN events e ON e.session_id = s.id
-      WHERE s.video_id = $1
-      GROUP BY u.full_name, u.email
-      ORDER BY u.full_name NULLS LAST, u.email
+        b.full_name,
+        b.email,
+        COALESCE(se.sessions, 0)              AS sessions,
+        se.first_access,
+        ev.last_event,
+        COALESCE(ev.max_time_seen, 0)         AS max_time_seen,
+        COALESCE(ev.finishes, 0)              AS finishes,
+        CASE
+          WHEN b.duration_seconds IS NULL OR b.duration_seconds <= 0 THEN NULL
+          WHEN w.watched_sec IS NOT NULL THEN
+            ROUND(LEAST(w.watched_sec, b.duration_seconds)::numeric * 100.0 / b.duration_seconds, 1)
+          WHEN COALESCE(ev.finishes,0) > 0 THEN
+            100.0
+          WHEN ev.max_time_seen IS NOT NULL THEN
+            ROUND(LEAST(GREATEST(ev.max_time_seen,0), b.duration_seconds)::numeric * 100.0 / b.duration_seconds, 1)
+          ELSE 0
+        END AS pct
+      FROM base b
+      LEFT JOIN sess    se ON se.user_id = b.user_id
+      LEFT JOIN ev      ev ON ev.user_id = b.user_id
+      LEFT JOIN watched w  ON w.user_id  = b.user_id
+      ORDER BY b.full_name NULLS LAST, b.email
     `, [videoId]);
 
+    // ===== Eventos brutos paginados (inalterado) =====
     const { rows:events } = await pool.query(`
       SELECT u.full_name, u.email, s.id AS session, e.type, e.video_time, e.client_ts
       FROM events e
       JOIN sessions s ON s.id = e.session_id
-      JOIN users u ON u.id = s.user_id
+      JOIN users u    ON u.id = s.user_id
       WHERE s.video_id = $1
       ORDER BY u.full_name NULLS LAST, u.email, e.client_ts
       LIMIT $2 OFFSET $3
@@ -3630,13 +3719,14 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
     const total = cnt[0]?.n || 0;
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+    // ===== Render =====
     const rowsSummary = summary.map(r => {
-      let pct = '—';
+      const ended = Number(r.finishes||0) > 0;
+      let pctStr = '—';
       if (durationSec && durationSec > 0) {
-        const ended = Number(r.finishes||0) > 0;
-        const maxSeen = Number(r.max_time_seen||0);
-        const calc = ended ? 100 : Math.min(100, Math.round((maxSeen / durationSec) * 100));
-        pct = isFinite(calc) ? (calc + '%') : '—';
+        // pct já veio calculado no SQL; só formata
+        const pctNum = Number(r.pct ?? 0);
+        pctStr = isFinite(pctNum) ? (pctNum + '%') : '—';
       }
       return `
         <tr>
@@ -3647,7 +3737,7 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
           <td>${fmt(r.last_event)}</td>
           <td>${r.max_time_seen ?? 0}s</td>
           <td>${r.finishes}</td>
-          <td><strong>${pct}</strong></td>
+          <td><strong>${pctStr}</strong></td>
         </tr>`;
     }).join('');
 
@@ -3669,25 +3759,23 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
         ${page<totalPages ? `<a href="/admin/relatorio/${videoId}?page=${page+1}">Próxima »</a>` : `<span class="mut">Próxima »</span>`}
       </div>`;
 
-      // --- Botão "Limpar relatório" (POST) com redirect de volta para esta página
-const clearForm = `
+    const clearForm = `
 <form method="POST" action="/admin/relatorio/${videoId}/clear"
       style="display:inline"
       onsubmit="return confirm('Remover TODOS os eventos e sessões deste vídeo?');">
   <input type="hidden" name="redirect" value="/admin/relatorio/${videoId}">
   <button style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">Limpar relatório</button>
-</form>
-`;
+</form>`;
 
     const body = `
       <div class="card">
         <div class="right" style="justify-content:space-between;gap:12px">
           <h1 style="margin:0">Relatório — ${safe(videoTitle)}</h1>
           <div>
-  <a href="/admin/relatorio/${videoId}.csv">Exportar CSV</a> ·
-  ${clearForm}
-  · <a href="/aulas">Voltar</a>
-</div>
+            <a href="/admin/relatorio/${videoId}.csv">Exportar CSV</a> ·
+            ${clearForm}
+            · <a href="/aulas">Voltar</a>
+          </div>
         </div>
         <p class="mut">Curso: ${safe(courseName)} ${durationSec ? `· Duração do vídeo: <code>${durationSec}s</code>` : ''}</p>
 
@@ -3715,10 +3803,9 @@ const clearForm = `
     res.send(renderShell('Relatório', body));
   }catch(err){
     console.error('ADMIN REPORT WEB ERROR', err);
-    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao gerar relatório</h1><p class="mut">${err.message||err}</p></div>`));
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao gerar relatório</h1><p class="mut">${safe(err.message||err)}</p></div>`));
   }
 });
-
 // ====== Relatórios com filtros (rápidos) ======
 // UI de filtros + tabela com % assistido (usa MAX(video_time) / duration_seconds)
 app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {

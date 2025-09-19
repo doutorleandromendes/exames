@@ -3988,3 +3988,13 @@ app.post('/track', async (req,res)=>{
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED REJECTION', reason));
 process.on('uncaughtException',  (err)    => console.error('UNCAUGHT EXCEPTION', err));
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
+
+// ====== KEEPALIVE SUPABASE ======
+setInterval(async () => {
+  try {
+    await pool.query('SELECT 1');
+    console.log('Keepalive Supabase OK', new Date().toISOString());
+  } catch (err) {
+    console.error('Erro no keepalive Supabase', err.message);
+  }
+}, 5 * 60 * 1000); // a cada 5 minutos

@@ -4,7 +4,8 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "keepalive": "node keepalive.js"
   },
   "dependencies": {
     "express": "^4.19.0",

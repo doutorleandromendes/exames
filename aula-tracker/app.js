@@ -38,9 +38,11 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 
 // ====== PG Pool ======
 const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: PGSSLMODE === 'require' ? { rejectUnauthorized: false } : false
-});
+    connectionString: DATABASE_URL,
+    // Força SSL mas ignora verificação do certificado (necessário para Supabase, pelo menos enquanto não configuramos o CA)
+    ssl: { rejectUnauthorized: false }
+  });
+  
 
 async function sendWelcomeAndMark({ userId, email, name, login, plain }) {
   // Segurança: só envia uma vez

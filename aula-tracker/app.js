@@ -911,220 +911,303 @@ app.get('/aulas', authRequired, async (req,res)=>{
 
 // ====== Relatórios (painel com filtros + limpeza em lote) ======
 app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
-    try {
-      const { course_id, video_id, q, dt_from, dt_to } = req.query;
-      const activeOnly = (req.query.active_only ?? '1') === '1'; // default: ligado
-  
-      // pct_min: ler cedo e validar
-      const rawPctMin = req.query.pct_min;
-      const pctMin = Number.isFinite(parseFloat(rawPctMin))
-        ? Math.max(0, Math.min(100, parseFloat(rawPctMin)))
-        : null;
-  
-      // combos
-      const courses = (await pool.query('SELECT id,name,slug FROM courses ORDER BY name')).rows;
-      const videos = course_id
-        ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title', [course_id])).rows
-        : [];
-  
-      // só busca dados agregados se tiver AO MENOS um filtro (inclui pct_min)
-      const hasAnyFilter = Boolean(course_id || video_id || q || dt_from || dt_to || pctMin != null || activeOnly);
-  
-      let rows = [];
-      if (hasAnyFilter) {
-        const where = [];
-        const params = [];
-  
-        if (course_id) { params.push(course_id); where.push(`v.course_id = $${params.length}`); }
-        if (video_id)  { params.push(video_id);  where.push(`v.id = $${params.length}`); }
-        if (q) {
-          params.push(`%${String(q).toLowerCase()}%`);
-          // inclui nome, email e título do vídeo
-          where.push(`(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length} OR LOWER(v.title) LIKE $${params.length})`);
-        }
-        if (dt_from)   { params.push(dt_from);   where.push(`e.client_ts >= $${params.length}`); }
-        if (dt_to)     { params.push(dt_to);     where.push(`e.client_ts <= $${params.length}`); }
-        if (activeOnly){ where.push(`c.archived = false`); }
-  
-        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  
-        // CTE base + enriched (pct não arredondado) e filtro opcional por pct_min
-        const sql = `
-          WITH base AS (
-            SELECT
-              u.id AS user_id, u.full_name, u.email,
-              v.id AS video_id, v.title, v.duration_seconds,
-              MAX(e.video_time) AS max_time
-            FROM sessions s
-            JOIN events e ON e.session_id = s.id
-            JOIN users  u ON u.id = s.user_id
-            JOIN videos v ON v.id = s.video_id
-            JOIN courses c ON c.id = v.course_id
-            ${whereSql}
-            GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
-          ),
-          enriched AS (
-            SELECT *,
-              CASE
-                WHEN duration_seconds IS NULL OR duration_seconds <= 0 THEN NULL
-                ELSE LEAST(GREATEST(max_time,0), duration_seconds) * 100.0 / duration_seconds
-              END AS pct
-            FROM base
-          )
+  try {
+    const { course_id, video_id, q, dt_from, dt_to } = req.query;
+    const activeOnly = (req.query.active_only ?? '1') === '1'; // default: ligado
+
+    // pct_min: ler cedo e validar
+    const rawPctMin = req.query.pct_min;
+    const pctMin = Number.isFinite(parseFloat(rawPctMin))
+      ? Math.max(0, Math.min(100, parseFloat(rawPctMin)))
+      : null;
+
+    // === combos (curso/aula) ===
+    const courses = (await pool.query(
+      activeOnly
+        ? 'SELECT id,name,slug FROM courses WHERE archived = false ORDER BY name'
+        : 'SELECT id,name,slug FROM courses ORDER BY name'
+    )).rows;
+
+    const videos = course_id
+      ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title', [course_id])).rows
+      : [];
+
+    // só busca dados agregados se tiver AO MENOS um filtro (inclui pct_min e activeOnly)
+    const hasAnyFilter = Boolean(course_id || video_id || q || dt_from || dt_to || pctMin != null || activeOnly);
+
+    let rows = [];
+    if (hasAnyFilter) {
+      // ------ construção de filtros -------
+      const whereBase = [];   // filtros que valem para s/u/v/c
+      const whereTime = [];   // filtros que valem para eventos (por client_ts)
+      const params = [];
+
+      if (course_id) { params.push(course_id); whereBase.push(`v.course_id = $${params.length}`); }
+      if (video_id)  { params.push(video_id);  whereBase.push(`v.id = $${params.length}`); }
+      if (q) {
+        params.push(`%${String(q).toLowerCase()}%`);
+        whereBase.push(`(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length} OR LOWER(v.title) LIKE $${params.length})`);
+      }
+      if (activeOnly) { whereBase.push(`c.archived = false`); }
+
+      // Filtro por data via tabela de eventos (mantém sem “inflar” o cálculo de pct)
+      if (dt_from)   { params.push(dt_from); whereTime.push(`e.client_ts >= $${params.length}`); }
+      if (dt_to)     { params.push(dt_to);   whereTime.push(`e.client_ts <= $${params.length}`); }
+
+      const baseSql = whereBase.length ? `WHERE ${whereBase.join(' AND ')}` : '';
+      const timeSql =
+        whereTime.length
+          ? `AND EXISTS (
+               SELECT 1 FROM events e
+               WHERE e.session_id = s.id
+                 AND ${whereTime.join(' AND ')}
+             )`
+          : '';
+
+      // ------ SQL com segmentos mesclados + fallback em MAX(video_time) ------
+      const sql = `
+        WITH base AS (
           SELECT
-            user_id, full_name, email, video_id, title, duration_seconds, max_time,
-            CASE WHEN pct IS NULL THEN NULL ELSE ROUND(pct::numeric, 1) END AS pct
-          FROM enriched
-          ${pctMin != null ? `WHERE pct IS NOT NULL AND pct >= $${params.length + 1}` : ``}
-          ORDER BY full_name, title
-          LIMIT 5000
-        `;
-  
-        if (pctMin != null) params.push(pctMin);
-  
-        rows = (await pool.query(sql, params)).rows;
-      }
-  
-      // vídeos distintos do resultado (para limpeza em lote)
-      const distinctVideos = [];
-      if (hasAnyFilter && rows.length) {
-        const seen = new Set();
-        for (const r of rows) {
-          if (!seen.has(r.video_id)) {
-            seen.add(r.video_id);
-            distinctVideos.push({ id: r.video_id, title: r.title });
-          }
+            u.id   AS user_id,
+            u.full_name,
+            u.email,
+            v.id   AS video_id,
+            v.title,
+            v.duration_seconds
+          FROM sessions s
+          JOIN users   u ON u.id = s.user_id
+          JOIN videos  v ON v.id = s.video_id
+          JOIN courses c ON c.id = v.course_id
+          ${baseSql}
+          ${timeSql}
+          GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
+        ),
+        segs AS (  -- segmentos reais vistos (limitados ao [0, duração])
+          SELECT
+            s.user_id,
+            s.video_id,
+            v.duration_seconds,
+            GREATEST(0, LEAST(ws.start_sec, v.duration_seconds)) AS s,
+            GREATEST(0, LEAST(ws.end_sec,   v.duration_seconds)) AS e
+          FROM sessions s
+          JOIN videos v         ON v.id = s.video_id
+          JOIN courses c        ON c.id = v.course_id
+          JOIN watch_segments ws ON ws.session_id = s.id
+          ${baseSql.replace(/u\./g,'u.')}  -- mesmo filtro de cima
+          ${timeSql}
+        ),
+        ordered AS (
+          SELECT *,
+                 LAG(e) OVER (PARTITION BY user_id, video_id ORDER BY s, e) AS prev_e
+          FROM segs
+        ),
+        grp AS (
+          SELECT *,
+                 SUM(CASE WHEN prev_e IS NULL OR s > prev_e THEN 1 ELSE 0 END)
+                 OVER (PARTITION BY user_id, video_id ORDER BY s, e) AS g
+          FROM ordered
+        ),
+        merged AS (  -- comprime sobreposições por (user,video)
+          SELECT user_id, video_id, duration_seconds, MIN(s) AS s, MAX(e) AS e
+          FROM grp
+          GROUP BY user_id, video_id, duration_seconds, g
+        ),
+        watched AS (
+          SELECT
+            user_id,
+            video_id,
+            duration_seconds,
+            SUM(GREATEST(e - s, 0)) AS watched_sec,
+            MAX(e)                  AS max_end
+          FROM merged
+          GROUP BY user_id, video_id, duration_seconds
+        ),
+        ev AS (       -- fallback a partir de eventos (se não houver segmentos)
+          SELECT
+            s.user_id,
+            s.video_id,
+            MAX(e.video_time) AS max_time
+          FROM sessions s
+          JOIN events e ON e.session_id = s.id
+          JOIN videos v ON v.id = s.video_id
+          JOIN courses c ON c.id = v.course_id
+          ${baseSql}
+          ${whereTime.length ? `AND ${whereTime.join(' AND ')}` : ''}
+          GROUP BY s.user_id, s.video_id
+        ),
+        enriched AS (
+          SELECT
+            b.user_id, b.full_name, b.email,
+            b.video_id, b.title, b.duration_seconds,
+            -- "max_pos" para a tabela: prioriza fim de segmento; senão, max de eventos
+            COALESCE(w.max_end, ev.max_time, 0) AS max_pos,
+            -- pct por segmentos; senão, fallback por eventos (mantém compatibilidade)
+            CASE
+              WHEN b.duration_seconds IS NULL OR b.duration_seconds <= 0 THEN NULL
+              WHEN w.watched_sec IS NOT NULL THEN
+                LEAST(w.watched_sec, b.duration_seconds) * 100.0 / b.duration_seconds
+              WHEN ev.max_time IS NOT NULL THEN
+                LEAST(GREATEST(ev.max_time,0), b.duration_seconds) * 100.0 / b.duration_seconds
+              ELSE 0
+            END AS pct
+          FROM base b
+          LEFT JOIN watched w ON w.user_id = b.user_id AND w.video_id = b.video_id
+          LEFT JOIN ev      ev ON ev.user_id = b.user_id AND ev.video_id = b.video_id
+        )
+        SELECT
+          user_id, full_name, email, video_id, title, duration_seconds,
+          max_pos AS max_time,
+          CASE WHEN pct IS NULL THEN NULL ELSE ROUND(pct::numeric, 1) END AS pct
+        FROM enriched
+        ${pctMin != null ? `WHERE pct IS NOT NULL AND pct >= $${params.length + 1}` : ``}
+        ORDER BY full_name, title
+        LIMIT 5000
+      `;
+
+      if (pctMin != null) params.push(pctMin);
+
+      rows = (await pool.query(sql, params)).rows;
+    }
+
+    // vídeos distintos do resultado (para limpeza em lote)
+    const distinctVideos = [];
+    if (hasAnyFilter && rows.length) {
+      const seen = new Set();
+      for (const r of rows) {
+        if (!seen.has(r.video_id)) {
+          seen.add(r.video_id);
+          distinctVideos.push({ id: r.video_id, title: r.title });
         }
       }
-  
-      // combos HTML
-      const courseOpts = ['<option value="">(Todos)</option>']
-        .concat(courses.map(c =>
-          `<option value="${c.id}" ${String(c.id) === String(course_id) ? 'selected' : ''}>${safe(c.name)}</option>`
-        ))
-        .join('');
-      const videoOpts = ['<option value="">(Todos)</option>']
-        .concat(videos.map(v =>
-          `<option value="${v.id}" ${String(v.id) === String(video_id) ? 'selected' : ''}>${safe(v.title)}</option>`
-        ))
-        .join('');
-  
-      // tabela
-      const table = hasAnyFilter
-        ? (rows.map(r => `
-             <tr>
-               <td>${safe(r.full_name || '-')}</td>
-               <td>${safe(r.email)}</td>
-               <td>${safe(r.title)}</td>
-               <td>${r.duration_seconds ?? '—'}</td>
-               <td>${r.max_time ?? 0}</td>
-               <td>${r.pct == null ? '—' : r.pct + '%'}</td>
-             </tr>
-           `).join('') || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>')
-        : '<tr><td colspan="6" class="mut">Aplique algum filtro e clique em “Aplicar filtros”.</td></tr>';
-  
-      // link do CSV inclui active_only e pct_min
-      const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
-        course_id: course_id || '',
-        video_id:  video_id  || '',
-        q:         q || '',
-        dt_from:   dt_from || '',
-        dt_to:     dt_to || '',
-        pct_min:   pctMin ?? '',
-        active_only: activeOnly ? '1' : '0'
-      }).toString();
-  
-      const html = `
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-            <h1>Relatórios (agregado)</h1>
-            <div><a href="/aulas">Voltar</a></div>
-          </div>
-  
-          <form method="GET" action="/admin/relatorios" class="mt2">
-            <div class="row">
-              <div>
-                <label>Curso</label>
-                <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
-              </div>
-              <div>
-                <label>Aula (vídeo)</label>
-                <select name="video_id">${videoOpts}</select>
-              </div>
-              <div style="display:flex;align-items:center;gap:6px;margin-top:22px">
-                <input type="checkbox" id="active_only" name="active_only" value="1" ${activeOnly ? 'checked' : ''}>
-                <label for="active_only" style="margin:0">Apenas cursos ativos</label>
-              </div>
-            </div>
-            <div class="row">
-              <div>
-                <label>Aluno (nome/email)</label>
-                <input name="q" value="${safe(q||'')}" placeholder="ex.: maria@ / João">
-              </div>
-              <div>
-                <label>De</label>
-                <input name="dt_from" value="${safe(dt_from||'')}" placeholder="2025-08-01T00:00:00-03:00">
-              </div>
-              <div>
-                <label>Até</label>
-                <input name="dt_to" value="${safe(dt_to||'')}" placeholder="2025-08-31T23:59:59-03:00">
-              </div>
-              <div>
-                <label>Mínimo % assistido (≥)</label>
-                <input name="pct_min" type="number" min="0" max="100" step="0.1" value="${pctMin ?? ''}">
-              </div>
-            </div>
-            <button class="mt">Aplicar filtros</button>
-            <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
-            <a class="mt" href="/admin/relatorio/raw" style="margin-left:12px;display:inline-block">Ver eventos brutos</a>
-          </form>
-  
-          ${hasAnyFilter ? `
-            <div class="card mt2" style="border:1px solid #ddd">
-              <h2 style="margin-top:0">Limpeza em lote (vídeos no resultado atual)</h2>
-              <form method="POST" action="/admin/relatorios/clear-batch" id="batchClearForm">
-                <div class="mt">
-                  <button type="button" class="linklike" id="selAll">Selecionar todos</button> ·
-                  <button type="button" class="linklike" id="selNone">Limpar seleção</button>
-                </div>
-                <div class="mt" style="columns:2;max-width:720px">
-                  ${distinctVideos.length ? distinctVideos.map(v =>
-                    `<label style="display:block"><input type="checkbox" name="video_ids[]" value="${v.id}"> ${safe(v.title)} (ID ${v.id})</label>`
-                  ).join('') : '<span class="mut">Nenhum vídeo no resultado atual.</span>'}
-                </div>
-                <input type="hidden" name="redirect" value="${safe(req.url)}">
-                <div class="mt">
-                  <button ${distinctVideos.length ? '' : 'disabled'} onclick="return confirm('Remover TODOS os eventos e sessões dos vídeos selecionados?');">Limpar relatórios selecionados</button>
-                </div>
-              </form>
-            </div>` : ''
-          }
-  
-          <table class="mt2">
-            <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
-            ${table}
-          </table>
-        </div>
-        <style>.linklike{background:none;border:0;padding:0;color:#007bff;cursor:pointer}</style>
-        <script>
-          (function(){
-            const root = document.getElementById('batchClearForm');
-            if(!root) return;
-            const selAll = document.getElementById('selAll');
-            const selNone = document.getElementById('selNone');
-            selAll && selAll.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=true); });
-            selNone && selNone.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=false); });
-          })();
-        </script>
-      `;
-  
-      res.send(renderShell('Relatórios', html));
-    } catch (err) {
-      console.error('RELATORIOS ERROR', err);
-      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir relatórios</h1><p class="mut">${err.message||err}</p></div>`));
     }
-  });
-  
+
+    // combos HTML
+    const courseOpts = ['<option value="">(Todos)</option>']
+      .concat(courses.map(c =>
+        `<option value="${c.id}" ${String(c.id) === String(course_id) ? 'selected' : ''}>${safe(c.name)}</option>`
+      ))
+      .join('');
+    const videoOpts = ['<option value="">(Todos)</option>']
+      .concat(videos.map(v =>
+        `<option value="${v.id}" ${String(v.id) === String(video_id) ? 'selected' : ''}>${safe(v.title)}</option>`
+      ))
+      .join('');
+
+    // tabela
+    const table = hasAnyFilter
+      ? (rows.map(r => `
+           <tr>
+             <td>${safe(r.full_name || '-')}</td>
+             <td>${safe(r.email)}</td>
+             <td>${safe(r.title)}</td>
+             <td>${r.duration_seconds ?? '—'}</td>
+             <td>${r.max_time ?? 0}</td>
+             <td>${r.pct == null ? '—' : r.pct + '%'}</td>
+           </tr>
+         `).join('') || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>')
+      : '<tr><td colspan="6" class="mut">Aplique algum filtro e clique em “Aplicar filtros”.</td></tr>';
+
+    // link do CSV inclui active_only e pct_min
+    const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
+      course_id: course_id || '',
+      video_id:  video_id  || '',
+      q:         q || '',
+      dt_from:   dt_from || '',
+      dt_to:     dt_to || '',
+      pct_min:   pctMin ?? '',
+      active_only: activeOnly ? '1' : '0'
+    }).toString();
+
+    const html = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <h1>Relatórios (agregado)</h1>
+          <div><a href="/aulas">Voltar</a></div>
+        </div>
+
+        <form method="GET" action="/admin/relatorios" class="mt2">
+          <div class="row">
+            <div>
+              <label>Curso</label>
+              <select name="course_id" onchange="this.form.submit()">${courseOpts}</select>
+            </div>
+            <div>
+              <label>Aula (vídeo)</label>
+              <select name="video_id">${videoOpts}</select>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:22px">
+              <input type="checkbox" id="active_only" name="active_only" value="1" ${activeOnly ? 'checked' : ''}>
+              <label for="active_only" style="margin:0">Apenas cursos ativos</label>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Aluno (nome/email)</label>
+              <input name="q" value="${safe(q||'')}" placeholder="ex.: maria@ / João">
+            </div>
+            <div>
+              <label>De</label>
+              <input name="dt_from" value="${safe(dt_from||'')}" placeholder="2025-08-01T00:00:00-03:00">
+            </div>
+            <div>
+              <label>Até</label>
+              <input name="dt_to" value="${safe(dt_to||'')}" placeholder="2025-08-31T23:59:59-03:00">
+            </div>
+            <div>
+              <label>Mínimo % assistido (≥)</label>
+              <input name="pct_min" type="number" min="0" max="100" step="0.1" value="${pctMin ?? ''}">
+            </div>
+          </div>
+          <button class="mt">Aplicar filtros</button>
+          <a class="mt" href="${csvLink}" style="margin-left:12px;display:inline-block">Exportar CSV</a>
+          <a class="mt" href="/admin/relatorio/raw" style="margin-left:12px;display:inline-block">Ver eventos brutos</a>
+        </form>
+
+        ${hasAnyFilter ? `
+          <div class="card mt2" style="border:1px solid #ddd">
+            <h2 style="margin-top:0">Limpeza em lote (vídeos no resultado atual)</h2>
+            <form method="POST" action="/admin/relatorios/clear-batch" id="batchClearForm">
+              <div class="mt">
+                <button type="button" class="linklike" id="selAll">Selecionar todos</button> ·
+                <button type="button" class="linklike" id="selNone">Limpar seleção</button>
+              </div>
+              <div class="mt" style="columns:2;max-width:720px">
+                ${distinctVideos.length ? distinctVideos.map(v =>
+                  `<label style="display:block"><input type="checkbox" name="video_ids[]" value="${v.id}"> ${safe(v.title)} (ID ${v.id})</label>`
+                ).join('') : '<span class="mut">Nenhum vídeo no resultado atual.</span>'}
+              </div>
+              <input type="hidden" name="redirect" value="${safe(req.url)}">
+              <div class="mt">
+                <button ${distinctVideos.length ? '' : 'disabled'} onclick="return confirm('Remover TODOS os eventos e sessões dos vídeos selecionados?');">Limpar relatórios selecionados</button>
+              </div>
+            </form>
+          </div>` : ''
+        }
+
+        <table class="mt2">
+          <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
+          ${table}
+        </table>
+      </div>
+      <style>.linklike{background:none;border:0;padding:0;color:#007bff;cursor:pointer}</style>
+      <script>
+        (function(){
+          const root = document.getElementById('batchClearForm');
+          if(!root) return;
+          const selAll = document.getElementById('selAll');
+          const selNone = document.getElementById('selNone');
+          selAll && selAll.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=true); });
+          selNone && selNone.addEventListener('click', ()=>{ root.querySelectorAll('input[type=checkbox]').forEach(ch=>ch.checked=false); });
+        })();
+      </script>
+    `;
+
+    res.send(renderShell('Relatórios', html));
+  } catch (err) {
+    console.error('RELATORIOS ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao abrir relatórios</h1><p class="mut">${err.message||err}</p></div>`));
+  }
+});
 // ====== CSV com os mesmos filtros (separador ;) ======
 app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) => {
   const { course_id, video_id, q, dt_from, dt_to } = req.query;
@@ -3608,7 +3691,7 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
     const courseName = vt[0].course_name || '-';
     const durationSec = vt[0].duration_seconds || null;
 
-    // ===== Resumo por aluno (usa união de segmentos assistidos) =====
+    // ===== Resumo por aluno (usa união de segmentos assistidos + fallback) =====
     const { rows:summary } = await pool.query(`
       WITH base AS (  -- um registro por usuário que abriu esse vídeo
         SELECT
@@ -3631,7 +3714,7 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
         WHERE s.video_id = $1
         GROUP BY s.user_id
       ),
-      ev AS (         -- métricas de eventos (inclui max_time_seen e último evento)
+      ev AS (         -- métricas de eventos (inclui max_time e último evento)
         SELECT
           s.user_id,
           MAX(e.video_time)                                 AS max_time_seen,
@@ -3642,21 +3725,21 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
         WHERE s.video_id = $1
         GROUP BY s.user_id
       ),
-      segs AS (       -- segmentos assistidos (limitados à duração do vídeo)
+      segs_raw AS (   -- segmentos assistidos (limitados à duração do vídeo)
         SELECT
           s.user_id,
           v.duration_seconds,
           GREATEST(0, LEAST(ws.start_sec, v.duration_seconds)) AS s,
           GREATEST(0, LEAST(ws.end_sec,   v.duration_seconds)) AS e
         FROM sessions s
-        JOIN videos v         ON v.id = s.video_id
+        JOIN videos v          ON v.id = s.video_id
         JOIN watch_segments ws ON ws.session_id = s.id
         WHERE s.video_id = $1
       ),
       ordered AS (    -- ordena segmentos por usuário e marca quebras
         SELECT *,
                LAG(e) OVER (PARTITION BY user_id ORDER BY s, e) AS prev_e
-        FROM segs
+        FROM segs_raw
       ),
       grp AS (        -- agrupa segmentos contíguos/sobrepostos
         SELECT *,
@@ -3669,10 +3752,14 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
         FROM grp
         GROUP BY user_id, duration_seconds, g
       ),
-      watched AS (    -- total efetivamente assistido por usuário
-        SELECT user_id, SUM(e - s) AS watched_sec
+      watched AS (    -- total efetivamente assistido por usuário + pico real
+        SELECT
+          user_id,
+          duration_seconds,
+          SUM(GREATEST(e - s, 0)) AS watched_sec,
+          MAX(e)                  AS max_end
         FROM merged
-        GROUP BY user_id
+        GROUP BY user_id, duration_seconds
       )
       SELECT
         b.full_name,
@@ -3680,7 +3767,8 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
         COALESCE(se.sessions, 0)              AS sessions,
         se.first_access,
         ev.last_event,
-        COALESCE(ev.max_time_seen, 0)         AS max_time_seen,
+        -- "Pico (s)" prioriza fim de segmento; senão usa max_time_seen
+        COALESCE(w.max_end, ev.max_time_seen, 0) AS max_time_seen,
         COALESCE(ev.finishes, 0)              AS finishes,
         CASE
           WHEN b.duration_seconds IS NULL OR b.duration_seconds <= 0 THEN NULL
@@ -3721,13 +3809,8 @@ app.get('/admin/relatorio/:videoId', adminRequired, async (req,res)=>{
 
     // ===== Render =====
     const rowsSummary = summary.map(r => {
-      const ended = Number(r.finishes||0) > 0;
-      let pctStr = '—';
-      if (durationSec && durationSec > 0) {
-        // pct já veio calculado no SQL; só formata
-        const pctNum = Number(r.pct ?? 0);
-        pctStr = isFinite(pctNum) ? (pctNum + '%') : '—';
-      }
+      const pctNum = Number(r.pct ?? 0);
+      const pctStr = (durationSec && durationSec > 0 && isFinite(pctNum)) ? (pctNum + '%') : '—';
       return `
         <tr>
           <td>${safe(r.full_name)||'-'}</td>

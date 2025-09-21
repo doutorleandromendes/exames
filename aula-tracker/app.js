@@ -90,11 +90,25 @@ function renderShell(title, body) {
       code{background:#0f1116;border:1px solid #2a2f39;border-radius:8px;padding:0 6px}
       .right{display:flex;gap:12px;align-items:center}
       form.inline{display:inline}
+      .admin-back-top{margin-bottom:16px}
     </style>
   </head>
-  <body><div class="wrap">${body}</div></body>
+  <body>
+    <div class="wrap">
+      <div id="admin-back" class="admin-back-top" style="display:none">
+        <a href="/aulas">← Voltar para aulas</a>
+      </div>
+      ${body}
+    </div>
+    <script>
+      if (location.pathname.startsWith('/admin')) {
+        document.getElementById('admin-back').style.display = 'block';
+      }
+    </script>
+  </body>
   </html>`;
 }
+
 const parseISO = s => (s ? new Date(s) : null);
 const safe = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmt = d => d ? new Date(d).toLocaleString('pt-BR') : '';

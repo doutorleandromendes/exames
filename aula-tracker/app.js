@@ -960,41 +960,32 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
           rows = [];
         } else {
           const params = [];
-          // matriculados no curso (respeita "ativos" e busca por nome/email)
           const condEnroll = ['cm.course_id = $1'];
           params.push(course_id);
+
           if (activeOnly) condEnroll.push('c.archived = false');
           if (q) {
             params.push(`%${String(q).toLowerCase()}%`);
             condEnroll.push(`(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length})`);
           }
 
-          // Subconjuntos de VÍDEOS alvo (1 vídeo ou todos do curso)
-          let vidsSql, vidsParams = [];
+          // Filtros de tempo (eventos e sessões)
+          let evTime = '', sessTime = '';
+          if (dt_from) { params.push(dt_from); evTime   += ` AND ev.client_ts >= $${params.length}`; }
+          if (dt_to)   { params.push(dt_to);   evTime   += ` AND ev.client_ts <= $${params.length}`; }
+          if (dt_from) { params.push(dt_from); sessTime += ` AND s.started_at >= $${params.length}`; }
+          if (dt_to)   { params.push(dt_to);   sessTime += ` AND s.started_at <= $${params.length}`; }
+
+          // CTE vids com numeração correta
+          let vidsSql;
           if (video_id) {
-            vidsParams.push(video_id);
-            vidsSql = `SELECT id, title, duration_seconds FROM videos WHERE id = $1`;
+            const vidIdx = params.length + 1;
+            vidsSql = `SELECT id, title, duration_seconds FROM videos WHERE id = $${vidIdx}`;
+            params.push(video_id);
           } else {
-            vidsParams.push(course_id);
             vidsSql = `SELECT id, title, duration_seconds FROM videos WHERE course_id = $1`;
           }
 
-          // Filtros de tempo: aplicamos em eventos (client_ts) OU em sessões (started_at) para cobrir segmentos.
-          let evTime = '', sessTime = '';
-          if (dt_from) { params.push(dt_from); evTime  += ` AND ev.client_ts   >= $${params.length}`; }
-          if (dt_to)   { params.push(dt_to);   evTime  += ` AND ev.client_ts   <= $${params.length}`; }
-          if (dt_from) { params.push(dt_from); sessTime+= ` AND s.started_at   >= $${params.length}`; }
-          if (dt_to)   { params.push(dt_to);   sessTime+= ` AND s.started_at   <= $${params.length}`; }
-
-          // Consulta final:
-          // 1) enrolled = alunos matriculados no curso
-          // 2) vids     = vídeo(s) alvo (curso inteiro ou um vídeo)
-          // 3) activity_events = quem teve evento no período nesses vídeos
-          // 4) activity_ws     = quem teve segmentos (sessão no período) nesses vídeos
-          // 5) activity        = união dos dois (qualquer atividade)
-          // 6) negativo:
-          //    - se video_id: enrolled x esse vídeo SEM activity
-          //    - senão: enrolled SEM activity em NENHUM vídeo do curso
           const sqlNeg = `
             WITH enrolled AS (
               SELECT u.id, u.full_name, u.email
@@ -1034,9 +1025,7 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
               ORDER BY e.full_name, v.title
               LIMIT 5000
             ` : `
-              ,activity_any AS (
-                SELECT DISTINCT user_id FROM activity
-              )
+              ,activity_any AS (SELECT DISTINCT user_id FROM activity)
               SELECT e.id AS user_id, e.full_name, e.email,
                      NULL::int AS video_id,
                      '(nenhuma aula do curso no período)'::text AS title,
@@ -1050,9 +1039,7 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
             `}
           `;
 
-          // Ordem dos parâmetros: params (curso/q/datas×2) + vidsParams (video_id ou course_id)
-          const allParams = params.concat(vidsParams);
-          rows = (await pool.query(sqlNeg, allParams)).rows;
+          rows = (await pool.query(sqlNeg, params)).rows;
         }
 
       } else {
@@ -1300,16 +1287,7 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
           <thead>
             <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
           </thead>
-          <tbody>${rows.length ? rows.map(r => `
-            <tr>
-              <td>${safe(r.full_name || '-')}</td>
-              <td>${safe(r.email)}</td>
-              <td>${safe(r.title || (wantMissing ? '(sem vídeo específico)' : '—'))}</td>
-              <td>${r.duration_seconds ?? '—'}</td>
-              <td>${r.max_time ?? 0}</td>
-              <td>${r.pct == null ? '—' : r.pct + '%'}</td>
-            </tr>
-          `).join('') : '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>'}</tbody>
+          <tbody>${tableBody}</tbody>
           ${totalsHtml}
         </table>
       </div>

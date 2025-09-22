@@ -923,20 +923,20 @@ app.get('/aulas', authRequired, async (req,res)=>{
     }
   });
 
-// ====== Relatórios (painel com filtros + limpeza em lote + totais + negativos) ======
+// ====== Relatórios (filtros + limpeza em lote + totais + negativos corrigido) ======
 app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
   try {
     const { course_id, video_id, q, dt_from, dt_to, show_missing } = req.query;
-    const activeOnly  = (req.query.active_only  ?? '1') === '1'; // default: ligado
+    const activeOnly  = (req.query.active_only  ?? '1') === '1'; // default ligado
     const wantMissing = (show_missing ?? '0') === '1';
 
-    // pct_min: ler cedo e validar (ignorado no negativo)
+    // pct_min (ignorado no negativo)
     const rawPctMin = req.query.pct_min;
     const pctMin = Number.isFinite(parseFloat(rawPctMin))
       ? Math.max(0, Math.min(100, parseFloat(rawPctMin)))
       : null;
 
-    // === combos (curso/aula) ===
+    // === combos ===
     const courses = (await pool.query(
       activeOnly
         ? 'SELECT id,name,slug FROM courses WHERE archived = false ORDER BY name'
@@ -947,7 +947,6 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
       ? (await pool.query('SELECT id,title FROM videos WHERE course_id=$1 ORDER BY title', [course_id])).rows
       : [];
 
-    // só busca dados agregados se tiver AO MENOS um filtro (inclui pct_min/activeOnly/negative)
     const hasAnyFilter = Boolean(course_id || video_id || q || dt_from || dt_to || pctMin != null || activeOnly || wantMissing);
 
     let rows = [];
@@ -955,93 +954,111 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
 
     if (hasAnyFilter) {
       if (wantMissing) {
-        // ================= RELATÓRIO NEGATIVO =================
+        // ================= RELATÓRIO NEGATIVO (matriculados sem atividade) =================
         if (!course_id) {
           infoMsg = 'Para relatório negativo, selecione um curso.';
           rows = [];
         } else {
           const params = [];
+          // matriculados no curso (respeita "ativos" e busca por nome/email)
           const condEnroll = ['cm.course_id = $1'];
           params.push(course_id);
-
           if (activeOnly) condEnroll.push('c.archived = false');
           if (q) {
             params.push(`%${String(q).toLowerCase()}%`);
             condEnroll.push(`(LOWER(u.full_name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length})`);
           }
 
-          // Filtros de data aplicados a eventos (período no qual NÃO houve visualização)
-          let timeCond = '';
-          if (dt_from) { params.push(dt_from); timeCond += ` AND ev.client_ts >= $${params.length}`; }
-          if (dt_to)   { params.push(dt_to);   timeCond += ` AND ev.client_ts <= $${params.length}`; }
-
-          let sqlNeg;
+          // Subconjuntos de VÍDEOS alvo (1 vídeo ou todos do curso)
+          let vidsSql, vidsParams = [];
           if (video_id) {
-            params.push(video_id);
-            sqlNeg = `
-              WITH enrolled AS (
-                SELECT u.id, u.full_name, u.email
-                  FROM course_members cm
-                  JOIN users u   ON u.id = cm.user_id
-                  JOIN courses c ON c.id = cm.course_id
-                 WHERE ${condEnroll.join(' AND ')}
-              ),
-              the_video AS (
-                SELECT id, title, duration_seconds FROM videos WHERE id = $${params.length}
-              )
+            vidsParams.push(video_id);
+            vidsSql = `SELECT id, title, duration_seconds FROM videos WHERE id = $1`;
+          } else {
+            vidsParams.push(course_id);
+            vidsSql = `SELECT id, title, duration_seconds FROM videos WHERE course_id = $1`;
+          }
+
+          // Filtros de tempo: aplicamos em eventos (client_ts) OU em sessões (started_at) para cobrir segmentos.
+          let evTime = '', sessTime = '';
+          if (dt_from) { params.push(dt_from); evTime  += ` AND ev.client_ts   >= $${params.length}`; }
+          if (dt_to)   { params.push(dt_to);   evTime  += ` AND ev.client_ts   <= $${params.length}`; }
+          if (dt_from) { params.push(dt_from); sessTime+= ` AND s.started_at   >= $${params.length}`; }
+          if (dt_to)   { params.push(dt_to);   sessTime+= ` AND s.started_at   <= $${params.length}`; }
+
+          // Consulta final:
+          // 1) enrolled = alunos matriculados no curso
+          // 2) vids     = vídeo(s) alvo (curso inteiro ou um vídeo)
+          // 3) activity_events = quem teve evento no período nesses vídeos
+          // 4) activity_ws     = quem teve segmentos (sessão no período) nesses vídeos
+          // 5) activity        = união dos dois (qualquer atividade)
+          // 6) negativo:
+          //    - se video_id: enrolled x esse vídeo SEM activity
+          //    - senão: enrolled SEM activity em NENHUM vídeo do curso
+          const sqlNeg = `
+            WITH enrolled AS (
+              SELECT u.id, u.full_name, u.email
+              FROM course_members cm
+              JOIN users   u ON u.id = cm.user_id
+              JOIN courses c ON c.id = cm.course_id
+              WHERE ${condEnroll.join(' AND ')}
+            ),
+            vids AS (${vidsSql}),
+            activity_events AS (
+              SELECT DISTINCT s.user_id, s.video_id
+              FROM sessions s
+              JOIN vids vv ON vv.id = s.video_id
+              JOIN events ev ON ev.session_id = s.id
+              WHERE 1=1 ${evTime}
+            ),
+            activity_ws AS (
+              SELECT DISTINCT s.user_id, s.video_id
+              FROM sessions s
+              JOIN vids vv ON vv.id = s.video_id
+              JOIN watch_segments ws ON ws.session_id = s.id
+              WHERE 1=1 ${sessTime}
+            ),
+            activity AS (
+              SELECT * FROM activity_events
+              UNION
+              SELECT * FROM activity_ws
+            )
+            ${video_id ? `
               SELECT e.id AS user_id, e.full_name, e.email,
                      v.id AS video_id, v.title, v.duration_seconds,
                      0::int AS max_time, 0::numeric AS pct
-                FROM enrolled e
-                CROSS JOIN the_video v
-               WHERE NOT EXISTS (
-                       SELECT 1
-                         FROM sessions s
-                         JOIN events ev ON ev.session_id = s.id
-                        WHERE s.user_id = e.id
-                          AND s.video_id = v.id
-                          ${timeCond}
-                     )
-               ORDER BY e.full_name, v.title
-               LIMIT 5000
-            `;
-          } else {
-            // curso inteiro: sem nenhum evento em nenhuma aula do curso no período
-            sqlNeg = `
-              WITH enrolled AS (
-                SELECT u.id, u.full_name, u.email
-                  FROM course_members cm
-                  JOIN users u   ON u.id = cm.user_id
-                  JOIN courses c ON c.id = cm.course_id
-                 WHERE ${condEnroll.join(' AND ')}
+              FROM enrolled e
+              CROSS JOIN vids v
+              LEFT JOIN activity a ON a.user_id = e.id AND a.video_id = v.id
+              WHERE a.user_id IS NULL
+              ORDER BY e.full_name, v.title
+              LIMIT 5000
+            ` : `
+              ,activity_any AS (
+                SELECT DISTINCT user_id FROM activity
               )
               SELECT e.id AS user_id, e.full_name, e.email,
                      NULL::int AS video_id,
                      '(nenhuma aula do curso no período)'::text AS title,
                      NULL::int AS duration_seconds,
                      0::int AS max_time, 0::numeric AS pct
-                FROM enrolled e
-               WHERE NOT EXISTS (
-                       SELECT 1
-                         FROM sessions s
-                         JOIN events  ev ON ev.session_id = s.id
-                         JOIN videos  v  ON v.id = s.video_id
-                        WHERE s.user_id = e.id
-                          AND v.course_id = $1
-                          ${timeCond}
-                     )
-               ORDER BY e.full_name
-               LIMIT 5000
-            `;
-          }
+              FROM enrolled e
+              LEFT JOIN activity_any a ON a.user_id = e.id
+              WHERE a.user_id IS NULL
+              ORDER BY e.full_name
+              LIMIT 5000
+            `}
+          `;
 
-          rows = (await pool.query(sqlNeg, params)).rows;
+          // Ordem dos parâmetros: params (curso/q/datas×2) + vidsParams (video_id ou course_id)
+          const allParams = params.concat(vidsParams);
+          rows = (await pool.query(sqlNeg, allParams)).rows;
         }
 
       } else {
-        // ============== RELATÓRIO POSITIVO (ASSISTIRAM) ==============
-        const whereBase = [];   // filtros que valem para s/u/v/c
-        const whereTime = [];   // filtros que valem para eventos (por client_ts)
+        // ================= RELATÓRIO POSITIVO (assistiram; com segmentos) =================
+        const whereBase = [];
+        const whereTime = [];
         const params = [];
 
         if (course_id) { params.push(course_id); whereBase.push(`v.course_id = $${params.length}`); }
@@ -1058,22 +1075,13 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
         const baseSql = whereBase.length ? `WHERE ${whereBase.join(' AND ')}` : '';
         const timeSql =
           whereTime.length
-            ? `AND EXISTS (
-                 SELECT 1 FROM events e
-                 WHERE e.session_id = s.id
-                   AND ${whereTime.join(' AND ')}
-               )`
+            ? `AND EXISTS (SELECT 1 FROM events e WHERE e.session_id = s.id AND ${whereTime.join(' AND ')})`
             : '';
 
         const sql = `
           WITH base AS (
-            SELECT
-              u.id   AS user_id,
-              u.full_name,
-              u.email,
-              v.id   AS video_id,
-              v.title,
-              v.duration_seconds
+            SELECT u.id AS user_id, u.full_name, u.email,
+                   v.id AS video_id, v.title, v.duration_seconds
             FROM sessions s
             JOIN users   u ON u.id = s.user_id
             JOIN videos  v ON v.id = s.video_id
@@ -1082,51 +1090,40 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
             ${timeSql}
             GROUP BY u.id, u.full_name, u.email, v.id, v.title, v.duration_seconds
           ),
-          segs AS (  -- segmentos reais vistos (limitados ao [0, duração])
-            SELECT
-              s.user_id,
-              s.video_id,
-              v.duration_seconds,
-              GREATEST(0, LEAST(ws.start_sec, v.duration_seconds)) AS s,
-              GREATEST(0, LEAST(ws.end_sec,   v.duration_seconds)) AS e
+          segs AS (
+            SELECT s.user_id, s.video_id, v.duration_seconds,
+                   GREATEST(0, LEAST(ws.start_sec, v.duration_seconds)) AS s,
+                   GREATEST(0, LEAST(ws.end_sec,   v.duration_seconds)) AS e
             FROM sessions s
-            JOIN videos v         ON v.id = s.video_id
-            JOIN courses c        ON c.id = v.course_id
+            JOIN videos v          ON v.id = s.video_id
+            JOIN courses c         ON c.id = v.course_id
             JOIN watch_segments ws ON ws.session_id = s.id
             ${baseSql}
             ${timeSql}
           ),
           ordered AS (
-            SELECT *,
-                   LAG(e) OVER (PARTITION BY user_id, video_id ORDER BY s, e) AS prev_e
+            SELECT *, LAG(e) OVER (PARTITION BY user_id, video_id ORDER BY s, e) AS prev_e
             FROM segs
           ),
           grp AS (
-            SELECT *,
-                   SUM(CASE WHEN prev_e IS NULL OR s > prev_e THEN 1 ELSE 0 END)
-                   OVER (PARTITION BY user_id, video_id ORDER BY s, e) AS g
+            SELECT *, SUM(CASE WHEN prev_e IS NULL OR s > prev_e THEN 1 ELSE 0 END)
+              OVER (PARTITION BY user_id, video_id ORDER BY s, e) AS g
             FROM ordered
           ),
-          merged AS (  -- comprime sobreposições por (user,video)
+          merged AS (
             SELECT user_id, video_id, duration_seconds, MIN(s) AS s, MAX(e) AS e
             FROM grp
             GROUP BY user_id, video_id, duration_seconds, g
           ),
           watched AS (
-            SELECT
-              user_id,
-              video_id,
-              duration_seconds,
-              SUM(GREATEST(e - s, 0)) AS watched_sec,
-              MAX(e)                  AS max_end
+            SELECT user_id, video_id, duration_seconds,
+                   SUM(GREATEST(e - s, 0)) AS watched_sec,
+                   MAX(e) AS max_end
             FROM merged
             GROUP BY user_id, video_id, duration_seconds
           ),
-          ev AS (       -- fallback a partir de eventos (se não houver segmentos)
-            SELECT
-              s.user_id,
-              s.video_id,
-              MAX(e.video_time) AS max_time
+          ev AS (
+            SELECT s.user_id, s.video_id, MAX(e.video_time) AS max_time
             FROM sessions s
             JOIN events e ON e.session_id = s.id
             JOIN videos v ON v.id = s.video_id
@@ -1136,82 +1133,69 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
             GROUP BY s.user_id, s.video_id
           ),
           enriched AS (
-            SELECT
-              b.user_id, b.full_name, b.email,
-              b.video_id, b.title, b.duration_seconds,
-              COALESCE(w.max_end, ev.max_time, 0) AS max_pos,
-              CASE
-                WHEN b.duration_seconds IS NULL OR b.duration_seconds <= 0 THEN NULL
-                WHEN w.watched_sec IS NOT NULL THEN
-                  LEAST(w.watched_sec, b.duration_seconds) * 100.0 / b.duration_seconds
-                WHEN ev.max_time IS NOT NULL THEN
-                  LEAST(GREATEST(ev.max_time,0), b.duration_seconds) * 100.0 / b.duration_seconds
-                ELSE 0
-              END AS pct
+            SELECT b.user_id, b.full_name, b.email,
+                   b.video_id, b.title, b.duration_seconds,
+                   COALESCE(w.max_end, ev.max_time, 0) AS max_pos,
+                   CASE
+                     WHEN b.duration_seconds IS NULL OR b.duration_seconds <= 0 THEN NULL
+                     WHEN w.watched_sec IS NOT NULL THEN LEAST(w.watched_sec, b.duration_seconds) * 100.0 / b.duration_seconds
+                     WHEN ev.max_time    IS NOT NULL THEN LEAST(GREATEST(ev.max_time,0), b.duration_seconds) * 100.0 / b.duration_seconds
+                     ELSE 0
+                   END AS pct
             FROM base b
             LEFT JOIN watched w ON w.user_id = b.user_id AND w.video_id = b.video_id
             LEFT JOIN ev      ev ON ev.user_id = b.user_id AND ev.video_id = b.video_id
           )
-          SELECT
-            user_id, full_name, email, video_id, title, duration_seconds,
-            max_pos AS max_time,
-            CASE WHEN pct IS NULL THEN NULL ELSE ROUND(pct::numeric, 1) END AS pct
+          SELECT user_id, full_name, email, video_id, title, duration_seconds,
+                 max_pos AS max_time,
+                 CASE WHEN pct IS NULL THEN NULL ELSE ROUND(pct::numeric, 1) END AS pct
           FROM enriched
           ${pctMin != null ? `WHERE pct IS NOT NULL AND pct >= $${params.length + 1}` : ``}
           ORDER BY full_name, title
           LIMIT 5000
         `;
-
         if (pctMin != null) params.push(pctMin);
         rows = (await pool.query(sql, params)).rows;
       }
     }
 
-    // vídeos distintos do resultado (para limpeza em lote) — só no positivo
+    // vídeos distintos (para limpeza) só no positivo
     const distinctVideos = [];
     if (hasAnyFilter && rows.length && !wantMissing) {
       const seen = new Set();
-      for (const r of rows) {
-        if (r.video_id && !seen.has(r.video_id)) {
-          seen.add(r.video_id);
-          distinctVideos.push({ id: r.video_id, title: r.title });
-        }
+      for (const r of rows) if (r.video_id && !seen.has(r.video_id)) {
+        seen.add(r.video_id);
+        distinctVideos.push({ id: r.video_id, title: r.title });
       }
     }
 
     // === Totais ===
-    const totalRegistros = rows.length;
-    const alunosDistintos = new Set(rows.map(r => r.user_id)).size;
+    const totalRegistros   = rows.length;
+    const alunosDistintos  = new Set(rows.map(r => r.user_id)).size;
     const pctVals = (!wantMissing)
       ? rows.map(r => (typeof r.pct === 'number' ? r.pct : null)).filter(v => v != null)
-      : []; // no negativo, pct=0 é “não assistiu”; média não é muito útil
+      : [];
     const mediaPct = (pctVals.length ? (pctVals.reduce((a,b)=>a+b,0) / pctVals.length).toFixed(1) : null);
 
-    const totalsHtml = totalRegistros
-      ? `
-        <tfoot>
-          <tr style="font-weight:bold;background:#20242b">
-            <td colspan="3">Totais</td>
-            <td colspan="2">${totalRegistros} registro(s) · ${alunosDistintos} aluno(s)</td>
-            <td>${(!wantMissing && mediaPct != null) ? `Média: ${mediaPct}%` : '—'}</td>
-          </tr>
-        </tfoot>
-      `
-      : '';
+    const totalsHtml = totalRegistros ? `
+      <tfoot>
+        <tr style="font-weight:bold;background:#20242b">
+          <td colspan="3">Totais</td>
+          <td colspan="2">${totalRegistros} registro(s) · ${alunosDistintos} aluno(s)</td>
+          <td>${(!wantMissing && mediaPct != null) ? `Média: ${mediaPct}%` : '—'}</td>
+        </tr>
+      </tfoot>` : '';
 
     // combos HTML
     const courseOpts = ['<option value="">(Todos)</option>']
       .concat(courses.map(c =>
         `<option value="${c.id}" ${String(c.id) === String(course_id) ? 'selected' : ''}>${safe(c.name)}</option>`
-      ))
-      .join('');
+      )).join('');
     const videoOpts = ['<option value="">(Todos)</option>']
       .concat(videos.map(v =>
         `<option value="${v.id}" ${String(v.id) === String(video_id) ? 'selected' : ''}>${safe(v.title)}</option>`
-      ))
-      .join('');
+      )).join('');
 
-    // tabela
     const tableBody = hasAnyFilter
       ? (rows.map(r => `
            <tr>
@@ -1225,7 +1209,7 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
          `).join('') || '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>')
       : '<tr><td colspan="6" class="mut">Aplique algum filtro e clique em “Aplicar filtros”.</td></tr>';
 
-    // link do CSV (só faz sentido no positivo)
+    // CSV (só no positivo)
     const csvLink = `/admin/relatorios.csv?` + new URLSearchParams({
       course_id: course_id || '',
       video_id:  video_id  || '',
@@ -1254,7 +1238,7 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
             </div>
             <div>
               <label>Aula (vídeo)</label>
-              <select name="video_id"${wantMissing ? ' disabled' : ''}>${videoOpts}</select>
+              <select name="video_id"${wantMissing ? '' : ''}>${videoOpts}</select>
             </div>
             <div style="display:flex;align-items:center;gap:10px;margin-top:22px;flex-wrap:wrap">
               <label style="display:flex;align-items:center;gap:6px;margin:0">
@@ -1316,7 +1300,16 @@ app.get('/admin/relatorios', authRequired, adminRequired, async (req, res) => {
           <thead>
             <tr><th>Nome</th><th>Email</th><th>Vídeo</th><th>Duração (s)</th><th>Max pos (s)</th><th>% assistido</th></tr>
           </thead>
-          <tbody>${tableBody}</tbody>
+          <tbody>${rows.length ? rows.map(r => `
+            <tr>
+              <td>${safe(r.full_name || '-')}</td>
+              <td>${safe(r.email)}</td>
+              <td>${safe(r.title || (wantMissing ? '(sem vídeo específico)' : '—'))}</td>
+              <td>${r.duration_seconds ?? '—'}</td>
+              <td>${r.max_time ?? 0}</td>
+              <td>${r.pct == null ? '—' : r.pct + '%'}</td>
+            </tr>
+          `).join('') : '<tr><td colspan="6" class="mut">Sem dados para os filtros.</td></tr>'}</tbody>
           ${totalsHtml}
         </table>
       </div>

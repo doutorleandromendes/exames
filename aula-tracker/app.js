@@ -117,7 +117,6 @@ function renderShell(title, body) {
 }
 
 const parseISO = s => (s ? new Date(s) : null);
-const safe = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmt = d => d ? new Date(d).toLocaleString('pt-BR') : '';
 const fmtDTLocal = d => d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
 
@@ -3661,7 +3660,6 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
       [videoId]
     );
     const pdfList = pdfFiles.map(f => {
-      const safeName = (f.label || 'material').replace(/["]+/g, '').trim() || 'material';
       const href = generateSignedUrlForKey(f.r2_key, {
         contentType: 'application/pdf',
         disposition: `attachment; filename="${encodeURIComponent(safeName)}.pdf"`

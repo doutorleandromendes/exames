@@ -67,6 +67,13 @@ async function sendWelcomeAndMark({ userId, email, name, login, plain }) {
 
 // ====== HTML helpers ======
 
+function safe(s){
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+
 function renderShell(title, body) {
   return `<!doctype html>
   <html lang="pt-br">
@@ -1388,7 +1395,7 @@ app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
     const addVideoFormHtml = `
       <div class="card">
         <h2>Adicionar nova aula ao curso</h2>
-        <form method="POST" action="/admin/cursos/${safe(curso.id)}/videos/add" class="mt2">
+        <form method="POST" action="/admin/cursos/${curso.id}/videos/add" class="mt2">
           <div class="row">
             <div>
               <label>Título</label>
@@ -1696,7 +1703,7 @@ app.post('/admin/cursos/:id/videos/add', authRequired, adminRequired, async (req
       <div class="card">
         <h1>Falha ao adicionar aula</h1>
         <p class="mut">${safe(err.message || String(err))}</p>
-        <div class="mt"><a href="/admin/cursos/${safe(req.params.id)}">Voltar</a></div>
+        <div class="mt"><a href="/admin/cursos/${req.params.id}">Voltar</a></div>
       </div>
     `));
   }
@@ -1719,7 +1726,7 @@ app.post('/admin/cursos/:id/videos/:vid/delete', authRequired, adminRequired, as
       <div class="card">
         <h1>Falha ao remover aula</h1>
         <p class="mut">${safe(err.message || String(err))}</p>
-        <div class="mt"><a href="/admin/cursos/${safe(req.params.id)}">Voltar</a></div>
+        <div class="mt"><a href="/admin/cursos/${req.params.id}">Voltar</a></div>
       </div>
     `));
   }

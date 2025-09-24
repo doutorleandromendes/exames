@@ -1366,254 +1366,364 @@ app.get('/debug/signed/:id', authRequired, async (req,res)=>{
 // ====== Admin: Cursos (listar/criar/editar) ======
 // Página de gerenciamento do curso: lista vídeos, permite editar várias datas e ordem de uma vez
 app.get('/admin/cursos/:id', adminRequired, async (req, res) => {
-    const courseId = parseInt(req.params.id, 10);
-    try {
-      const { rows: cRows } = await pool.query(
-        'SELECT id, name, slug, archived FROM courses WHERE id=$1',
-        [courseId]
-      );
-      if (!cRows[0]) {
-        return res.send(renderShell('Curso', `<div class="card"><h1>Curso não encontrado</h1><p><a href="/admin/cursos">Voltar</a></p></div>`));
-      }
-      const curso = cRows[0];
-  
-      const { rows: videos } = await pool.query(
-        `SELECT id, title, r2_key, duration_seconds, available_from, sort_index
-           FROM videos
-          WHERE course_id = $1
-          ORDER BY sort_index NULLS LAST, id ASC`,
-        [courseId]
-      );
-  
-      // --- NOVO: lista alunos matriculados neste curso ---
-      const { rows: members } = await pool.query(
-        `SELECT u.id AS user_id, u.full_name, u.email,
-                cm.expires_at AS member_expires_at
-           FROM course_members cm
-           JOIN users u ON u.id = cm.user_id
-          WHERE cm.course_id = $1
-          ORDER BY u.full_name NULLS LAST, u.email`,
-        [courseId]
-      );
-  
-      const membersRows = members.map(m => `
-        <tr>
-          <td>${safe(m.full_name) || '-'}</td>
-          <td>${safe(m.email)}</td>
-          <td>${fmt(m.member_expires_at) || '<span class="mut">—</span>'}</td>
-          <td style="white-space:nowrap">
-            <form class="inline" method="POST" action="/admin/cursos/${courseId}/matriculas/${m.user_id}/validade" style="display:inline-block;margin-right:8px">
-              <input type="datetime-local" name="member_expires_at" style="max-width:220px">
-              <button>Atualizar validade</button>
-            </form>
-            · <a href="/admin/alunos/${m.user_id}/relatorio?course_id=${courseId}">relatório do aluno</a>
-          </td>
-        </tr>
-      `).join('');
-  
-      // Converte timestamptz -> formato aceito por <input type="datetime-local"> (YYYY-MM-DDTHH:mm, sem TZ)
-      const tsToLocalInput = (ts) => {
-        if (!ts) return '';
-        const d = new Date(ts);              // interpreta o que veio do banco
-        if (isNaN(d)) return '';
-        const pad = (n) => String(n).padStart(2,'0');
-        const yyyy = d.getFullYear();
-        const mm   = pad(d.getMonth()+1);
-        const dd   = pad(d.getDate());
-        const HH   = pad(d.getHours());
-        const MM   = pad(d.getMinutes());
-        return `${yyyy}-${mm}-${dd}T${HH}:${MM}`;
-      };
-  
-      const rowsHtml = videos.map((v, idx) => `
-        <tr data-row-index="${idx}">
-          <td style="white-space:nowrap">
-            <button type="button" class="btn-up"   style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">↑</button>
-            <button type="button" class="btn-down" style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">↓</button>
-          </td>
-          <td>${v.id}<input type="hidden" name="video_id[]" value="${v.id}"></td>
-          <td>${safe(v.title)}</td>
-          <td><code>${safe(v.r2_key)}</code></td>
-          <td>${v.duration_seconds ?? '—'}</td>
-          <td><input type="datetime-local" name="available_from[]" value="${tsToLocalInput(v.available_from)}"></td>
-          <td><input type="number" name="sort_index[]" value="${v.sort_index ?? ''}" min="0" step="1" style="width:90px"></td>
-        </tr>
-      `).join('');
-  
-      const html = `
-        <div class="card">
-          <h1>Gerenciar Curso: ${safe(curso.name)} ${curso.archived ? '<span class="mut">(arquivado)</span>' : ''}</h1>
-          <p class="mut">Slug: <code>${safe(curso.slug)}</code></p>
-          <p><a href="/admin/cursos">Voltar</a></p>
-  
-          <form method="POST" action="/admin/cursos/${curso.id}/bulk" id="bulkForm">
-            <div class="row">
-              <div>
-                <label>Intervalo sugerido</label>
-                <select id="intervalSelect" name="__interval">
-                  <option value="P7D">+7 dias</option>
-                  <option value="P15D">+15 dias</option>
-                  <option value="P30D">+30 dias</option>
-                  <option value="custom">Personalizado…</option>
-                </select>
-              </div>
-              <div id="customDaysWrap" style="display:none">
-                <label>Dias (personalizado)</label>
-                <input type="number" id="customDays" min="1" step="1" placeholder="ex.: 10">
-              </div>
+  const courseId = parseInt(req.params.id, 10);
+  try {
+    const { rows: cRows } = await pool.query(
+      'SELECT id, name, slug, archived FROM courses WHERE id=$1',
+      [courseId]
+    );
+    if (!cRows[0]) {
+      return res.send(renderShell('Curso', `<div class="card"><h1>Curso não encontrado</h1><p><a href="/admin/cursos">Voltar</a></p></div>`));
+    }
+    const curso = cRows[0];
+
+    const { rows: videos } = await pool.query(
+      `SELECT id, title, r2_key, duration_seconds, available_from, sort_index
+         FROM videos
+        WHERE course_id = $1
+        ORDER BY sort_index NULLS LAST, id ASC`,
+      [courseId]
+    );
+
+    const addVideoFormHtml = `
+      <div class="card">
+        <h2>Adicionar nova aula ao curso</h2>
+        <form method="POST" action="/admin/cursos/${safe(curso.id)}/videos/add" class="mt2">
+          <div class="row">
+            <div>
+              <label>Título</label>
+              <input name="title" required placeholder="Ex.: Aula 05 — Antibioticoterapia">
             </div>
-  
-            <div class="mt2">
-              <button type="button" id="btnAutofill">Autopreencher datas a partir da primeira</button>
-              <button type="button" id="btnNormalizeOrder">Reindexar ordem 10,20,30…</button>
+            <div>
+              <label>Duração (segundos)</label>
+              <input name="duration_seconds" type="number" min="0" placeholder="Ex.: 1800">
             </div>
-  
-            <table class="mt2" id="videosTable">
-              <thead>
-                <tr>
-                  <th>Ordem</th>
-                  <th>ID</th>
-                  <th>Título</th>
-                  <th>R2 key</th>
-                  <th>Duração (s)</th>
-                  <th>Disponível a partir</th>
-                  <th>sort_index</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rowsHtml || '<tr><td colspan="7" class="mut">Nenhum vídeo neste curso.</td></tr>'}
-              </tbody>
-            </table>
-  
-            <div class="mt2">
-              <button type="submit">Salvar alterações</button>
+          </div>
+          <div class="row">
+            <div>
+              <label>R2 Key (vídeo)</label>
+              <input name="r2_key" required placeholder="Ex.: videos/2025/aula05.mp4">
+              <p class="mut">A URL assinada é gerada em tempo de execução; aqui vai apenas a <b>R2 key</b>.</p>
             </div>
+            <div>
+              <label>Disponível a partir de</label>
+              <input name="available_from" type="datetime-local" placeholder="opcional">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Ordem (sort_index)</label>
+              <input name="sort_index" type="number" placeholder="opcional">
+            </div>
+          </div>
+          <button class="mt">Adicionar aula</button>
+        </form>
+      </div>
+    `;
+
+    // --- lista alunos matriculados neste curso ---
+    const { rows: members } = await pool.query(
+      `SELECT u.id AS user_id, u.full_name, u.email,
+              cm.expires_at AS member_expires_at
+         FROM course_members cm
+         JOIN users u ON u.id = cm.user_id
+        WHERE cm.course_id = $1
+        ORDER BY u.full_name NULLS LAST, u.email`,
+      [courseId]
+    );
+
+    const membersRows = members.map(m => `
+      <tr>
+        <td>${safe(m.full_name) || '-'}</td>
+        <td>${safe(m.email)}</td>
+        <td>${fmt(m.member_expires_at) || '<span class="mut">—</span>'}</td>
+        <td style="white-space:nowrap">
+          <form class="inline" method="POST" action="/admin/cursos/${courseId}/matriculas/${m.user_id}/validade" style="display:inline-block;margin-right:8px">
+            <input type="datetime-local" name="member_expires_at" style="max-width:220px">
+            <button>Atualizar validade</button>
           </form>
+          · <a href="/admin/alunos/${m.user_id}/relatorio?course_id=${courseId}">relatório do aluno</a>
+        </td>
+      </tr>
+    `).join('');
+
+    // Converte timestamptz -> <input type="datetime-local">
+    const tsToLocalInput = (ts) => {
+      if (!ts) return '';
+      const d = new Date(ts);
+      if (isNaN(d)) return '';
+      const pad = (n) => String(n).padStart(2,'0');
+      const yyyy = d.getFullYear();
+      const mm   = pad(d.getMonth()+1);
+      const dd   = pad(d.getDate());
+      const HH   = pad(d.getHours());
+      const MM   = pad(d.getMinutes());
+      return `${yyyy}-${mm}-${dd}T${HH}:${MM}`;
+    };
+
+    const rowsHtml = videos.map((v, idx) => `
+      <tr data-row-index="${idx}">
+        <td style="white-space:nowrap">
+          <button type="button" class="btn-up"   style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">↑</button>
+          <button type="button" class="btn-down" style="background:none;border:0;color:#007bff;cursor:pointer;padding:0">↓</button>
+        </td>
+        <td>${v.id}<input type="hidden" name="video_id[]" value="${v.id}"></td>
+        <td>${safe(v.title)}</td>
+        <td><code>${safe(v.r2_key)}</code></td>
+        <td>${v.duration_seconds ?? '—'}</td>
+        <td><input type="datetime-local" name="available_from[]" value="${tsToLocalInput(v.available_from)}"></td>
+        <td><input type="number" name="sort_index[]" value="${v.sort_index ?? ''}" min="0" step="1" style="width:90px"></td>
+        <td style="white-space:nowrap">
+          <form method="POST"
+                action="/admin/cursos/${curso.id}/videos/${v.id}/delete"
+                class="inline"
+                onsubmit="return confirm('Excluir a aula &quot;${safe(v.title)}&quot;? Isso removerá relatórios desse vídeo.');">
+            <button class="linkbutton" type="submit">Excluir</button>
+          </form>
+        </td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div class="card">
+        <div class="right" style="justify-content:space-between">
+          <h1>Gerenciar Curso: ${safe(curso.name)} ${curso.archived ? '<span class="mut">(arquivado)</span>' : ''}</h1>
+          <div><a href="/admin/cursos">Voltar</a></div>
         </div>
-  
-        <div class="card">
-          <h2 class="mt0">Alunos matriculados neste curso</h2>
-          <table>
+        <p class="mut">Slug: <code>${safe(curso.slug)}</code></p>
+
+        ${addVideoFormHtml}
+
+        <form method="POST" action="/admin/cursos/${curso.id}/bulk" id="bulkForm">
+          <div class="row">
+            <div>
+              <label>Intervalo sugerido</label>
+              <select id="intervalSelect" name="__interval">
+                <option value="P7D">+7 dias</option>
+                <option value="P15D">+15 dias</option>
+                <option value="P30D">+30 dias</option>
+                <option value="custom">Personalizado…</option>
+              </select>
+            </div>
+            <div id="customDaysWrap" style="display:none">
+              <label>Dias (personalizado)</label>
+              <input type="number" id="customDays" min="1" step="1" placeholder="ex.: 10">
+            </div>
+          </div>
+
+          <div class="mt2">
+            <button type="button" id="btnAutofill">Autopreencher datas a partir da primeira</button>
+            <button type="button" id="btnNormalizeOrder">Reindexar ordem 10,20,30…</button>
+          </div>
+
+          <table class="mt2" id="videosTable">
             <thead>
-              <tr><th>Nome</th><th>Email</th><th>Validade da matrícula</th><th>Ações</th></tr>
+              <tr>
+                <th>Ordem</th>
+                <th>ID</th>
+                <th>Título</th>
+                <th>R2 key</th>
+                <th>Duração (s)</th>
+                <th>Disponível a partir</th>
+                <th>sort_index</th>
+                <th>Ações</th>
+              </tr>
             </thead>
             <tbody>
-              ${membersRows || '<tr><td colspan="4" class="mut">Nenhum aluno matriculado.</td></tr>'}
+              ${rowsHtml || '<tr><td colspan="8" class="mut">Nenhum vídeo neste curso.</td></tr>'}
             </tbody>
           </table>
-  
-          <h3 class="mt2">Adicionar aluno manualmente a este curso</h3>
-          <form method="POST" action="/admin/cursos/${curso.id}/alunos/add">
-            <div class="row">
-              <div>
-                <label>Nome completo</label>
-                <input name="full_name" required>
-                <label>Senha inicial</label>
-                <input name="password" type="text" placeholder="ex.: Abc123456" required>
-                <label>Validade (usuário, opcional)</label>
-                <input name="user_expires_at" type="datetime-local">
-              </div>
-              <div>
-                <label>Email</label>
-                <input name="email" type="email" required>
-                <label>Validade (matrícula no curso, opcional)</label>
-                <input name="member_expires_at" type="datetime-local">
-                <div class="mut" style="margin-top:8px">Se o e-mail já existir, o aluno é reaproveitado e apenas a matrícula é criada/atualizada.</div>
-              </div>
+
+          <div class="mt2">
+            <button type="submit">Salvar alterações</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2 class="mt0">Alunos matriculados neste curso</h2>
+        <table>
+          <thead>
+            <tr><th>Nome</th><th>Email</th><th>Validade da matrícula</th><th>Ações</th></tr>
+          </thead>
+          <tbody>
+            ${membersRows || '<tr><td colspan="4" class="mut">Nenhum aluno matriculado.</td></tr>'}
+          </tbody>
+        </table>
+
+        <h3 class="mt2">Adicionar aluno manualmente a este curso</h3>
+        <form method="POST" action="/admin/cursos/${curso.id}/alunos/add">
+          <div class="row">
+            <div>
+              <label>Nome completo</label>
+              <input name="full_name" required>
+              <label>Senha inicial</label>
+              <input name="password" type="text" placeholder="ex.: Abc123456" required>
+              <label>Validade (usuário, opcional)</label>
+              <input name="user_expires_at" type="datetime-local">
             </div>
-            <button class="mt">Adicionar aluno ao curso</button>
-          </form>
-        </div>
-  
-        <script>
-          (function(){
-            const table = document.getElementById('videosTable').querySelector('tbody');
-            const intervalSelect = document.getElementById('intervalSelect');
-            const customWrap = document.getElementById('customDaysWrap');
-            const customDays = document.getElementById('customDays');
-  
-            intervalSelect.addEventListener('change', ()=>{
-              customWrap.style.display = intervalSelect.value === 'custom' ? '' : 'none';
+            <div>
+              <label>Email</label>
+              <input name="email" type="email" required>
+              <label>Validade (matrícula no curso, opcional)</label>
+              <input name="member_expires_at" type="datetime-local">
+              <div class="mut" style="margin-top:8px">Se o e-mail já existir, o aluno é reaproveitado e apenas a matrícula é criada/atualizada.</div>
+            </div>
+          </div>
+          <button class="mt">Adicionar aluno ao curso</button>
+        </form>
+      </div>
+
+      <style>.linkbutton{background:none;border:0;color:#8fb6ff;cursor:pointer;padding:0}</style>
+      <script>
+        (function(){
+          const table = document.getElementById('videosTable').querySelector('tbody');
+          const intervalSelect = document.getElementById('intervalSelect');
+          const customWrap = document.getElementById('customDaysWrap');
+          const customDays = document.getElementById('customDays');
+
+          intervalSelect.addEventListener('change', ()=>{
+            customWrap.style.display = intervalSelect.value === 'custom' ? '' : 'none';
+          });
+
+          function swapRows(i, j){
+            const rows = Array.from(table.querySelectorAll('tr'));
+            if (i < 0 || j < 0 || i >= rows.length || j >= rows.length) return;
+            if (i === j) return;
+            if (j > i) {
+              table.insertBefore(rows[j], rows[i]);
+            } else {
+              table.insertBefore(rows[i], rows[j]);
+            }
+          }
+
+          table.addEventListener('click', (ev)=>{
+            const tr = ev.target.closest('tr');
+            if (!tr) return;
+            const rows = Array.from(table.querySelectorAll('tr'));
+            const idx = rows.indexOf(tr);
+
+            if (ev.target.classList.contains('btn-up'))   swapRows(idx, idx-1);
+            if (ev.target.classList.contains('btn-down')) swapRows(idx+1, idx);
+          });
+
+          document.getElementById('btnNormalizeOrder').addEventListener('click', ()=>{
+            const rows = Array.from(table.querySelectorAll('tr'));
+            let v = 10;
+            rows.forEach(tr=>{
+              const si = tr.querySelector('input[name="sort_index[]"]');
+              if (si) { si.value = v; v += 10; }
             });
-  
-            function swapRows(i, j){
-              const rows = Array.from(table.querySelectorAll('tr'));
-              if (i < 0 || j < 0 || i >= rows.length || j >= rows.length) return;
-              if (i === j) return;
-              if (j > i) {
-                table.insertBefore(rows[j], rows[i]);
-              } else {
-                table.insertBefore(rows[i], rows[j]);
+          });
+
+          document.getElementById('btnAutofill').addEventListener('click', ()=>{
+            const rows = Array.from(table.querySelectorAll('tr'));
+            if (rows.length === 0) return;
+
+            const firstInput = rows[0].querySelector('input[name="available_from[]"]');
+            if (!firstInput || !firstInput.value) {
+              alert('Preencha a data do primeiro vídeo antes de autopreencher.');
+              return;
+            }
+            let base = new Date(firstInput.value);
+            if (isNaN(base.getTime())) { alert('Data inicial inválida.'); return; }
+
+            let days = 7;
+            const val = intervalSelect.value;
+            if (val === 'P7D') days = 7;
+            else if (val === 'P15D') days = 15;
+            else if (val === 'P30D') days = 30;
+            else if (val === 'custom') {
+              const n = parseInt(customDays.value,10);
+              if (!n || n < 1) { alert('Informe um número de dias válido.'); return; }
+              days = n;
+            }
+
+            let current = new Date(base.getTime());
+            for (let i=1;i<rows.length;i++){
+              current = new Date(current.getTime());
+              current.setDate(current.getDate() + days);
+              const inp = rows[i].querySelector('input[name="available_from[]"]');
+              if (inp) {
+                const yyyy = current.getFullYear().toString().padStart(4,'0');
+                const mm = (current.getMonth()+1).toString().padStart(2,'0');
+                const dd = current.getDate().toString().padStart(2,'0');
+                const hh = current.getHours().toString().padStart(2,'0');
+                const mi = current.getMinutes().toString().padStart(2,'0');
+                inp.value = \`\${yyyy}-\${mm}-\${dd}T\${hh}:\${mi}\`;
               }
             }
-  
-            table.addEventListener('click', (ev)=>{
-              const tr = ev.target.closest('tr');
-              if (!tr) return;
-              const rows = Array.from(table.querySelectorAll('tr'));
-              const idx = rows.indexOf(tr);
-  
-              if (ev.target.classList.contains('btn-up'))   swapRows(idx, idx-1);
-              if (ev.target.classList.contains('btn-down')) swapRows(idx+1, idx);
-            });
-  
-            document.getElementById('btnNormalizeOrder').addEventListener('click', ()=>{
-              const rows = Array.from(table.querySelectorAll('tr'));
-              let v = 10;
-              rows.forEach(tr=>{
-                const si = tr.querySelector('input[name="sort_index[]"]');
-                if (si) { si.value = v; v += 10; }
-              });
-            });
-  
-            document.getElementById('btnAutofill').addEventListener('click', ()=>{
-              const rows = Array.from(table.querySelectorAll('tr'));
-              if (rows.length === 0) return;
-  
-              const firstInput = rows[0].querySelector('input[name="available_from[]"]');
-              if (!firstInput || !firstInput.value) {
-                alert('Preencha a data do primeiro vídeo antes de autopreencher.');
-                return;
-              }
-              let base = new Date(firstInput.value);
-              if (isNaN(base.getTime())) { alert('Data inicial inválida.'); return; }
-  
-              let days = 7;
-              const val = intervalSelect.value;
-              if (val === 'P7D') days = 7;
-              else if (val === 'P15D') days = 15;
-              else if (val === 'P30D') days = 30;
-              else if (val === 'custom') {
-                const n = parseInt(customDays.value,10);
-                if (!n || n < 1) { alert('Informe um número de dias válido.'); return; }
-                days = n;
-              }
-  
-              let current = new Date(base.getTime());
-              for (let i=1;i<rows.length;i++){
-                current = new Date(current.getTime());
-                current.setDate(current.getDate() + days);
-                const inp = rows[i].querySelector('input[name="available_from[]"]');
-                if (inp) {
-                  const yyyy = current.getFullYear().toString().padStart(4,'0');
-                  const mm = (current.getMonth()+1).toString().padStart(2,'0');
-                  const dd = current.getDate().toString().padStart(2,'0');
-                  const hh = current.getHours().toString().padStart(2,'0');
-                  const mi = current.getMinutes().toString().padStart(2,'0');
-                  inp.value = \`\${yyyy}-\${mm}-\${dd}T\${hh}:\${mi}\`;
-                }
-              }
-            });
-          })();
-        </script>
-      `;
-      res.send(renderShell('Gerenciar Curso', html));
-    } catch (err) {
-      console.error('ADMIN COURSE MANAGE ERROR', err);
-      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${err.message||err}</p></div>`));
-    }
-  });
+          });
+        })();
+      </script>
+    `;
 
+    res.send(renderShell('Gerenciar Curso', html));
+  } catch (err) {
+    console.error('ADMIN COURSE MANAGE ERROR', err);
+    res.status(500).send(renderShell('Erro', `<div class="card"><h1>Falha ao carregar</h1><p class="mut">${safe(err.message||err)}</p></div>`));
+  }
+});
+
+// ====== Admin: adicionar aula manualmente a um curso ======
+app.post('/admin/cursos/:id/videos/add', authRequired, adminRequired, async (req, res) => {
+  const courseId = parseInt(req.params.id, 10);
+  try {
+    let { title, r2_key, duration_seconds, available_from, sort_index } = req.body || {};
+    if (!courseId || !r2_key || !title) {
+      return res.status(400).send('Título e R2 key são obrigatórios');
+    }
+
+    // Normalizações
+    title = String(title).trim();
+    r2_key = String(r2_key).trim();
+    duration_seconds = duration_seconds ? parseInt(duration_seconds, 10) : null;
+    sort_index = (sort_index !== '' && sort_index != null) ? parseInt(sort_index, 10) : null;
+
+    // available_from com helper
+    const avail = normalizeDateStr ? (normalizeDateStr(available_from) || null) : (available_from || null);
+
+    await pool.query(
+      `INSERT INTO videos (title, r2_key, course_id, duration_seconds, available_from, sort_index)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [title, r2_key, courseId, duration_seconds, avail, sort_index]
+    );
+
+    res.redirect(`/admin/cursos/${courseId}`);
+  } catch (err) {
+    console.error('ADMIN ADD VIDEO ERROR', err);
+    res.status(500).send(renderShell('Erro', `
+      <div class="card">
+        <h1>Falha ao adicionar aula</h1>
+        <p class="mut">${safe(err.message || String(err))}</p>
+        <div class="mt"><a href="/admin/cursos/${safe(req.params.id)}">Voltar</a></div>
+      </div>
+    `));
+  }
+});
+
+// ====== Admin: deletar aula de um curso ======
+app.post('/admin/cursos/:id/videos/:vid/delete', authRequired, adminRequired, async (req, res) => {
+  const courseId = parseInt(req.params.id, 10);
+  const videoId  = parseInt(req.params.vid, 10);
+  try {
+    if (!courseId || !videoId) return res.status(400).send('IDs inválidos');
+
+    // ON DELETE CASCADE já limpa sessions/events/video_files ligados a esse vídeo
+    await pool.query('DELETE FROM videos WHERE id=$1 AND course_id=$2', [videoId, courseId]);
+
+    res.redirect(`/admin/cursos/${courseId}`);
+  } catch (err) {
+    console.error('ADMIN DELETE VIDEO ERROR', err);
+    res.status(500).send(renderShell('Erro', `
+      <div class="card">
+        <h1>Falha ao remover aula</h1>
+        <p class="mut">${safe(err.message || String(err))}</p>
+        <div class="mt"><a href="/admin/cursos/${safe(req.params.id)}">Voltar</a></div>
+      </div>
+    `));
+  }
+});
   // ====== Admin: atualizar validade da matrícula de um aluno neste curso ======
 app.post('/admin/cursos/:courseId/matriculas/:userId/validade', adminRequired, async (req, res) => {
     try {

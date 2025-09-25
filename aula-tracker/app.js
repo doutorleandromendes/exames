@@ -3654,35 +3654,39 @@ app.get('/aula/:id', authRequired, async (req,res)=>{
       const wm = (req.user.full_name || req.user.email || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   
       
-    // Materiais (PDFs)
-    const { rows: pdfFiles } = await pool.query(
-      'SELECT id, label, r2_key FROM video_files WHERE video_id=$1 ORDER BY sort_index NULLS LAST, id ASC',
-      [videoId]
-    );
-    const pdfList = pdfFiles.map(f => {
-      const href = generateSignedUrlForKey(f.r2_key, {
-        contentType: 'application/pdf',
-        disposition: `attachment; filename="${encodeURIComponent(safeName)}.pdf"`
-      });
-      return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
-    }).join('');
-    const pdfBlock = pdfFiles.length ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
-const body = `
-        <div class="card">
-          <div class="right" style="justify-content:space-between;gap:12px">
-            <h1 style="margin:0">${safe(v.title)}</h1>
-            <div><a href="/logout">Sair</a></div>
-          </div>
-          <p class="mut">Curso: ${safe(v.course_name)} ${admin? '· <strong>(ADMIN)</strong>' : ''}</p>
-          <div class="video">
-            <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
-              ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
-            </video>
-            <div class="wm">${wm}</div>
-          </div>
+// Materiais (PDFs)
+const { rows: pdfFiles } = await pool.query(
+  'SELECT id, label, r2_key FROM video_files WHERE video_id=$1 ORDER BY sort_index NULLS LAST, id ASC',
+  [videoId]
+);
 
-          ${pdfBlock}
-        </div>
+// só considera arquivos .pdf (pelo label ou pela key)
+const pdfList = (pdfFiles || [])
+  .filter(f => {
+    const lbl = String(f.label || '').toLowerCase();
+    const key = String(f.r2_key || '').toLowerCase();
+    return lbl.includes('pdf') || key.endsWith('.pdf');
+  })
+  .map(f => {
+    // nome amigável/seguro para o download
+    const raw = String(f.label || 'material')
+      .replace(/["<>\r\n]+/g, ' ')
+      .trim() || 'material';
+    const base = raw.replace(/\.pdf$/i, ''); // evita duplicar .pdf
+
+    const href = generateSignedUrlForKey(f.r2_key, {
+      contentType: 'application/pdf',
+      disposition: `attachment; filename="${encodeURIComponent(base)}.pdf"`
+    });
+
+    return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
+  })
+  .join('');
+
+const pdfBlock = pdfList
+  ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>`
+  : '';
+
   
         <script>
         (function(){

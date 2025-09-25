@@ -3660,7 +3660,7 @@ const { rows: pdfFiles } = await pool.query(
   [videoId]
 );
 
-// só considera arquivos .pdf (pelo label ou pela key)
+// monta a lista apenas com PDFs (pelo label conter “pdf” ou a key terminar com .pdf)
 const pdfList = (pdfFiles || [])
   .filter(f => {
     const lbl = String(f.label || '').toLowerCase();
@@ -3668,153 +3668,167 @@ const pdfList = (pdfFiles || [])
     return lbl.includes('pdf') || key.endsWith('.pdf');
   })
   .map(f => {
-    // nome amigável/seguro para o download
-    const raw = String(f.label || 'material')
-      .replace(/["<>\r\n]+/g, ' ')
-      .trim() || 'material';
-    const base = raw.replace(/\.pdf$/i, ''); // evita duplicar .pdf
-
+    // nome amigável/seguro para o filename
+    const raw = String(f.label || 'material').replace(/["<>\r\n]+/g, ' ').trim() || 'material';
+    const base = raw.replace(/\.pdf$/i, '');
     const href = generateSignedUrlForKey(f.r2_key, {
       contentType: 'application/pdf',
       disposition: `attachment; filename="${encodeURIComponent(base)}.pdf"`
     });
-
     return `<li><a href="${href}">Baixar ${safe(f.label || f.r2_key)} (PDF)</a></li>`;
   })
   .join('');
 
-const pdfBlock = pdfList
-  ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>`
-  : '';
+const pdfBlock = pdfList ? `<h3 class="mt2">Materiais (PDFs)</h3><ul>${pdfList}</ul>` : '';
 
-  
-        <script>
-        (function(){
-          const video = document.getElementById('player');
-          const sessionId = ${sessionId};
-  
-          // ————— Segmentos efetivamente assistidos —————
-          let playing = false;
-          let segStart = null;   // início do trecho realmente tocado
-          let lastT = 0;
-          let lastSentAt = 0;
-  
-          function now(){ return Date.now(); }
-  
-          function sendSegment(start, end){
-            if (start == null) return;
-            const a = Math.floor(Math.max(0, start));
-            const b = Math.floor(Math.max(0, end));
-            if (b > a) {
-              fetch('/track/segment', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ sessionId, startSec:a, endSec:b })
-              }).catch(()=>{});
-            }
-          }
-  
-          // começou a tocar → abre segmento
-          video.addEventListener('play', ()=>{
-            playing = true;
-            segStart = Math.floor(video.currentTime || 0);
-            lastT = segStart;
-          });
-  
-          // tocando: fecha bloco se houver pulo, e envia parciais a cada ~10s
-          video.addEventListener('timeupdate', ()=>{
-            if (!playing) return;
-            const t = Math.floor(video.currentTime || 0);
-  
-            // salto p/ trás ou p/ frente > 5s → fecha segmento anterior
-            if (segStart != null && (t < lastT || t - lastT > 5)) {
-              sendSegment(segStart, lastT);
-              segStart = t; // reabre a partir do novo ponto
-            }
-            lastT = t;
-  
-            // envia a cada 10s para não acumular demais
-            if (now() - lastSentAt > 10000 && segStart != null && lastT > segStart) {
-              sendSegment(segStart, lastT);
-              segStart = lastT; // novo bloco começa aqui
-              lastSentAt = now();
-            }
-          });
-  
-          // pausou → fecha segmento
-          video.addEventListener('pause', ()=>{
-            playing = false;
-            const t = Math.floor(video.currentTime || 0);
-            if (segStart != null) sendSegment(segStart, t);
-            segStart = null;
-          });
-  
-          // terminou → fecha segmento
-          video.addEventListener('ended', ()=>{
-            const t = Math.floor(video.currentTime || 0);
-            if (segStart != null) sendSegment(segStart, t);
-            segStart = null;
-            playing = false;
-          });
-  
-          // antes do seek → fecha segmento corrente
-          video.addEventListener('seeking', ()=>{
-            if (segStart != null) {
-              const t = Math.floor(video.currentTime || 0);
-              sendSegment(segStart, t);
-              segStart = null;
-            }
-          });
-  
-          // após seek: se continuar tocando, reabre
-          video.addEventListener('seeked', ()=>{
-            if (!video.paused && !video.ended) {
-              segStart = Math.floor(video.currentTime || 0);
-              lastT = segStart;
-              playing = true;
-            }
-          });
-  
-          // ————— Eventos “simples” (mantidos para compatibilidade/telemetria leve) —————
-          function send(type){
-            fetch('/track', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({
-                sessionId,
-                type,
-                videoTime: Math.floor(video.currentTime||0),
-                clientTs: new Date().toISOString()
-              })
-            }).catch(()=>{});
-          }
-          if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2).');
-          video.addEventListener('play',  ()=>send('play'));
-          video.addEventListener('pause', ()=>send('pause'));
-          video.addEventListener('ended', ()=>send('ended'));
-          setInterval(()=>send('progress'), 5000);
-  
-          // ao carregar metadata → reporta duração (caso ainda não esteja no banco)
-          video.addEventListener('loadedmetadata', ()=>{
-            const dur = Math.floor(video.duration || 0);
-            if (dur > 0) {
-              fetch('/api/video-duration', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ videoId: ${videoId}, durationSeconds: dur })
-              }).catch(()=>{});
-            }
-          });
-  
-          // debug de erros de mídia
-          video.addEventListener('error', ()=>{
-            const err = video.error;
-            console.error('HTMLMediaError', err);
-            alert('Erro no player. Verifique Console/Network. Code: ' + (err && err.code));
-          });
-        })();
-        </script>
-      `;
+// ===== body inteiro dentro de um único template string =====
+const body = `
+  <div class="card">
+    <div class="right" style="justify-content:space-between;gap:12px">
+      <h1 style="margin:0">${safe(v.title)}</h1>
+      <div><a href="/logout">Sair</a></div>
+    </div>
+    <p class="mut">Curso: ${safe(v.course_name)} ${admin ? '· <strong>(ADMIN)</strong>' : ''}</p>
+
+    <div class="video">
+      <video id="player" controls playsinline preload="metadata" controlsList="nodownload" oncontextmenu="return false" style="width:100%;height:100%">
+        ${signedUrl ? `<source src="${signedUrl}" type="video/mp4" />` : ''}
+      </video>
+      <div class="wm">${wm}</div>
+    </div>
+
+    ${pdfBlock}
+  </div>
+
+  <script>
+  (function(){
+    const video = document.getElementById('player');
+    const sessionId = ${sessionId};
+
+    // ————— Segmentos efetivamente assistidos —————
+    let playing = false;
+    let segStart = null;   // início do trecho realmente tocado
+    let lastT = 0;
+    let lastSentAt = 0;
+
+    function now(){ return Date.now(); }
+
+    function sendSegment(start, end){
+      if (start == null) return;
+      const a = Math.floor(Math.max(0, start));
+      const b = Math.floor(Math.max(0, end));
+      if (b > a) {
+        fetch('/track/segment', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ sessionId, startSec:a, endSec:b })
+        }).catch(()=>{});
+      }
+    }
+
+    // começou a tocar → abre segmento
+    video.addEventListener('play', ()=>{
+      playing = true;
+      segStart = Math.floor(video.currentTime || 0);
+      lastT = segStart;
+    });
+
+    // tocando: fecha bloco se houver pulo, e envia parciais a cada ~10s
+    video.addEventListener('timeupdate', ()=>{
+      if (!playing) return;
+      const t = Math.floor(video.currentTime || 0);
+
+      // salto p/ trás ou p/ frente > 5s → fecha segmento anterior
+      if (segStart != null && (t < lastT || t - lastT > 5)) {
+        sendSegment(segStart, lastT);
+        segStart = t; // reabre a partir do novo ponto
+      }
+      lastT = t;
+
+      // envia a cada 10s para não acumular demais
+      if (now() - lastSentAt > 10000 && segStart != null && lastT > segStart) {
+        sendSegment(segStart, lastT);
+        segStart = lastT; // novo bloco começa aqui
+        lastSentAt = now();
+      }
+    });
+
+    // pausou → fecha segmento
+    video.addEventListener('pause', ()=>{
+      playing = false;
+      const t = Math.floor(video.currentTime || 0);
+      if (segStart != null) sendSegment(segStart, t);
+      segStart = null;
+    });
+
+    // terminou → fecha segmento
+    video.addEventListener('ended', ()=>{
+      const t = Math.floor(video.currentTime || 0);
+      if (segStart != null) sendSegment(segStart, t);
+      segStart = null;
+      playing = false;
+    });
+
+    // antes do seek → fecha segmento corrente
+    video.addEventListener('seeking', ()=>{
+      if (segStart != null) {
+        const t = Math.floor(video.currentTime || 0);
+        sendSegment(segStart, t);
+        segStart = null;
+      }
+    });
+
+    // após seek: se continuar tocando, reabre
+    video.addEventListener('seeked', ()=>{
+      if (!video.paused && !video.ended) {
+        segStart = Math.floor(video.currentTime || 0);
+        lastT = segStart;
+        playing = true;
+      }
+    });
+
+    // ————— Eventos simples (compatibilidade/telemetria) —————
+    function send(type){
+      fetch('/track', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          sessionId,
+          type,
+          videoTime: Math.floor(video.currentTime||0),
+          clientTs: new Date().toISOString()
+        })
+      }).catch(()=>{});
+    }
+    if(!${JSON.stringify(!!signedUrl)}) alert('Vídeo não configurado (R2).');
+    video.addEventListener('play',  ()=>send('play'));
+    video.addEventListener('pause', ()=>send('pause'));
+    video.addEventListener('ended', ()=>send('ended'));
+    setInterval(()=>send('progress'), 5000);
+
+    // ao carregar metadata → reporta duração (se ainda não estiver no banco)
+    video.addEventListener('loadedmetadata', ()=>{
+      const dur = Math.floor(video.duration || 0);
+      if (dur > 0) {
+        fetch('/api/video-duration', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ videoId: ${videoId}, durationSeconds: dur })
+        }).catch(()=>{});
+      }
+    });
+
+    // debug de erros de mídia
+    video.addEventListener('error', ()=>{
+      const err = video.error;
+      console.error('HTMLMediaError', err);
+      alert('Erro no player. Verifique Console/Network. Code: ' + (err && err.code));
+    });
+  })();
+  </script>
+`;
+
+res.send(renderShell(v.title, body));
       res.send(renderShell(v.title, body));
     }catch(err){
       console.error('PLAYER ERROR', err);

@@ -381,7 +381,7 @@
       {
         "sku": "CCDS",
         "nome": "Cistatina C – Dosagem sérica",
-        "estoque": 31,
+        "estoque": 30,
         "alerta": 5
       },
       {
@@ -585,7 +585,7 @@
       {
         "sku": "M-AG",
         "nome": "Malária - Antígeno Geral",
-        "estoque": 29,
+        "estoque": 28,
         "alerta": 10
       },
       {

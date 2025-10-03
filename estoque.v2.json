@@ -393,7 +393,7 @@
       {
         "sku": "CI",
         "nome": "CMV (IgG/IgM)",
-        "estoque": 38,
+        "estoque": 37,
         "alerta": 5
       },
       {
@@ -693,7 +693,7 @@
       {
         "sku": "TI",
         "nome": "Toxoplasmose - Anticorpos IgM",
-        "estoque": 26,
+        "estoque": 25,
         "alerta": 5
       },
       {

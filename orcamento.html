@@ -40,7 +40,14 @@
   .no-print {
     display: none !important;
   } .no-print { display: none; } }
-  </style>
+  
+/* Microscopia materials UI */
+.btn-mini { padding: 4px 8px; font-size: 12px; background:#0d6efd; color:#fff; border:none; border-radius:4px; cursor:pointer; }
+.btn-mini:hover { background:#0b5ed7; }
+.chip { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border:1px solid #ccc; border-radius:12px; font-size:12px; }
+.chip .rm { cursor:pointer; font-weight:bold; }
+.microscopia-controls { background:#fafafa; border:1px dashed #ccc; padding:8px; margin-top:6px; border-radius:6px; }
+</style>
 </head>
 <body>
 <h1>Orçamento de Exames</h1>
@@ -216,10 +223,65 @@ function adicionarExameExtra() {
       exames.forEach(exame => {
         const label = document.createElement("label");
         label.title = exame["Description"] || "";
-        label.innerHTML = `<input type="checkbox" value="${exame["Product Name"]}" data-preco="${exame["Price"]}" data-pix="${exame["Pix Price"]}"> ${exame["Product Name"]} (R$ ${exame["Price"]} / Pix R$ ${exame["Pix Price"]})`;
-        container.appendChild(label);
-        label.classList.add("exame-item");
+        const nomeProd = exame["Product Name"];
+  const preco = exame["Price"];
+  const pix = exame["Pix Price"];
+  const isMicro = (nomeProd || "").toLowerCase().includes("microscopia");
+
+  if (isMicro) {
+    label.innerHTML = `
+      <input type="checkbox" value="${nomeProd}" data-preco="${preco}" data-pix="${pix}">
+      ${nomeProd} (R$ ${preco} / Pix R$ ${pix})
+      <div class="microscopia-controls hidden">
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <input type="text" placeholder="Material (ex.: sangue, secreção, raspado...)" class="material-input" style="flex:1; padding:6px;">
+          <button type="button" class="btn-mini add-material">+ material</button>
+        </div>
+        <div class="materiais-list" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+        <small style="display:block; margin-top:4px; color:#666;">Adicione 1+ materiais; cada material gera uma linha do exame com o mesmo preço.</small>
+      </div>
+    `;
+  } else {
+    label.innerHTML = `<input type="checkbox" value="${nomeProd}" data-preco="${preco}" data-pix="${pix}"> ${nomeProd} (R$ ${preco} / Pix R$ ${pix})`;
+  }
+  container.appendChild(label);
+  label.classList.add("exame-item");
+
+  if (isMicro) {
+    const cb = label.querySelector('input[type=checkbox]');
+    const controls = label.querySelector('.microscopia-controls');
+    const addBtn = label.querySelector('.add-material');
+    const input = label.querySelector('.material-input');
+    const lista = label.querySelector('.materiais-list');
+    label._materiais = [];
+    cb.addEventListener('change', () => {
+      controls.classList.toggle('hidden', !cb.checked);
+    });
+    function renderMateriais() {
+      lista.innerHTML = '';
+      label._materiais.forEach((mat, idx) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.innerHTML = `${mat} <span class="rm" data-idx="${idx}" title="remover">×</span>`;
+        lista.appendChild(chip);
       });
+    }
+    addBtn.addEventListener('click', () => {
+      const val = (input.value || '').trim();
+      if (!val) return;
+      label._materiais.push(val);
+      input.value = '';
+      renderMateriais();
+    });
+    lista.addEventListener('click', (e) => {
+      const rm = e.target.closest('.rm');
+      if (!rm) return;
+      const i = Number(rm.dataset.idx);
+      label._materiais.splice(i, 1);
+      renderMateriais();
+    });
+  }
+});
     }
 
     carregarExames();
@@ -249,18 +311,30 @@ function adicionarExameExtra() {
       let totalPix = 0;
       const desconto = parseFloat(document.getElementById('desconto').value) || 0;
 
-      checkboxes.forEach(cb => {
-        const preco = parseFloat(cb.dataset.preco);
-        const pix = parseFloat(cb.dataset.pix);
-        total += preco;
-        totalPix += pix;
+      
+checkboxes.forEach(cb => {
+  const preco = parseFloat(cb.dataset.preco);
+  const pix = parseFloat(cb.dataset.pix);
+  const label = cb.closest('label');
+  const materiais = (label && Array.isArray(label._materiais)) ? label._materiais : null;
 
-        const row = document.createElement('tr');
-        row.innerHTML = `<td>${cb.value}</td><td>R$ ${preco.toFixed(2)}</td><td>R$ ${pix.toFixed(2)}</td>`;
-        tabela.appendChild(row);
-      });
-
-      totalSpan.textContent = `R$ ${total.toFixed(2)}`;
+  if (materiais && materiais.length > 0) {
+    materiais.forEach(material => {
+      total += preco;
+      totalPix += pix;
+      const row = document.createElement('tr');
+      row.innerHTML = `<td>${cb.value} — Material: ${material}</td><td>R$ ${preco.toFixed(2)}</td><td>R$ ${pix.toFixed(2)}</td>`;
+      tabela.appendChild(row);
+    });
+  } else {
+    total += preco;
+    totalPix += pix;
+    const row = document.createElement('tr');
+    row.innerHTML = `<td>${cb.value}</td><td>R$ ${preco.toFixed(2)}</td><td>R$ ${pix.toFixed(2)}</td>`;
+    tabela.appendChild(row);
+  }
+});
+totalSpan.textContent = `R$ ${total.toFixed(2)}`;
       totalPixSpan.textContent = `R$ ${totalPix.toFixed(2)}`;
       const totalComDesconto = total * (1 - desconto / 100);
       const totalPixComDesconto = totalPix * (1 - desconto / 100);

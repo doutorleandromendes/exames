@@ -87,7 +87,7 @@
       border-radius: 3px;
     }
 
-    /* Observação (novo): central, itálico, preto, sem fundo; 4pt menor que 16px (~12pt) => ~8pt => ~10.67px */
+    /* Observação: central, itálico, preto, sem fundo; 4pt menor que ~12pt => ~8pt (~10.67px) */
     .observacao {
       text-align: center;
       font-style: italic;
@@ -124,7 +124,7 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* Fallback de impressão nativa (pode usar o botão Imprimir se quiser) */
+    /* Fallback de impressão nativa */
     @media print {
       @page { size: A4 portrait; margin: 0; }
       .formulario, .acoes, details.debug { display: none !important; }
@@ -190,7 +190,7 @@
       <option>Microscopia com KOH</option>
     </select>
 
-    <!-- Valor de Referência: opt-in manual (sem afetar o resto) -->
+    <!-- Valor de Referência: opt-in manual -->
     <label><input type="checkbox" id="vrManualToggle" /> Inserir Valor de Referência manual</label>
     <div id="vr-manual-wrap" style="display:none;">
       <label for="vrManual">Valor de Referência (manual):</label>
@@ -200,7 +200,7 @@
     <label>Resultado:</label>
     <div id="resultado-container"></div>
 
-    <!-- Observação: opt-in manual (NOVO) -->
+    <!-- Observação: opt-in manual -->
     <label><input type="checkbox" id="obsToggle" /> Inserir Observação</label>
     <div id="obsWrap" style="display:none;">
       <label for="obsText">Observação:</label>
@@ -266,7 +266,7 @@
       }
     });
 
-    // === Mostrar/ocultar Observação (NOVO) ===
+    // === Mostrar/ocultar Observação (mantido) ===
     document.addEventListener('DOMContentLoaded', () => {
       const tgl = document.getElementById('obsToggle');
       const wrap = document.getElementById('obsWrap');
@@ -477,7 +477,7 @@
       cont.style.display='block';
     }
 
-    // ==== Gerar cada laudo (mantido + VR/Resultado manuais + Observação opt-in) ====
+    // ==== Gerar cada laudo (mantido + VR/Resultado manuais + Observação com duas quebras) ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -554,12 +554,12 @@
         if (vr) valorRef = vr;
       }
 
-      // Observação (opt-in): só mostra se marcado e preenchido
+      // Observação (opt-in): duas quebras de linha antes da observação
       let observacaoHTML = '';
       if (document.getElementById('obsToggle')?.checked) {
         const obs = (document.getElementById('obsText')?.value || '').trim();
         if (obs) {
-          observacaoHTML = `<p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
+          observacaoHTML = `<br><br><p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
         }
       }
 

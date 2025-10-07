@@ -36,7 +36,7 @@
     }
     h2 { margin: 0 0 12px; }
     label { display: block; margin-bottom: 6px; font-size: 14px; }
-    select, input[type="text"], input[type="date"] { width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px; }
+    select, input[type="text"], input[type="date"], textarea { width: 100%; padding: 6px; margin-bottom: 10px; font-size: 14px; }
     button { padding: 10px 16px; background: #007BFF; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     button + button { margin-left: 8px; }
 
@@ -78,13 +78,23 @@
 
     .resultado-box {
       text-align: center;
-      font-size: 16px;
+      font-size: 16px;            /* base para cálculo de -4pt na observação */
       font-weight: bold;
       background: #f5f5f5;
       padding: 10px 20px;
       width: max-content;
       margin: 16px auto 8px;
       border-radius: 3px;
+    }
+
+    /* Observação (novo): central, itálico, preto, sem fundo; 4pt menor que 16px (~12pt) => ~8pt => ~10.67px */
+    .observacao {
+      text-align: center;
+      font-style: italic;
+      color: #000;
+      background: transparent;
+      font-size: 10.67px; /* ~8pt */
+      margin: 6px 0 0;
     }
 
     /* Assinatura digital */
@@ -180,16 +190,22 @@
       <option>Microscopia com KOH</option>
     </select>
 
-    <!-- === NOVO (opt-in): Valor de Referência manual, sem impactar layout === -->
+    <!-- Valor de Referência: opt-in manual (sem afetar o resto) -->
     <label><input type="checkbox" id="vrManualToggle" /> Inserir Valor de Referência manual</label>
     <div id="vr-manual-wrap" style="display:none;">
       <label for="vrManual">Valor de Referência (manual):</label>
       <input type="text" id="vrManual" placeholder="Ex.: Inferior a 0,10 ng/mL" />
     </div>
-    <!-- === /NOVO === -->
 
     <label>Resultado:</label>
     <div id="resultado-container"></div>
+
+    <!-- Observação: opt-in manual (NOVO) -->
+    <label><input type="checkbox" id="obsToggle" /> Inserir Observação</label>
+    <div id="obsWrap" style="display:none;">
+      <label for="obsText">Observação:</label>
+      <textarea id="obsText" rows="2" placeholder="Digite uma observação (opcional)"></textarea>
+    </div>
 
     <div class="acoes" style="margin-top:8px;">
       <button onclick="gerarLaudo()">Adicionar exame</button>
@@ -239,7 +255,7 @@
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
-    // === Mostrar/ocultar campo de VR manual (novo, sem interferir no resto) ===
+    // === Mostrar/ocultar VR manual (mantido) ===
     document.addEventListener('DOMContentLoaded', () => {
       const tgl = document.getElementById('vrManualToggle');
       const wrap = document.getElementById('vr-manual-wrap');
@@ -249,7 +265,17 @@
         });
       }
     });
-    // === /novo ===
+
+    // === Mostrar/ocultar Observação (NOVO) ===
+    document.addEventListener('DOMContentLoaded', () => {
+      const tgl = document.getElementById('obsToggle');
+      const wrap = document.getElementById('obsWrap');
+      if (tgl && wrap) {
+        tgl.addEventListener('change', () => {
+          wrap.style.display = tgl.checked ? 'block' : 'none';
+        });
+      }
+    });
 
     // ==== Carrega Pacientes (mantido) ====
     fetchNoCache(pacientesURL)
@@ -329,7 +355,7 @@
       })
       .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    // === Helper para toggle de Resultado manual (novo, injetado dentro do container) ===
+    // === Helper para toggle de Resultado manual (mantido) ===
     function addResultadoManualToggle(container){
       const lbl = document.createElement('label');
       const chk = document.createElement('input');
@@ -356,9 +382,8 @@
         if (base) base.disabled = usarManual;
       });
     }
-    // === /novo ===
 
-    // ==== Campo Resultado dinâmico (mantido + toggle manual nas variantes que não são texto livre) ====
+    // ==== Campo Resultado dinâmico (mantido) ====
     function atualizarCampoResultado(){
       const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const container = document.getElementById('resultado-container');
@@ -378,7 +403,7 @@
         });
         container.appendChild(input);
 
-        // === acrescenta opção manual (opt-in)
+        // acrescenta opção manual (opt-in)
         addResultadoManualToggle(container);
 
       } else if (nomeExame.includes('microscopia')) {
@@ -404,7 +429,7 @@
         });
         container.appendChild(select);
 
-        // === acrescenta opção manual (opt-in)
+        // acrescenta opção manual (opt-in)
         addResultadoManualToggle(container);
       }
     }
@@ -452,7 +477,7 @@
       cont.style.display='block';
     }
 
-    // ==== Gerar cada laudo (mantido + respeito aos overrides manuais) ====
+    // ==== Gerar cada laudo (mantido + VR/Resultado manuais + Observação opt-in) ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -472,7 +497,7 @@
       const amostra = document.getElementById('amostra').value;
       const metodo = document.getElementById('metodo').value;
 
-      // === Resultado respeitando "manual" se marcado
+      // Resultado (respeita "manual")
       let resultadoBruto = '';
       const resManualAtivo = document.getElementById('resultadoManualToggle')?.checked;
       if (resManualAtivo) {
@@ -494,7 +519,7 @@
         header.dataset.filled = '1';
       }
 
-      // === Valor de referência automático (mantido) + unidade para DOSAGENS
+      // Valor de referência automático (mantido) + unidade para DOSAGENS
       let valorRef = 'NÃO REAGENTE';
       if (exame.toLowerCase().includes('dosagem')) {
         const cfg = {
@@ -523,13 +548,22 @@
         }
       }
 
-      // === Override manual do Valor de Referência (se opt-in e preenchido)
+      // Override manual do Valor de Referência (se opt-in e preenchido)
       if (document.getElementById('vrManualToggle')?.checked) {
         const vr = (document.getElementById('vrManual')?.value || '').trim();
         if (vr) valorRef = vr;
       }
 
-      // ==== Bloco de saída (mantido) ====
+      // Observação (opt-in): só mostra se marcado e preenchido
+      let observacaoHTML = '';
+      if (document.getElementById('obsToggle')?.checked) {
+        const obs = (document.getElementById('obsText')?.value || '').trim();
+        if (obs) {
+          observacaoHTML = `<p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
+        }
+      }
+
+      // Bloco de saída (mantido)
       const bloco = document.createElement('div');
       bloco.className = 'laudo';
       bloco.innerHTML = `
@@ -539,7 +573,9 @@
           <p class="ref"><strong>Valor de referência:</strong> ${valorRef}</p>
         </div>
         <p class="metodo"><strong>Método:</strong> ${metodo}</p>
-        <div class="resultado-box"><strong>Resultado:</strong> ${resultadoBruto}</div>`;
+        <div class="resultado-box"><strong>Resultado:</strong> ${resultadoBruto}</div>
+        ${observacaoHTML}
+      `;
       document.getElementById('examesList').appendChild(bloco);
     }
 

@@ -180,6 +180,14 @@
       <option>Microscopia com KOH</option>
     </select>
 
+    <!-- === NOVO (opt-in): Valor de Referência manual, sem impactar layout === -->
+    <label><input type="checkbox" id="vrManualToggle" /> Inserir Valor de Referência manual</label>
+    <div id="vr-manual-wrap" style="display:none;">
+      <label for="vrManual">Valor de Referência (manual):</label>
+      <input type="text" id="vrManual" placeholder="Ex.: Inferior a 0,10 ng/mL" />
+    </div>
+    <!-- === /NOVO === -->
+
     <label>Resultado:</label>
     <div id="resultado-container"></div>
 
@@ -195,11 +203,11 @@
   <div class="laudos-container" id="laudos"></div>
 
   <script>
-    // ==== URLs dos CSVs ====
+    // ==== URLs dos CSVs (mantidas) ====
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
     const examesURL    = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv';
 
-    // ==== Utilidades ====
+    // ==== Utilidades (mantidas) ====
     function fetchNoCache(url, opts = {}) {
       const sep = url.includes('?') ? '&' : '?';
       const busted = `${url}${sep}_ts=${Date.now()}`;
@@ -226,12 +234,24 @@
       return s;
     }
 
-    // ==== Datas default ====
+    // ==== Datas default (mantidas) ====
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
-    // ==== Carrega Pacientes ====
+    // === Mostrar/ocultar campo de VR manual (novo, sem interferir no resto) ===
+    document.addEventListener('DOMContentLoaded', () => {
+      const tgl = document.getElementById('vrManualToggle');
+      const wrap = document.getElementById('vr-manual-wrap');
+      if (tgl && wrap) {
+        tgl.addEventListener('change', () => {
+          wrap.style.display = tgl.checked ? 'block' : 'none';
+        });
+      }
+    });
+    // === /novo ===
+
+    // ==== Carrega Pacientes (mantido) ====
     fetchNoCache(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -267,7 +287,7 @@
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    // ==== Carrega Exames (primeira coluna do CSV ; delimitador ;) ====
+    // ==== Carrega Exames (mantido) ====
     fetchNoCache(examesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -309,53 +329,87 @@
       })
       .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    // ==== Campo Resultado dinâmico ====
+    // === Helper para toggle de Resultado manual (novo, injetado dentro do container) ===
+    function addResultadoManualToggle(container){
+      const lbl = document.createElement('label');
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.id = 'resultadoManualToggle';
+      lbl.appendChild(chk);
+      lbl.appendChild(document.createTextNode(' Inserir Resultado manual'));
+      container.appendChild(lbl);
+
+      const manual = document.createElement('input');
+      manual.type = 'text';
+      manual.id = 'resultadoManual';
+      manual.placeholder = 'Digite o resultado (texto livre)';
+      manual.style.fontWeight = 'bold';
+      manual.style.textAlign = 'center';
+      manual.style.display = 'none';
+      container.appendChild(manual);
+
+      chk.addEventListener('change', ()=>{
+        const base = document.getElementById('resultado');
+        const usarManual = chk.checked;
+        if (usarManual && base) manual.value = base.value || '';
+        manual.style.display = usarManual ? '' : 'none';
+        if (base) base.disabled = usarManual;
+      });
+    }
+    // === /novo ===
+
+    // ==== Campo Resultado dinâmico (mantido + toggle manual nas variantes que não são texto livre) ====
     function atualizarCampoResultado(){
-  const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
-  const container = document.getElementById('resultado-container');
-  container.innerHTML = '';
+      const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
+      const container = document.getElementById('resultado-container');
+      container.innerHTML = '';
 
-  if (nomeExame.includes('dosagem')) {
-    // Campo só para números
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.inputMode = 'decimal';
-    input.placeholder = 'Digite apenas o número';
-    input.id = 'resultado';
-    input.style.fontWeight = 'bold';
-    input.style.textAlign = 'center';
-    input.addEventListener('input', (e)=>{
-      e.target.value = e.target.value.replace(/[^\d.,<>]/g,''); // só número, vírgula e ponto
-    });
-    container.appendChild(input);
+      if (nomeExame.includes('dosagem')) {
+        // Campo só para números
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.inputMode = 'decimal';
+        input.placeholder = 'Digite apenas o número';
+        input.id = 'resultado';
+        input.style.fontWeight = 'bold';
+        input.style.textAlign = 'center';
+        input.addEventListener('input', (e)=>{
+          e.target.value = e.target.value.replace(/[^\d.,<>]/g,''); // só número, vírgula e ponto
+        });
+        container.appendChild(input);
 
-  } else if (nomeExame.includes('microscopia')) {
-    // Campo de texto livre
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = 'Digite o resultado';
-    input.id = 'resultado';
-    input.style.fontWeight = 'bold';
-    input.style.textAlign = 'center';
-    container.appendChild(input);
+        // === acrescenta opção manual (opt-in)
+        addResultadoManualToggle(container);
 
-  } else {
-    // Dropdown padrão
-    const select = document.createElement('select');
-    select.id = 'resultado';
-    select.style.fontWeight = 'bold';
-    select.style.textAlign = 'center';
-    ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{
-      const o=document.createElement('option');
-      o.value=v; o.textContent=v;
-      select.appendChild(o);
-    });
-    container.appendChild(select);
-  }
-}
+      } else if (nomeExame.includes('microscopia')) {
+        // Campo de texto livre (já é manual por natureza)
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Digite o resultado';
+        input.id = 'resultado';
+        input.style.fontWeight = 'bold';
+        input.style.textAlign = 'center';
+        container.appendChild(input);
 
+      } else {
+        // Dropdown padrão
+        const select = document.createElement('select');
+        select.id = 'resultado';
+        select.style.fontWeight = 'bold';
+        select.style.textAlign = 'center';
+        ['NÃO REAGENTE','REAGENTE','INDETERMINADO'].forEach(v=>{
+          const o=document.createElement('option');
+          o.value=v; o.textContent=v;
+          select.appendChild(o);
+        });
+        container.appendChild(select);
 
-    // Default método = Imunofluorescência quando for “dosagem”
+        // === acrescenta opção manual (opt-in)
+        addResultadoManualToggle(container);
+      }
+    }
+
+    // Default método = Imunofluorescência quando for “dosagem” (mantido)
     function setMetodoDefaultParaExame(){
       const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const metodoSel = document.getElementById('metodo');
@@ -367,7 +421,7 @@
       }
     }
 
-    // ==== Estrutura fixa da saída ====
+    // ==== Estrutura fixa da saída (mantida) ====
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -398,7 +452,7 @@
       cont.style.display='block';
     }
 
-    // ==== Gerar cada laudo ====
+    // ==== Gerar cada laudo (mantido + respeito aos overrides manuais) ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -417,10 +471,19 @@
       const exame = (document.getElementById('exame').value || '').trim();
       const amostra = document.getElementById('amostra').value;
       const metodo = document.getElementById('metodo').value;
-      let resultadoBruto = document.getElementById('resultado').value || '';
+
+      // === Resultado respeitando "manual" se marcado
+      let resultadoBruto = '';
+      const resManualAtivo = document.getElementById('resultadoManualToggle')?.checked;
+      if (resManualAtivo) {
+        resultadoBruto = (document.getElementById('resultadoManual')?.value || '').trim();
+      } else {
+        resultadoBruto = (document.getElementById('resultado')?.value || '').trim();
+      }
+
       const hoje = new Date().toLocaleDateString('pt-BR');
 
-      // identificação uma vez
+      // identificação uma vez (mantido)
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
@@ -431,7 +494,7 @@
         header.dataset.filled = '1';
       }
 
-      // Valor de referência & unidade automáticas p/ DOSAGENS (três casos configurados)
+      // === Valor de referência automático (mantido) + unidade para DOSAGENS
       let valorRef = 'NÃO REAGENTE';
       if (exame.toLowerCase().includes('dosagem')) {
         const cfg = {
@@ -442,21 +505,31 @@
         };
         if (cfg.ref) {
           valorRef = cfg.ref;
-          // se o usuário digitou só número, formata + unidade
-          let num = resultadoBruto.trim().replace(',', '.');
-          const n = parseFloat(num);
-          if (!isNaN(n)) {
-            const casas = num.includes('.') ? 2 : 0;
-            const str = n.toFixed(casas).replace('.', ',');
-            resultadoBruto = str + (cfg.unit || '');
-          } else if (resultadoBruto && cfg.unit && !resultadoBruto.includes(cfg.unit.trim())) {
-            resultadoBruto = resultadoBruto + cfg.unit;
+
+          // se NÃO for resultado manual: formata número + unidade
+          if (!resManualAtivo) {
+            let num = resultadoBruto.trim().replace(',', '.');
+            const n = parseFloat(num);
+            if (!isNaN(n)) {
+              const casas = num.includes('.') ? 2 : 0;
+              const str = n.toFixed(casas).replace('.', ',');
+              resultadoBruto = str + (cfg.unit || '');
+            } else if (resultadoBruto && cfg.unit && !resultadoBruto.includes(cfg.unit.trim())) {
+              resultadoBruto = resultadoBruto + cfg.unit;
+            }
           }
         } else {
           valorRef = '—';
         }
       }
 
+      // === Override manual do Valor de Referência (se opt-in e preenchido)
+      if (document.getElementById('vrManualToggle')?.checked) {
+        const vr = (document.getElementById('vrManual')?.value || '').trim();
+        if (vr) valorRef = vr;
+      }
+
+      // ==== Bloco de saída (mantido) ====
       const bloco = document.createElement('div');
       bloco.className = 'laudo';
       bloco.innerHTML = `
@@ -478,7 +551,7 @@
       if (res) res.focus();
     }
 
-    // ==== Salvar PDF com nome customizado (html2pdf + fallback jsPDF.html) ====
+    // ==== Salvar PDF (mantido) ====
     async function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {

@@ -178,6 +178,14 @@
       <option>Fezes</option>
     </select>
 
+    <!-- Material (Amostra) manual: opt-in (NOVO) -->
+    <label><input type="checkbox" id="amostraManualToggle" /> Inserir Material manual</label>
+    <div id="amostra-manual-wrap" style="display:none;">
+      <label for="amostraManual">Material (manual):</label>
+      <input type="text" id="amostraManual" placeholder="Ex.: Líquor, Líquido sinovial, LCR, etc." />
+    </div>
+    <!-- /NOVO -->
+
     <label for="metodo">Método:</label>
     <select id="metodo">
       <option>Imunocromatografia de Fluxo Lateral</option>
@@ -254,6 +262,14 @@
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
+
+    // === Mostrar/ocultar Material (Amostra) manual (NOVO) ===
+    document.addEventListener('DOMContentLoaded', () => {
+      const t = document.getElementById('amostraManualToggle');
+      const w = document.getElementById('amostra-manual-wrap');
+      if (t && w) t.addEventListener('change', ()=>{ w.style.display = t.checked ? 'block' : 'none'; });
+    });
+    // === /NOVO ===
 
     // === Mostrar/ocultar VR manual (mantido) ===
     document.addEventListener('DOMContentLoaded', () => {
@@ -477,7 +493,7 @@
       cont.style.display='block';
     }
 
-    // ==== Gerar cada laudo (mantido + VR/Resultado manuais + Observação com duas quebras) ====
+    // ==== Gerar cada laudo (mantido + VR/Resultado manuais + Observação com duas quebras + Material manual) ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -494,7 +510,14 @@
 
       const dataTeste = toBRDate(document.getElementById('data').value);
       const exame = (document.getElementById('exame').value || '').trim();
-      const amostra = document.getElementById('amostra').value;
+
+      // Amostra (com override manual, se marcado e preenchido)
+      let amostra = document.getElementById('amostra').value;
+      if (document.getElementById('amostraManualToggle')?.checked) {
+        const a = (document.getElementById('amostraManual')?.value || '').trim();
+        if (a) amostra = a;
+      }
+
       const metodo = document.getElementById('metodo').value;
 
       // Resultado (respeita "manual")

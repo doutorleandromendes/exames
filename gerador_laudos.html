@@ -82,9 +82,17 @@
       font-weight: bold;
       background: #f5f5f5;
       padding: 10px 20px;
-      width: max-content;
+      /* width: max-content;  REMOVIDO para permitir quebra */
       margin: 16px auto 8px;
       border-radius: 3px;
+
+      /* >>> Permitir quebra e respeitar a largura do container/A4 <<< */
+      display: inline-block;      /* conserva visual “caixa” centralizada */
+      max-width: 100%;            /* nunca excede a largura disponível */
+      box-sizing: border-box;
+      white-space: normal;        /* permite quebra natural */
+      overflow-wrap: anywhere;    /* quebra palavras muito longas */
+      word-break: break-word;     /* fallback amplo */
     }
 
     /* Observação: central, itálico, preto, sem fundo; 4pt menor que ~12pt => ~8pt (~10.67px) */
@@ -135,6 +143,9 @@
       .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
       .assinatura-digital { margin-bottom: 6mm !important; }
       .lm-footer { margin-top: 6mm !important; break-inside: avoid; page-break-inside: avoid; }
+
+      /* garante que a caixa do resultado nunca ultrapasse a largura útil do A4 */
+      .resultado-box { max-width: calc(210mm - 24mm); }
     }
   </style>
 </head>
@@ -178,13 +189,12 @@
       <option>Fezes</option>
     </select>
 
-    <!-- Material (Amostra) manual: opt-in (NOVO) -->
+    <!-- Material (Amostra) manual: opt-in -->
     <label><input type="checkbox" id="amostraManualToggle" /> Inserir Material manual</label>
     <div id="amostra-manual-wrap" style="display:none;">
       <label for="amostraManual">Material (manual):</label>
       <input type="text" id="amostraManual" placeholder="Ex.: Líquor, Líquido sinovial, LCR, etc." />
     </div>
-    <!-- /NOVO -->
 
     <label for="metodo">Método:</label>
     <select id="metodo">
@@ -263,15 +273,14 @@
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
-    // === Mostrar/ocultar Material (Amostra) manual (NOVO) ===
+    // === Mostrar/ocultar Material (Amostra) manual ===
     document.addEventListener('DOMContentLoaded', () => {
       const t = document.getElementById('amostraManualToggle');
       const w = document.getElementById('amostra-manual-wrap');
       if (t && w) t.addEventListener('change', ()=>{ w.style.display = t.checked ? 'block' : 'none'; });
     });
-    // === /NOVO ===
 
-    // === Mostrar/ocultar VR manual (mantido) ===
+    // === Mostrar/ocultar VR manual ===
     document.addEventListener('DOMContentLoaded', () => {
       const tgl = document.getElementById('vrManualToggle');
       const wrap = document.getElementById('vr-manual-wrap');
@@ -282,7 +291,7 @@
       }
     });
 
-    // === Mostrar/ocultar Observação (mantido) ===
+    // === Mostrar/ocultar Observação ===
     document.addEventListener('DOMContentLoaded', () => {
       const tgl = document.getElementById('obsToggle');
       const wrap = document.getElementById('obsWrap');
@@ -293,7 +302,7 @@
       }
     });
 
-    // ==== Carrega Pacientes (mantido) ====
+    // ==== Carrega Pacientes ====
     fetchNoCache(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -329,7 +338,7 @@
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    // ==== Carrega Exames (mantido) ====
+    // ==== Carrega Exames ====
     fetchNoCache(examesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -371,7 +380,7 @@
       })
       .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    // === Helper para toggle de Resultado manual (mantido) ===
+    // === Helper para toggle de Resultado manual ===
     function addResultadoManualToggle(container){
       const lbl = document.createElement('label');
       const chk = document.createElement('input');
@@ -399,7 +408,7 @@
       });
     }
 
-    // ==== Campo Resultado dinâmico (mantido) ====
+    // ==== Campo Resultado dinâmico ====
     function atualizarCampoResultado(){
       const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const container = document.getElementById('resultado-container');
@@ -450,7 +459,7 @@
       }
     }
 
-    // Default método = Imunofluorescência quando for “dosagem” (mantido)
+    // Default método = Imunofluorescência quando for “dosagem”
     function setMetodoDefaultParaExame(){
       const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const metodoSel = document.getElementById('metodo');
@@ -462,7 +471,7 @@
       }
     }
 
-    // ==== Estrutura fixa da saída (mantida) ====
+    // ==== Estrutura fixa da saída ====
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -493,7 +502,7 @@
       cont.style.display='block';
     }
 
-    // ==== Gerar cada laudo (mantido + VR/Resultado manuais + Observação com duas quebras + Material manual) ====
+    // ==== Gerar cada laudo ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -531,7 +540,7 @@
 
       const hoje = new Date().toLocaleDateString('pt-BR');
 
-      // identificação uma vez (mantido)
+      // identificação uma vez
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
@@ -542,7 +551,7 @@
         header.dataset.filled = '1';
       }
 
-      // Valor de referência automático (mantido) + unidade para DOSAGENS
+      // Valor de referência automático + unidade para DOSAGENS
       let valorRef = 'NÃO REAGENTE';
       if (exame.toLowerCase().includes('dosagem')) {
         const cfg = {
@@ -571,7 +580,7 @@
         }
       }
 
-      // Override manual do Valor de Referência (se opt-in e preenchido)
+      // Override manual do Valor de Referência
       if (document.getElementById('vrManualToggle')?.checked) {
         const vr = (document.getElementById('vrManual')?.value || '').trim();
         if (vr) valorRef = vr;
@@ -586,7 +595,7 @@
         }
       }
 
-      // Bloco de saída (mantido)
+      // Bloco de saída
       const bloco = document.createElement('div');
       bloco.className = 'laudo';
       bloco.innerHTML = `
@@ -610,7 +619,7 @@
       if (res) res.focus();
     }
 
-    // ==== Salvar PDF (mantido) ====
+    // ==== Salvar PDF ====
     async function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {

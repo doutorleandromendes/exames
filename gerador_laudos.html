@@ -67,10 +67,10 @@
       font-style: italic;
       background: #e9e9e9;
       padding: 6px 10px;
-      text-align: left;           /* alinhado à esquerda */
+      text-align: left;
       margin: 14px 0;
       border-radius: 3px;
-      font-size: 16px;            /* igual ao resultado */
+      font-size: 16px;
     }
     .linha-top { display: flex; justify-content: space-between; align-items: flex-start; margin: 8px 0 4px; }
     .amostra, .ref { color: #666; font-size: 13px; margin: 0; }
@@ -78,24 +78,22 @@
 
     .resultado-box {
       text-align: center;
-      font-size: 16px;            /* base para cálculo de -4pt na observação */
+      font-size: 16px;
       font-weight: bold;
       background: #f5f5f5;
       padding: 10px 20px;
-      /* width: max-content;  REMOVIDO para permitir quebra */
+      /* width: max-content;  (removido anteriormente p/ quebra) */
       margin: 16px auto 8px;
       border-radius: 3px;
 
-      /* >>> Permitir quebra e respeitar a largura do container/A4 <<< */
-      display: inline-block;      /* conserva visual “caixa” centralizada */
-      max-width: 100%;            /* nunca excede a largura disponível */
+      display: inline-block;
+      max-width: 100%;
       box-sizing: border-box;
-      white-space: normal;        /* permite quebra natural */
-      overflow-wrap: anywhere;    /* quebra palavras muito longas */
-      word-break: break-word;     /* fallback amplo */
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
-    /* Observação: central, itálico, preto, sem fundo; 4pt menor que ~12pt => ~8pt (~10.67px) */
     .observacao {
       text-align: center;
       font-style: italic;
@@ -105,20 +103,18 @@
       margin: 6px 0 0;
     }
 
-    /* Assinatura digital */
     .assinatura-digital {
       font-size: 11px;
       font-weight: bold;
       text-align: center;
-      margin-top: 48px;   /* ~3 linhas antes do texto */
+      margin-top: 48px;
       margin-bottom: 8px;
     }
 
-    /* Footer minimal */
     .lm-footer{
       background:#111;
       color:#f5f5f5;
-      padding:10px 12px;   /* altura reduzida */
+      padding:10px 12px;
       font: 400 11px/1.4 system-ui;
       text-align:center;
       margin-top: 10px;
@@ -132,19 +128,66 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* Fallback de impressão nativa */
+    /* ===== Impressão (APENAS CSS, sem mudar HTML/JS) ===== */
     @media print {
       @page { size: A4 portrait; margin: 0; }
+
       .formulario, .acoes, details.debug { display: none !important; }
       .laudos-container { display: block !important; }
-      html, body { width: 210mm; height: auto !important; margin: 0 !important; padding: 0 !important; }
-      .lm-header, .header-info, .exames-list, .assinatura-digital, .lm-footer { padding-left: 12mm !important; padding-right: 12mm !important; }
+
+      html, body {
+        width: 210mm;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      /* Mantém as laterais iguais às do layout */
+      .lm-header, .header-info, .exames-list, .assinatura-digital, .lm-footer {
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
+
+      /* Cabeçalho e identificação REPETIDOS em todas as páginas */
+      .lm-header {
+        position: fixed;
+        top: 0;
+        left: 0; right: 0;
+        background: #fff;
+        z-index: 10;
+      }
+      .header-info {
+        position: fixed;
+        left: 0; right: 0;
+        top: 68mm;             /* distância após o bloco do cabeçalho */
+        background: #fff;
+        z-index: 9;
+      }
+
+      /* Rodapé REPETIDO em todas as páginas */
+      .lm-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0; right: 0;
+        z-index: 10;
+      }
+
+      /* Espaço para não sobrepor o conteúdo
+         (margem até o primeiro resultado + área do rodapé) */
+      .exames-list {
+        /* espaço superior = cabeçalho + identificação */
+        margin-top: 88mm !important;   /* ajuste fino se necessário no seu impressor */
+        /* espaço inferior = rodapé */
+        margin-bottom: 20mm !important;
+      }
+
       .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
       .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
-      .assinatura-digital { margin-bottom: 6mm !important; }
-      .lm-footer { margin-top: 6mm !important; break-inside: avoid; page-break-inside: avoid; }
 
-      /* garante que a caixa do resultado nunca ultrapasse a largura útil do A4 */
+      .assinatura-digital { margin-bottom: 22mm !important; } /* não colar no rodapé */
+      .lm-footer { break-inside: avoid; page-break-inside: avoid; }
+
+      /* Garante que a caixa do resultado respeite a largura útil do A4 */
       .resultado-box { max-width: calc(210mm - 24mm); }
     }
   </style>
@@ -237,11 +280,9 @@
   <div class="laudos-container" id="laudos"></div>
 
   <script>
-    // ==== URLs dos CSVs (mantidas) ====
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
     const examesURL    = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv';
 
-    // ==== Utilidades (mantidas) ====
     function fetchNoCache(url, opts = {}) {
       const sep = url.includes('?') ? '&' : '?';
       const busted = `${url}${sep}_ts=${Date.now()}`;
@@ -268,19 +309,16 @@
       return s;
     }
 
-    // ==== Datas default (mantidas) ====
     document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
-    // === Mostrar/ocultar Material (Amostra) manual ===
     document.addEventListener('DOMContentLoaded', () => {
       const t = document.getElementById('amostraManualToggle');
       const w = document.getElementById('amostra-manual-wrap');
       if (t && w) t.addEventListener('change', ()=>{ w.style.display = t.checked ? 'block' : 'none'; });
     });
 
-    // === Mostrar/ocultar VR manual ===
     document.addEventListener('DOMContentLoaded', () => {
       const tgl = document.getElementById('vrManualToggle');
       const wrap = document.getElementById('vr-manual-wrap');
@@ -291,7 +329,6 @@
       }
     });
 
-    // === Mostrar/ocultar Observação ===
     document.addEventListener('DOMContentLoaded', () => {
       const tgl = document.getElementById('obsToggle');
       const wrap = document.getElementById('obsWrap');
@@ -302,7 +339,6 @@
       }
     });
 
-    // ==== Carrega Pacientes ====
     fetchNoCache(pacientesURL)
       .then(r=>r.text())
       .then(csv=>{
@@ -338,18 +374,15 @@
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    // ==== Carrega Exames ====
     fetchNoCache(examesURL)
       .then(r=>r.text())
       .then(csv=>{
-        // tenta com header ; (GitHub CSV tem ; e header: Product Name;Price;...)
         let parsed = Papa.parse(csv, { header: true, delimiter: ';', skipEmptyLines: true });
         let exames = [];
         if (parsed.meta && parsed.data && parsed.data.length) {
           const firstKey = parsed.meta.fields?.[0] || 'Product Name';
           exames = parsed.data.map(r => (r[firstKey]||'').toString().trim()).filter(Boolean);
         }
-        // fallback: sem header
         if (!exames.length) {
           parsed = Papa.parse(csv, { header: false, delimiter: ';', skipEmptyLines: true });
           const rows = parsed.data || [];
@@ -380,7 +413,6 @@
       })
       .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
 
-    // === Helper para toggle de Resultado manual ===
     function addResultadoManualToggle(container){
       const lbl = document.createElement('label');
       const chk = document.createElement('input');
@@ -408,14 +440,12 @@
       });
     }
 
-    // ==== Campo Resultado dinâmico ====
     function atualizarCampoResultado(){
       const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const container = document.getElementById('resultado-container');
       container.innerHTML = '';
 
       if (nomeExame.includes('dosagem')) {
-        // Campo só para números
         const input = document.createElement('input');
         input.type = 'text';
         input.inputMode = 'decimal';
@@ -424,15 +454,12 @@
         input.style.fontWeight = 'bold';
         input.style.textAlign = 'center';
         input.addEventListener('input', (e)=>{
-          e.target.value = e.target.value.replace(/[^\d.,<>]/g,''); // só número, vírgula e ponto
+          e.target.value = e.target.value.replace(/[^\d.,<>]/g,'');
         });
         container.appendChild(input);
-
-        // acrescenta opção manual (opt-in)
         addResultadoManualToggle(container);
 
       } else if (nomeExame.includes('microscopia')) {
-        // Campo de texto livre (já é manual por natureza)
         const input = document.createElement('input');
         input.type = 'text';
         input.placeholder = 'Digite o resultado';
@@ -442,7 +469,6 @@
         container.appendChild(input);
 
       } else {
-        // Dropdown padrão
         const select = document.createElement('select');
         select.id = 'resultado';
         select.style.fontWeight = 'bold';
@@ -453,13 +479,10 @@
           select.appendChild(o);
         });
         container.appendChild(select);
-
-        // acrescenta opção manual (opt-in)
         addResultadoManualToggle(container);
       }
     }
 
-    // Default método = Imunofluorescência quando for “dosagem”
     function setMetodoDefaultParaExame(){
       const nomeExame = (document.getElementById('exame').value || '').trim().toLowerCase();
       const metodoSel = document.getElementById('metodo');
@@ -471,7 +494,6 @@
       }
     }
 
-    // ==== Estrutura fixa da saída ====
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -502,7 +524,6 @@
       cont.style.display='block';
     }
 
-    // ==== Gerar cada laudo ====
     function gerarLaudo(){
       garantirEstrutura();
 
@@ -520,7 +541,6 @@
       const dataTeste = toBRDate(document.getElementById('data').value);
       const exame = (document.getElementById('exame').value || '').trim();
 
-      // Amostra (com override manual, se marcado e preenchido)
       let amostra = document.getElementById('amostra').value;
       if (document.getElementById('amostraManualToggle')?.checked) {
         const a = (document.getElementById('amostraManual')?.value || '').trim();
@@ -529,7 +549,6 @@
 
       const metodo = document.getElementById('metodo').value;
 
-      // Resultado (respeita "manual")
       let resultadoBruto = '';
       const resManualAtivo = document.getElementById('resultadoManualToggle')?.checked;
       if (resManualAtivo) {
@@ -540,7 +559,6 @@
 
       const hoje = new Date().toLocaleDateString('pt-BR');
 
-      // identificação uma vez
       const header = document.getElementById('headerInfo');
       if (!header.dataset.filled) {
         header.innerHTML = `
@@ -551,7 +569,6 @@
         header.dataset.filled = '1';
       }
 
-      // Valor de referência automático + unidade para DOSAGENS
       let valorRef = 'NÃO REAGENTE';
       if (exame.toLowerCase().includes('dosagem')) {
         const cfg = {
@@ -563,7 +580,6 @@
         if (cfg.ref) {
           valorRef = cfg.ref;
 
-          // se NÃO for resultado manual: formata número + unidade
           if (!resManualAtivo) {
             let num = resultadoBruto.trim().replace(',', '.');
             const n = parseFloat(num);
@@ -580,13 +596,11 @@
         }
       }
 
-      // Override manual do Valor de Referência
       if (document.getElementById('vrManualToggle')?.checked) {
         const vr = (document.getElementById('vrManual')?.value || '').trim();
         if (vr) valorRef = vr;
       }
 
-      // Observação (opt-in): duas quebras de linha antes da observação
       let observacaoHTML = '';
       if (document.getElementById('obsToggle')?.checked) {
         const obs = (document.getElementById('obsText')?.value || '').trim();
@@ -595,7 +609,6 @@
         }
       }
 
-      // Bloco de saída
       const bloco = document.createElement('div');
       bloco.className = 'laudo';
       bloco.innerHTML = `
@@ -619,7 +632,6 @@
       if (res) res.focus();
     }
 
-    // ==== Salvar PDF ====
     async function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {
@@ -627,18 +639,16 @@
         return;
       }
 
-      // monta nome do arquivo
       const sel = document.getElementById('paciente').value;
       let nomePaciente = (sel === 'manual')
         ? (document.getElementById('pacienteNomeManual').value || '').trim()
         : (sel.split('|')[0] || '').trim();
 
-      const dataISO = (document.getElementById('data').value || '').trim(); // YYYY-MM-DD
+      const dataISO = (document.getElementById('data').value || '').trim();
       const dataNome = dataISO ? dataISO.split('-').reverse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 
-      // garante visível e com respiro A4
       const prevDisplay = laudos.style.display;
       const prevPL = laudos.style.paddingLeft;
       const prevPR = laudos.style.paddingRight;
@@ -646,7 +656,6 @@
       laudos.style.paddingLeft = '12mm';
       laudos.style.paddingRight = '12mm';
 
-      // tenta html2pdf com timeout
       const opt = {
         margin: 0,
         filename: nomeArquivo,
@@ -657,19 +666,16 @@
       };
 
       let salvou = false;
-      const timeout = new Promise(res => setTimeout(res, 6000)); // 6s
+      const timeout = new Promise(res => setTimeout(res, 6000));
 
       try {
         await Promise.race([
           html2pdf().set(opt).from(laudos).save().then(()=>{ salvou = true; }),
           timeout
         ]);
-      } catch(e) {
-        // cai pro fallback
-      }
+      } catch(e) {}
 
       if (!salvou) {
-        // FALLBACK jsPDF.html
         try {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', hotfixes: ['px_scaling'] });
@@ -686,7 +692,6 @@
         }
       }
 
-      // restaura estilos
       laudos.style.display = prevDisplay || laudos.style.display;
       laudos.style.paddingLeft = prevPL || '';
       laudos.style.paddingRight = prevPR || '';

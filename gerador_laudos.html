@@ -128,8 +128,8 @@
 
     /* ========= IMPRESSÃO =========
        - header/ident e rodapé repetem (fixed)
-       - NADA de “tabela” para evitar centralização vertical
-       - Margens dinâmicas são injetadas via JS no beforeprint (sem folgas). */
+       - Margens dinâmicas injetadas via JS (medidas reais)
+       - “Cinto e suspensório”: conteúdo é empurrado com padding calculado */
     @media print {
       /* valor default (sobrescrito dinamicamente) */
       @page { size: A4 portrait; margin: 60mm 12mm 30mm 12mm; }
@@ -148,7 +148,7 @@
         position: fixed !important;
         top: 0; left: 0; right: 0;
         background: #fff !important;
-        z-index: 100;
+        z-index: 9999 !important;
         padding-left: 12mm !important;
         padding-right: 12mm !important;
       }
@@ -158,7 +158,7 @@
         left: 0; right: 0;
         margin: 0 !important;
         background: #fff !important;
-        z-index: 90;
+        z-index: 9999 !important;
         padding-left: 12mm !important;
         padding-right: 12mm !important;
       }
@@ -185,7 +185,14 @@
         padding-right: 12mm !important;
       }
 
-      .exames-list { margin: 0 !important; padding: 0 !important; }
+      /* empilhamento correto + área útil empurrada via JS */
+      .exames-list {
+        margin: 0 !important;
+        padding: 0 !important;  /* (JS aplicará padding-top/bottom dinâmicos) */
+        position: relative;
+        z-index: 0;
+      }
+
       .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
       .resultado-box{
@@ -614,53 +621,52 @@
 
     /* ================== Impressão: margens dinâmicas precisas ================== */
     function pxToMm(px){ return px * 25.4 / 96; }
-function mmToPx(mm){ return mm * 96 / 25.4; }
+    function mmToPx(mm){ return mm * 96 / 25.4; }
 
-function computeAndInjectPrintMargins() {
-  const header = document.getElementById('lmHeader');
-  const info   = document.getElementById('headerInfo');
-  const footer = document.getElementById('lmFooter');
-  const assin  = document.querySelector('.assinatura-digital');
-  const bodyList = document.getElementById('examesList');
+    function computeAndInjectPrintMargins() {
+      const header = document.getElementById('lmHeader');
+      const info   = document.getElementById('headerInfo');
+      const footer = document.getElementById('lmFooter');
+      const assin  = document.querySelector('.assinatura-digital');
+      const bodyList = document.getElementById('examesList');
 
-  // Alturas reais em px
-  const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
-  const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
-  const hFooterPx = footer ? footer.getBoundingClientRect().height : mmToPx(12);
+      // Alturas reais em px
+      const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
+      const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
+      const hFooterPx = footer ? footer.getBoundingClientRect().height : mmToPx(12);
 
-  // Espaços visuais (~1 linha topo, ~2 linhas rodapé)
-  const gapTopMm    = 4;
-  const gapBottomMm = 8;
+      // Espaços visuais (~1 linha topo, ~2 linhas rodapé)
+      const gapTopMm    = 4;
+      const gapBottomMm = 8;
 
-  // Conversões p/ @page
-  const topMm    = pxToMm(hHeaderPx + hInfoPx) + gapTopMm;
-  const bottomMm = pxToMm(hFooterPx) + gapBottomMm;
+      // Conversões p/ @page
+      const topMm    = pxToMm(hHeaderPx + hInfoPx) + gapTopMm;
+      const bottomMm = pxToMm(hFooterPx) + gapBottomMm;
 
-  // Posicionamentos fixos coerentes com a medida real
-  if (info)  info.style.top     = hHeaderPx + 'px';
-  if (assin) assin.style.bottom = (hFooterPx + mmToPx(2)) + 'px';
+      // Posicionamentos fixos coerentes com a medida real
+      if (info)  info.style.top     = hHeaderPx + 'px';
+      if (assin) assin.style.bottom = (hFooterPx + mmToPx(2)) + 'px';
 
-  // >>> Empurra o fluxo do conteúdo dentro da área útil (resolve sobreposição no Chrome)
-  if (bodyList) {
-    const paddingTopPx    = hHeaderPx + hInfoPx + mmToPx(gapTopMm);
-    const paddingBottomPx = hFooterPx + mmToPx(gapBottomMm);
-    bodyList.style.paddingTop    = paddingTopPx + 'px';
-    bodyList.style.paddingBottom = paddingBottomPx + 'px';
-  }
+      // >>> Empurra o fluxo do conteúdo dentro da área útil (cinto e suspensório)
+      if (bodyList) {
+        const paddingTopPx    = hHeaderPx + hInfoPx + mmToPx(gapTopMm);
+        const paddingBottomPx = hFooterPx + mmToPx(gapBottomMm);
+        bodyList.style.paddingTop    = paddingTopPx + 'px';
+        bodyList.style.paddingBottom = paddingBottomPx + 'px';
+      }
 
-  // Injeta/atualiza @page (para engines que respeitam)
-  let dyn = document.getElementById('dynamicPrintCSS');
-  const css = `@page { size: A4 portrait; margin: ${topMm}mm 12mm ${bottomMm}mm 12mm; }`;
-  if (!dyn) {
-    dyn = document.createElement('style');
-    dyn.id = 'dynamicPrintCSS'; dyn.media = 'print';
-    dyn.appendChild(document.createTextNode(css));
-    document.head.appendChild(dyn);
-  } else {
-    dyn.textContent = css;
-  }
-}
-
+      // Injeta/atualiza @page (para engines que respeitam)
+      let dyn = document.getElementById('dynamicPrintCSS');
+      const css = `@page { size: A4 portrait; margin: ${topMm}mm 12mm ${bottomMm}mm 12mm; }`;
+      if (!dyn) {
+        dyn = document.createElement('style');
+        dyn.id = 'dynamicPrintCSS'; dyn.media = 'print';
+        dyn.appendChild(document.createTextNode(css));
+        document.head.appendChild(dyn);
+      } else {
+        dyn.textContent = css;
+      }
+    }
 
     if (window.matchMedia) {
       const mql = window.matchMedia('print');
@@ -671,8 +677,10 @@ function computeAndInjectPrintMargins() {
     window.addEventListener('afterprint', () => {
       const info  = document.getElementById('headerInfo');
       const assin = document.querySelector('.assinatura-digital');
-      if (info) info.style.top = '';
+      const bodyList = document.getElementById('examesList');
+      if (info)  info.style.top = '';
       if (assin) assin.style.bottom = '';
+      if (bodyList){ bodyList.style.paddingTop=''; bodyList.style.paddingBottom=''; }
     });
 
     /* ================== Salvar PDF: paginador A4 com cabeçalho/rodapé em cada página ================== */
@@ -697,12 +705,10 @@ function computeAndInjectPrintMargins() {
 
       const pageWidthPx  = mmToPx(210);
       const pageHeightPx = mmToPx(297);
-      const padLRPx      = mmToPx(12);
 
       const headerTopPx  = 0;
       const identTopPx   = hHeaderPx;                 // identificação logo após o header
       const bodyTopPx    = hHeaderPx + hInfoPx + gapTopPx;
-      const footerBottomPx = 0;
       const signBottomPx   = hFooterPx + mmToPx(2);   // assinatura um pouco acima da barra
       const bodyBottomPx   = hFooterPx + gapBotPx;
 
@@ -713,7 +719,7 @@ function computeAndInjectPrintMargins() {
       const pagesWrap = document.createElement('div');
       pagesWrap.className = 'pdf-pages';
 
-      let page, body, used = 0;
+      let page, body;
       function newPage(){
         page = document.createElement('div');
         page.className = 'pdf-page';
@@ -748,7 +754,6 @@ function computeAndInjectPrintMargins() {
         page.appendChild(pf);
 
         pagesWrap.appendChild(page);
-        used = 0;
       }
 
       newPage();

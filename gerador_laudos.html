@@ -132,17 +132,21 @@
        - 1 linha entre barra cinza e identificação; ~2 linhas antes do rodapé
     */
     /* ===== Impressão: header/rodapé repetem e empurram conteúdo ===== */
+/* ===== Impressão: header/rodapé repetem e o conteúdo NÃO sobrepõe ===== */
 @media print {
-  /* Reserva por página:
-     topo = (cabeçalho + identificação + ~1 linha),
-     base = (assinatura + ~2 linhas + barra preta) */
+  /* >>> Ajustes principais: 
+     - top = altura do cabeçalho (logo+títulos+barra) + identificação + ~1 linha
+     - bottom = assinatura + ~2 linhas + altura da barra preta
+     Ajuste fino: aumente/diminua os mm abaixo se notar 1–2 mm de diferença no seu PDF. */
   @page {
     size: A4 portrait;
-    margin: 48mm 12mm 34mm 12mm; /* top right bottom left */
+    margin: 62mm 12mm 38mm 12mm; /* top right bottom left */
   }
 
   .formulario, .acoes, details.debug { display: none !important; }
-  .laudos-container { display: block !important; } /* evita “tabela” centrar verticalmente */
+
+  /* MUITO IMPORTANTE: nada de display:table no contêiner ao imprimir */
+  .laudos-container { display: block !important; }
 
   html, body {
     width: 210mm;
@@ -151,7 +155,7 @@
     background: #fff !important;
   }
 
-  /* ===== Cabeçalho + Identificação (repetem e NÃO sobrepõem) ===== */
+  /* ===== Cabeçalho (logo/títulos/barra) + Identificação ===== */
   .lm-header{
     position: fixed !important;
     top: 0; left: 0; right: 0;
@@ -160,13 +164,15 @@
     padding-left: 12mm !important;
     padding-right: 12mm !important;
   }
+
+  /* A identificação fica **logo abaixo** do cabeçalho fixo */
   .header-info{
     position: fixed !important;
-    top: 30mm;                         /* altura aproximada do bloco do cabeçalho */
+    top: 34mm;                        /* altura real do bloco da .lm-header no seu layout */
     left: 0; right: 0;
+    margin: 4mm 0 0 0 !important;     /* ~1 linha entre a barra cinza e a identificação */
     background: #fff !important;
     z-index: 9;
-    margin: 4mm 0 0 0 !important;      /* exatamente 1 “linha” após a barra cinza */
     padding-left: 12mm !important;
     padding-right: 12mm !important;
   }
@@ -174,31 +180,35 @@
   /* ===== Rodapé (assinatura + barra preta) ===== */
   .assinatura-digital{
     position: fixed !important;
-    bottom: 24mm;                       /* ~2 linhas acima da barra preta */
+    bottom: 26mm;                      /* ~2 linhas acima da barra preta */
     left: 0; right: 0;
     margin: 0 !important;
     text-align: center !important;
-    background: #fff !important;
+    background: #fff !important;       /* mantém o papel “limpo” atrás da assinatura */
     z-index: 10;
     padding-left: 12mm !important;
     padding-right: 12mm !important;
   }
+
   .lm-footer{
     position: fixed !important;
     bottom: 0; left: 0; right: 0;
-    background: #111 !important;        /* **mantém a barra preta** */
+    background: #111 !important;       /* GARANTE a caixa preta */
     color: #f5f5f5 !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    -webkit-print-color-adjust: exact; 
+    print-color-adjust: exact;
     z-index: 10;
     padding-left: 12mm !important;
     padding-right: 12mm !important;
   }
 
-  /* ===== Corpo ===== */
-  .exames-list{ margin: 0 !important; padding: 0 !important; }
+  /* ===== Corpo =====
+     Nada de margens artificiais aqui — @page já reservou topo/rodapé por página.
+     Isso evita a “centralização vertical” do bloco de resultados. */
+  .exames-list { margin: 0 !important; padding: 0 !important; }
   .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
-  /* Resultado centralizado e limitado à largura útil do A4 */
+  /* Resultado: sempre centralizado e quebrando linha quando precisar */
   .resultado-box{
     max-width: calc(210mm - 24mm) !important; /* 12mm de cada lado */
     margin-left: auto !important;

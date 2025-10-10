@@ -131,51 +131,84 @@
        - Mantém formatação/tipografia/flex iguais
        - 1 linha entre barra cinza e identificação; ~2 linhas antes do rodapé
     */
-    @media print {
-      @page { size: A4 portrait; margin: 12mm; } /* laterais fixas; topo/rodapé serão "consumidos" pelo header/footer */
+    /* ===== Impressão: header/rodapé repetem e empurram conteúdo ===== */
+@media print {
+  /* Reserva por página:
+     topo = (cabeçalho + identificação + ~1 linha),
+     base = (assinatura + ~2 linhas + barra preta) */
+  @page {
+    size: A4 portrait;
+    margin: 48mm 12mm 34mm 12mm; /* top right bottom left */
+  }
 
-      .formulario, .acoes, details.debug { display: none !important; }
+  .formulario, .acoes, details.debug { display: none !important; }
+  .laudos-container { display: block !important; } /* evita “tabela” centrar verticalmente */
 
-      /* Estrutura de tabela para imprimir: header, corpo, footer */
-      .laudos-container { display: table !important; width: 100% !important; border-collapse: separate !important; }
+  html, body {
+    width: 210mm;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
 
-      .print-header { display: table-header-group !important; }
-      .print-body   { display: table-row-group !important; }
-      .print-footer { display: table-footer-group !important; }
+  /* ===== Cabeçalho + Identificação (repetem e NÃO sobrepõem) ===== */
+  .lm-header{
+    position: fixed !important;
+    top: 0; left: 0; right: 0;
+    background: #fff !important;
+    z-index: 10;
+    padding-left: 12mm !important;
+    padding-right: 12mm !important;
+  }
+  .header-info{
+    position: fixed !important;
+    top: 30mm;                         /* altura aproximada do bloco do cabeçalho */
+    left: 0; right: 0;
+    background: #fff !important;
+    z-index: 9;
+    margin: 4mm 0 0 0 !important;      /* exatamente 1 “linha” após a barra cinza */
+    padding-left: 12mm !important;
+    padding-right: 12mm !important;
+  }
 
-      /* NADA de position:fixed na impressão */
-      .lm-header, .header-info, .assinatura-digital, .lm-footer {
-        position: static !important;
-        z-index: auto !important;
-        background: #fff !important;
-        padding-left: 12mm !important;
-        padding-right: 12mm !important;
-      }
+  /* ===== Rodapé (assinatura + barra preta) ===== */
+  .assinatura-digital{
+    position: fixed !important;
+    bottom: 24mm;                       /* ~2 linhas acima da barra preta */
+    left: 0; right: 0;
+    margin: 0 !important;
+    text-align: center !important;
+    background: #fff !important;
+    z-index: 10;
+    padding-left: 12mm !important;
+    padding-right: 12mm !important;
+  }
+  .lm-footer{
+    position: fixed !important;
+    bottom: 0; left: 0; right: 0;
+    background: #111 !important;        /* **mantém a barra preta** */
+    color: #f5f5f5 !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    z-index: 10;
+    padding-left: 12mm !important;
+    padding-right: 12mm !important;
+  }
 
-      /* 1 quebra entre barra cinza e identificação */
-      .lm-header__rule { margin-top: 10px !important; }
-      .header-info { margin: 1.2em 0 0 0 !important; }
+  /* ===== Corpo ===== */
+  .exames-list{ margin: 0 !important; padding: 0 !important; }
+  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
-      /* ~2 quebras antes do rodapé: usa espaçamento na assinatura (parte superior do rodapé) */
-      .assinatura-digital { margin: 0 0 2.4em 0 !important; }
+  /* Resultado centralizado e limitado à largura útil do A4 */
+  .resultado-box{
+    max-width: calc(210mm - 24mm) !important; /* 12mm de cada lado */
+    margin-left: auto !important;
+    margin-right: auto !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+}
 
-      /* Footer com barra preta preservada */
-      .lm-footer { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-
-      /* Corpo sem centralização vertical (ancorado no topo do bloco útil) */
-      .print-body, .exames-list { margin: 0 !important; padding: 0 !important; }
-
-      /* Evitar cortes de bloco */
-      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-      .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
-
-      /* Largura útil A4 para Resultado */
-      .resultado-box {
-        max-width: calc(210mm - 24mm) !important;
-        margin-left: auto !important;
-        margin-right: auto !important;
-      }
-    }
 
     /* ====== Modo PDF (html2pdf) ======
        html2pdf ignora @media print, então ativamos o mesmo layout

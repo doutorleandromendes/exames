@@ -127,108 +127,105 @@
     .status.err { color: #b00020; }
 
     /* ========= IMPRESSÃO =========
-       - header/ident e rodapé repetem (fixed)
-       - Margens em mm já reservam CABEÇALHO + IDENTIFICAÇÃO
-       - JS ainda “empurra” a área útil (cinto e suspensório) */
+       Reserva de topo em TODAS as páginas (header + identificação + gap)
+       Cabeçalho/ident são “desenhados” na área de margem com offset negativo
+       Corpo nunca passa por baixo; rodapé repetido com folga */
     @media print {
-  :root{
-    --h-header-mm: 32;   /* altura visual do cabeçalho (logo+título+barra) */
-    --h-ident-mm:  20;   /* altura do bloco de Identificação (Nome/DN/Datas) */
-    --h-footer-mm: 12;   /* altura da barra preta do rodapé */
-    --gap-top-mm:   4;   /* ~1 linha entre Identificação e 1º resultado */
-    --gap-bottom-mm:10;  /* respiro antes do rodapé */
-    --mt-mm: calc(var(--h-header-mm) + var(--h-ident-mm) + var(--gap-top-mm));
-  }
+      :root{
+        --h-header-mm: 32;   /* cabeçalho (logo+título+barra) */
+        --h-ident-mm:  20;   /* identificação (Nome/DN/Datas) */
+        --h-footer-mm: 12;   /* barra preta do rodapé */
+        --gap-top-mm:   4;   /* ~1 linha entre identificação e 1º resultado */
+        --gap-bottom-mm:10;  /* respiro antes do rodapé */
+        --mt-mm: calc(var(--h-header-mm) + var(--h-ident-mm) + var(--gap-top-mm));
+      }
 
-  /* A4; todas as páginas reservam topo/base igualmente */
-  @page {
-    size: A4 portrait;
-    margin: var(--mt-mm)mm 12mm calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm 12mm;
-  }
+      @page {
+        size: A4 portrait;
+        margin: var(--mt-mm)mm 12mm calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm 12mm;
+      }
 
-  .formulario, .acoes, details.debug { display: none !important; }
-  .laudos-container { display: block !important; }
+      .formulario, .acoes, details.debug { display: none !important; }
+      .laudos-container { display: block !important; }
 
-  html, body {
-    width: 210mm;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #fff !important;
-  }
+      html, body {
+        width: 210mm;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+      }
 
-  /* ===== TOPO FIXO (desenhado na ÁREA DE MARGEM via offset negativo) ===== */
-  .lm-header{
-    position: fixed !important;
-    top: calc(-1 * var(--mt-mm) * 1mm) !important;         /* sobe para o topo físico */
-    left: 0; right: 0;
-    height: calc(var(--h-header-mm) * 1mm) !important;
-    background: #fff !important;
-    z-index: 9999 !important;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
-  .header-info{
-    position: fixed !important;
-    top: calc((-1 * var(--mt-mm) + var(--h-header-mm)) * 1mm) !important; /* logo após o cabeçalho */
-    left: 0; right: 0;
-    margin: 0 !important;
-    background: #fff !important;
-    z-index: 9999 !important;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== TOPO FIXO (desenho na área de margem com offset negativo) ===== */
+      .lm-header{
+        position: fixed !important;
+        top: calc(-1 * var(--mt-mm) * 1mm) !important;
+        left: 0; right: 0;
+        height: calc(var(--h-header-mm) * 1mm) !important;
+        background: #fff !important;
+        z-index: 9999 !important;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
+      .header-info{
+        position: fixed !important;
+        top: calc((-1 * var(--mt-mm) + var(--h-header-mm)) * 1mm) !important;
+        left: 0; right: 0;
+        margin: 0 !important;
+        background: #fff !important;
+        z-index: 9999 !important;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
 
-  /* ===== BASE FIXA ===== */
-  .assinatura-digital{
-    position: fixed !important;
-    bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important; /* ~2mm acima da barra preta */
-    left: 0; right: 0;
-    margin: 0 !important;
-    text-align: center !important;
-    background: #fff !important;
-    z-index: 100;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
-  .lm-footer{
-    position: fixed !important;
-    bottom: 0; left: 0; right: 0;
-    height: calc(var(--h-footer-mm) * 1mm) !important;
-    background: #111 !important;
-    color: #f5f5f5 !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-    z-index: 100;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== BASE FIXA ===== */
+      .assinatura-digital{
+        position: fixed !important;
+        bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important;
+        left: 0; right: 0;
+        margin: 0 !important;
+        text-align: center !important;
+        background: #fff !important;
+        z-index: 100;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
+      .lm-footer{
+        position: fixed !important;
+        bottom: 0; left: 0; right: 0;
+        height: calc(var(--h-footer-mm) * 1mm) !important;
+        background: #111 !important;
+        color: #f5f5f5 !important;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        z-index: 100;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
 
-  /* ===== CORPO =====
-     sem padding-top: a margem de @page já reserva espaço em TODAS as páginas
-     mantemos só um padding-bottom mínimo para nunca encostar no rodapé */
-  .exames-list {
-    margin: 0 !important;
-    position: relative;
-    z-index: 0;
-    padding-bottom: calc(var(--gap-bottom-mm) * 1mm) !important;
-  }
+      /* ===== CORPO ===== */
+      .exames-list {
+        margin: 0 !important;
+        position: relative;
+        z-index: 0;
+        /* sem padding-top: @page já reserva o topo para TODAS as páginas */
+        padding-bottom: calc(var(--gap-bottom-mm) * 1mm) !important; /* respiro extra */
+      }
 
-  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
-  .resultado-box{
-    max-width: calc(210mm - 24mm) !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    white-space: normal !important;
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
-  }
+      .resultado-box{
+        max-width: calc(210mm - 24mm) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+      }
 
-  /* Não imprimir a estrutura do botão "Salvar PDF" */
-  .pdf-pages { display: none !important; }
-}
+      /* NÃO imprimir a estrutura do “Salvar PDF” */
+      .pdf-pages { display: none !important; }
+    }
 
-
-    /* ====== Estilos do paginador do botão “Salvar PDF” (não afetam tela/print) ====== */
+    /* ====== Estilos do paginador do botão “Salvar PDF” (não afetam a impressão) ====== */
     .pdf-pages { position: fixed; left: -10000px; top: 0; width: 210mm; }
     .pdf-page {
       width: 210mm; height: 297mm;
@@ -642,57 +639,24 @@
       if (res) res.focus();
     }
 
-    /* ================== Impressão: margens dinâmicas precisas ================== */
-    function pxToMm(px){ return px * 25.4 / 96; }
-    function mmToPx(mm){ return mm * 96 / 25.4; }
-
+    /* ================== Impressão: remover injeções antigas ================== */
     function computeAndInjectPrintMargins() {
-  const header = document.getElementById('lmHeader');
-  const info   = document.getElementById('headerInfo');
-  const footer = document.getElementById('lmFooter');
-  const assin  = document.querySelector('.assinatura-digital');
-  const bodyList = document.getElementById('examesList');
+      // Remover estilos dinâmicos antigos que podiam sobrescrever o @page
+      const dyn = document.getElementById('dynamicPrintCSS');
+      if (dyn) dyn.remove();
+      const dynPad = document.getElementById('dynamicBodyPad');
+      if (dynPad) dynPad.remove();
 
-  // Alturas reais em px
-  const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
-  const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
-  const hFooterPx = footer ? footer.getBoundingClientRect().height : 0;
+      // Garantir que não restem paddings inline conflitantes
+      const bodyList = document.getElementById('examesList');
+      if (bodyList) { bodyList.style.paddingTop=''; bodyList.style.paddingBottom=''; }
 
-  // Gaps em mm -> px
-  const gapTopPx    = (4  * 96) / 25.4;  // ~1 linha
-  const gapBottomPx = (10 * 96) / 25.4;  // respiro antes do rodapé
-
-  /* 1) Posicionar identificação LOGO APÓS o header (em px) */
-  if (info)  info.style.top     = hHeaderPx + 'px';
-  if (assin) assin.style.bottom = (hFooterPx + (2 * 96/25.4)) + 'px'; // ~2mm acima da barra
-
-  /* 2) (Simplificado) Corpo sem padding-top; @page já reserva o topo em TODAS as páginas.
-      Mantemos apenas um respiro inferior adicional, se desejar. */
-if (bodyList) {
-  const padBot = hFooterPx + gapBottomPx; // ~ rodapé + folga
-
-  // zera qualquer padding-top aplicado anteriormente
-  bodyList.style.paddingTop = '';
-  // respiro antes do rodapé (opcional; você também já tem um mínimo no CSS)
-  bodyList.style.paddingBottom = padBot + 'px';
-
-  // remove eventual estilo injetado anteriormente com !important
-  const dynPad = document.getElementById('dynamicBodyPad');
-  if (dynPad) dynPad.remove();
-}
-
-
-  /* 3) @page: topo 0mm (IMPORTANTÍSSIMO), laterais 12mm, base reservada */
-  let dyn = document.getElementById('dynamicPrintCSS');
-  const cssPage = `@page { size: A4 portrait; margin: 0mm 12mm ${ (hFooterPx * 25.4 / 96) + 10 }mm 12mm; }`;
-  if (!dyn) {
-    dyn = document.createElement('style');
-    dyn.id = 'dynamicPrintCSS';
-    dyn.media = 'print';
-    document.head.appendChild(dyn);
-  }
-  dyn.textContent = cssPage;
-}
+      // Garantir que top/bottom inline não sobrescrevam o CSS de impressão
+      const info  = document.getElementById('headerInfo');
+      const assin = document.querySelector('.assinatura-digital');
+      if (info)  info.style.top = '';
+      if (assin) assin.style.bottom = '';
+    }
 
     if (window.matchMedia) {
       const mql = window.matchMedia('print');
@@ -701,15 +665,11 @@ if (bodyList) {
     }
     window.addEventListener('beforeprint', computeAndInjectPrintMargins);
     window.addEventListener('afterprint', () => {
-      const info  = document.getElementById('headerInfo');
-      const assin = document.querySelector('.assinatura-digital');
-      const bodyList = document.getElementById('examesList');
-      if (info)  info.style.top = '';
-      if (assin) assin.style.bottom = '';
-      if (bodyList){ bodyList.style.paddingTop=''; bodyList.style.paddingBottom=''; }
+      // limpeza de segurança
+      computeAndInjectPrintMargins();
     });
 
-    /* ================== Salvar PDF: paginador A4 com cabeçalho/rodapé em cada página ================== */
+    /* ================== Salvar PDF (independente do print) ================== */
     async function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {
@@ -717,30 +677,27 @@ if (bodyList) {
         return;
       }
 
-      // Medidas reais da área fixa para espelhar a impressão
       const header = document.getElementById('lmHeader');
       const info   = document.getElementById('headerInfo');
       const footer = document.getElementById('lmFooter');
 
-      // Mede alturas em px (tela) e define áreas úteis
+      const mmToPx = mm => mm * 96 / 25.4;
       const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
       const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
       const hFooterPx = footer ? footer.getBoundingClientRect().height : mmToPx(12);
-      const gapTopPx  = mmToPx(4);   // ~1 linha
-      const gapBotPx  = mmToPx(8);   // ~2 linhas (assinatura)
+      const gapTopPx  = mmToPx(4);
+      const gapBotPx  = mmToPx(8);
 
       const pageWidthPx  = mmToPx(210);
       const pageHeightPx = mmToPx(297);
 
       const headerTopPx  = 0;
-      const identTopPx   = hHeaderPx;                 // identificação logo após o header
+      const identTopPx   = hHeaderPx;
       const bodyTopPx    = hHeaderPx + hInfoPx + gapTopPx;
-      const signBottomPx   = hFooterPx + mmToPx(2);   // assinatura um pouco acima da barra
-      const bodyBottomPx   = hFooterPx + gapBotPx;
-
+      const signBottomPx = hFooterPx + mmToPx(2);
+      const bodyBottomPx = hFooterPx + gapBotPx;
       const bodyHeightPx = pageHeightPx - bodyTopPx - bodyBottomPx;
 
-      // Clona blocos de exame e distribui em páginas
       const exames = Array.from(document.querySelectorAll('#examesList .laudo'));
       const pagesWrap = document.createElement('div');
       pagesWrap.className = 'pdf-pages';
@@ -750,31 +707,26 @@ if (bodyList) {
         page = document.createElement('div');
         page.className = 'pdf-page';
 
-        // Header (estático)
         const ph = document.createElement('div'); ph.className = 'pdf-header';
         ph.style.top = headerTopPx+'px';
         ph.innerHTML = header.outerHTML;
         page.appendChild(ph);
 
-        // Identificação (estático)
         const pid = document.createElement('div'); pid.className = 'pdf-ident';
         pid.style.top = identTopPx+'px';
         pid.innerHTML = info.outerHTML;
         page.appendChild(pid);
 
-        // Corpo
         body = document.createElement('div'); body.className = 'pdf-body';
         body.style.top = bodyTopPx+'px';
         body.style.height = bodyHeightPx+'px';
         page.appendChild(body);
 
-        // Assinatura
         const ps = document.createElement('div'); ps.className = 'pdf-sign';
         ps.style.bottom = signBottomPx+'px';
         ps.textContent = document.querySelector('.assinatura-digital').textContent;
         page.appendChild(ps);
 
-        // Rodapé (barra preta)
         const pf = document.createElement('div'); pf.className = 'pdf-footer';
         pf.innerHTML = document.getElementById('lmFooter').querySelector('.lm-footer__content').outerHTML;
         page.appendChild(pf);
@@ -783,15 +735,12 @@ if (bodyList) {
       }
 
       newPage();
-      // Inserir exames respeitando a altura útil
       for (const ex of exames) {
         const clone = ex.cloneNode(true);
         clone.style.pageBreakInside = 'avoid';
         clone.style.breakInside = 'avoid';
         body.appendChild(clone);
-        const need = body.scrollHeight; // total ocupado
-        if (need > bodyHeightPx) {
-          // remove o último, vai para próxima página
+        if (body.scrollHeight > bodyHeightPx) {
           body.removeChild(clone);
           newPage();
           body.appendChild(clone);
@@ -800,7 +749,6 @@ if (bodyList) {
 
       document.body.appendChild(pagesWrap);
 
-      // Nome de arquivo
       const sel = document.getElementById('paciente').value;
       let nomePaciente = (sel === 'manual')
         ? (document.getElementById('pacienteNomeManual').value || '').trim()
@@ -810,7 +758,6 @@ if (bodyList) {
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 
-      // Gera PDF a partir das páginas estáticas
       const opt = {
         margin: 0,
         filename: nomeArquivo,
@@ -822,7 +769,6 @@ if (bodyList) {
       try {
         await html2pdf().set(opt).from(pagesWrap).save();
       } catch (e) {
-        // Fallback jsPDF.html
         try {
           const { jsPDF } = window.jspdf;
           const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', hotfixes: ['px_scaling'] });

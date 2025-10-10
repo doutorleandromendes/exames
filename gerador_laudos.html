@@ -614,44 +614,53 @@
 
     /* ================== Impressão: margens dinâmicas precisas ================== */
     function pxToMm(px){ return px * 25.4 / 96; }
-    function mmToPx(mm){ return mm * 96 / 25.4; }
+function mmToPx(mm){ return mm * 96 / 25.4; }
 
-    function computeAndInjectPrintMargins() {
-      const header = document.getElementById('lmHeader');
-      const info   = document.getElementById('headerInfo');
-      const footer = document.getElementById('lmFooter');
-      const assin  = document.querySelector('.assinatura-digital');
+function computeAndInjectPrintMargins() {
+  const header = document.getElementById('lmHeader');
+  const info   = document.getElementById('headerInfo');
+  const footer = document.getElementById('lmFooter');
+  const assin  = document.querySelector('.assinatura-digital');
+  const bodyList = document.getElementById('examesList');
 
-      // Alturas reais em px
-      const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
-      const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
-      const hFooterPx = footer ? footer.getBoundingClientRect().height : mmToPx(12); // fallback ~12mm
+  // Alturas reais em px
+  const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
+  const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
+  const hFooterPx = footer ? footer.getBoundingClientRect().height : mmToPx(12);
 
-      // Espaços “visuais” (em mm) — 1 linha após identificação, ~2 linhas antes do rodapé
-      const gapTopMm    = 4;   // ≈ 1 linha
-      const gapBottomMm = 8;   // ≈ 2 linhas
+  // Espaços visuais (~1 linha topo, ~2 linhas rodapé)
+  const gapTopMm    = 4;
+  const gapBottomMm = 8;
 
-      // Converte topo real p/ mm
-      const topMm    = pxToMm(hHeaderPx + hInfoPx) + gapTopMm;
-      const bottomMm = pxToMm(hFooterPx) + gapBottomMm;
+  // Conversões p/ @page
+  const topMm    = pxToMm(hHeaderPx + hInfoPx) + gapTopMm;
+  const bottomMm = pxToMm(hFooterPx) + gapBottomMm;
 
-      // Posiciona identificação exatamente após o header (em px p/ engines caprichosos)
-      if (info) info.style.top = hHeaderPx + 'px';
-      // Assinatura fica alguns mm acima da barra
-      if (assin) assin.style.bottom = (hFooterPx + mmToPx(2)) + 'px';
+  // Posicionamentos fixos coerentes com a medida real
+  if (info)  info.style.top     = hHeaderPx + 'px';
+  if (assin) assin.style.bottom = (hFooterPx + mmToPx(2)) + 'px';
 
-      // Injeta/atualiza a regra @page com as margens exatas
-      let dyn = document.getElementById('dynamicPrintCSS');
-      const css = `@page { size: A4 portrait; margin: ${topMm}mm 12mm ${bottomMm}mm 12mm; }`;
-      if (!dyn) {
-        dyn = document.createElement('style');
-        dyn.id = 'dynamicPrintCSS'; dyn.media = 'print';
-        dyn.appendChild(document.createTextNode(css));
-        document.head.appendChild(dyn);
-      } else {
-        dyn.textContent = css;
-      }
-    }
+  // >>> Empurra o fluxo do conteúdo dentro da área útil (resolve sobreposição no Chrome)
+  if (bodyList) {
+    const paddingTopPx    = hHeaderPx + hInfoPx + mmToPx(gapTopMm);
+    const paddingBottomPx = hFooterPx + mmToPx(gapBottomMm);
+    bodyList.style.paddingTop    = paddingTopPx + 'px';
+    bodyList.style.paddingBottom = paddingBottomPx + 'px';
+  }
+
+  // Injeta/atualiza @page (para engines que respeitam)
+  let dyn = document.getElementById('dynamicPrintCSS');
+  const css = `@page { size: A4 portrait; margin: ${topMm}mm 12mm ${bottomMm}mm 12mm; }`;
+  if (!dyn) {
+    dyn = document.createElement('style');
+    dyn.id = 'dynamicPrintCSS'; dyn.media = 'print';
+    dyn.appendChild(document.createTextNode(css));
+    document.head.appendChild(dyn);
+  } else {
+    dyn.textContent = css;
+  }
+}
+
 
     if (window.matchMedia) {
       const mql = window.matchMedia('print');

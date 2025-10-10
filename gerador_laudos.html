@@ -40,7 +40,7 @@
     button { padding: 10px 16px; background: #007BFF; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     button + button { margin-left: 8px; }
 
-    /* Header (TUDO como estava) */
+    /* Header (tela) */
     .lm-header{ position: relative; padding: 18px 0 14px 0; }
     .lm-header__wrap{ display:flex; align-items:flex-end; justify-content:flex-end; gap: 16px; }
     .lm-header__meta{ text-align:right; }
@@ -126,125 +126,124 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* ========= IMPRESSÃO E PDF: repetição sem sobreposição =========
-       - Usa "tabela de impressão" para reservar espaço do header e footer
-       - Mantém formatação/tipografia/flex iguais
-       - 1 linha entre barra cinza e identificação; ~2 linhas antes do rodapé
-    */
-    /* ===== Impressão: header/rodapé repetem e empurram conteúdo ===== */
-/* ===== Impressão: header/rodapé repetem e o conteúdo NÃO sobrepõe ===== */
-@media print {
-  /* >>> Ajustes principais: 
-     - top = altura do cabeçalho (logo+títulos+barra) + identificação + ~1 linha
-     - bottom = assinatura + ~2 linhas + altura da barra preta
-     Ajuste fino: aumente/diminua os mm abaixo se notar 1–2 mm de diferença no seu PDF. */
-  @page {
-    size: A4 portrait;
-    margin: 62mm 12mm 38mm 12mm; /* top right bottom left */
-  }
+    /* ========= IMPRESSÃO: header/rodapé repetem e empurram o conteúdo ========= */
+    @media print {
+      :root{
+        /* laterais iguais ao layout */
+        --pad-lr: 12mm;
+        /* alturas do topo */
+        --h-header: 28mm;           /* logo + títulos + barra */
+        --h-ident: 22mm;            /* bloco de identificação (4 linhas) */
+        --gap-after-ident: 4mm;     /* ~1 quebra entre identificação e corpo */
+        /* base */
+        --h-footer: 12mm;           /* barra preta com endereço */
+        --gap-before-footer: 8mm;   /* ~2 quebras acima da barra (assinatura) */
+      }
 
-  .formulario, .acoes, details.debug { display: none !important; }
+      /* A área útil de cada página começa DEPOIS do cabeçalho+ident e termina ANTES do rodapé */
+      @page {
+        size: A4 portrait;
+        margin: calc(var(--h-header) + var(--h-ident) + var(--gap-after-ident)) var(--pad-lr)
+                calc(var(--h-footer) + var(--gap-before-footer)) var(--pad-lr);
+      }
 
-  /* MUITO IMPORTANTE: nada de display:table no contêiner ao imprimir */
-  .laudos-container { display: block !important; }
+      .formulario, .acoes, details.debug { display: none !important; }
+      .laudos-container { display: block !important; }
 
-  html, body {
-    width: 210mm;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #fff !important;
-  }
+      html, body {
+        width: 210mm;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+      }
 
-  /* ===== Cabeçalho (logo/títulos/barra) + Identificação ===== */
-  .lm-header{
-    position: fixed !important;
-    top: 0; left: 0; right: 0;
-    background: #fff !important;
-    z-index: 10;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== Cabeçalho + Identificação (FIXOS e totalmente dentro da margem superior) ===== */
+      .lm-header{
+        position: fixed !important;
+        top: 0;
+        left: 0; right: 0;
+        background: #fff !important;
+        z-index: 100;
+        padding-left: var(--pad-lr) !important;
+        padding-right: var(--pad-lr) !important;
+      }
+      .header-info{
+        position: fixed !important;
+        top: var(--h-header);         /* começa onde termina o cabeçalho */
+        left: 0; right: 0;
+        margin: 0 !important;         /* sem margem extra (o “1 linha” já está na @page) */
+        background: #fff !important;
+        z-index: 90;
+        padding-left: var(--pad-lr) !important;
+        padding-right: var(--pad-lr) !important;
+      }
 
-  /* A identificação fica **logo abaixo** do cabeçalho fixo */
-  .header-info{
-    position: fixed !important;
-    top: 34mm;                        /* altura real do bloco da .lm-header no seu layout */
-    left: 0; right: 0;
-    margin: 4mm 0 0 0 !important;     /* ~1 linha entre a barra cinza e a identificação */
-    background: #fff !important;
-    z-index: 9;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== Rodapé (assinatura + barra preta) ===== */
+      .assinatura-digital{
+        position: fixed !important;
+        bottom: calc(var(--h-footer) + 2mm);  /* ~2 mm de respiro acima da barra */
+        left: 0; right: 0;
+        margin: 0 !important;
+        text-align: center !important;
+        background: #fff !important;
+        z-index: 100;
+        padding-left: var(--pad-lr) !important;
+        padding-right: var(--pad-lr) !important;
+      }
+      .lm-footer{
+        position: fixed !important;
+        bottom: 0;
+        left: 0; right: 0;
+        background: #111 !important;        /* garante a caixa preta */
+        color: #f5f5f5 !important;
+        -webkit-print-color-adjust: exact; 
+        print-color-adjust: exact;
+        z-index: 100;
+        padding-left: var(--pad-lr) !important;
+        padding-right: var(--pad-lr) !important;
+      }
 
-  /* ===== Rodapé (assinatura + barra preta) ===== */
-  .assinatura-digital{
-    position: fixed !important;
-    bottom: 26mm;                      /* ~2 linhas acima da barra preta */
-    left: 0; right: 0;
-    margin: 0 !important;
-    text-align: center !important;
-    background: #fff !important;       /* mantém o papel “limpo” atrás da assinatura */
-    z-index: 10;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== Corpo: sem centralização vertical e sem sobreposição ===== */
+      .exames-list{ margin: 0 !important; padding: 0 !important; }
+      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
-  .lm-footer{
-    position: fixed !important;
-    bottom: 0; left: 0; right: 0;
-    background: #111 !important;       /* GARANTE a caixa preta */
-    color: #f5f5f5 !important;
-    -webkit-print-color-adjust: exact; 
-    print-color-adjust: exact;
-    z-index: 10;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* Resultado centralizado na largura útil do A4 e com quebras */
+      .resultado-box{
+        max-width: calc(210mm - (2 * var(--pad-lr))) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+      }
+    }
 
-  /* ===== Corpo =====
-     Nada de margens artificiais aqui — @page já reservou topo/rodapé por página.
-     Isso evita a “centralização vertical” do bloco de resultados. */
-  .exames-list { margin: 0 !important; padding: 0 !important; }
-  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-
-  /* Resultado: sempre centralizado e quebrando linha quando precisar */
-  .resultado-box{
-    max-width: calc(210mm - 24mm) !important; /* 12mm de cada lado */
-    margin-left: auto !important;
-    margin-right: auto !important;
-    white-space: normal !important;
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
-  }
-}
-
-
-    /* ====== Modo PDF (html2pdf) ======
-       html2pdf ignora @media print, então ativamos o mesmo layout
-       de "tabela de impressão" quando o body estiver com .print-mode.
-    */
-    body.print-mode .laudos-container { display: table !important; width: 100% !important; border-collapse: separate !important; }
-    body.print-mode .print-header { display: table-header-group !important; }
-    body.print-mode .print-body   { display: table-row-group !important; }
-    body.print-mode .print-footer { display: table-footer-group !important; }
-
-    body.print-mode .lm-header, 
-    body.print-mode .header-info, 
-    body.print-mode .assinatura-digital, 
+    /* ====== Modo PDF (botão “Salvar PDF”): aplica o MESMO layout de impressão ====== */
+    body.print-mode .laudos-container { display: block !important; }
+    body.print-mode .lm-header,
+    body.print-mode .header-info,
+    body.print-mode .assinatura-digital,
     body.print-mode .lm-footer {
-      position: static !important;
-      z-index: auto !important;
-      background: #fff !important;
+      position: fixed !important;
+      left: 0; right: 0;
       padding-left: 12mm !important;
       padding-right: 12mm !important;
+      background: #fff !important;
+      z-index: 100;
     }
-    body.print-mode .header-info { margin: 1.2em 0 0 0 !important; }
-    body.print-mode .assinatura-digital { margin: 0 0 2.4em 0 !important; }
-    body.print-mode .resultado-box {
+    body.print-mode .lm-footer{
+      background:#111 !important; color:#f5f5f5 !important;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+      bottom: 0;
+    }
+    body.print-mode .assinatura-digital{ bottom: 14mm; } /* aproxima da borda inferior */
+    body.print-mode .header-info{ top: 28mm; }
+    body.print-mode .lm-header{ top: 0; }
+    body.print-mode .exames-list{ margin:0 !important; padding:0 !important; }
+    body.print-mode .resultado-box{
       max-width: calc(210mm - 24mm) !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
+      margin-left: auto !important; margin-right: auto !important;
+      white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important;
     }
   </style>
 </head>
@@ -575,7 +574,7 @@
       }
     }
 
-    // ==== Estrutura fixa da saída (com wrappers de impressão) ====
+    // ==== Estrutura fixa da saída (mantida) ====
     function garantirEstrutura(){
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
@@ -761,7 +760,7 @@
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 
-      // garante visível e com respiro A4 (tela)
+      // garante visível
       const prevDisplay = laudos.style.display;
       const prevPL = laudos.style.paddingLeft;
       const prevPR = laudos.style.paddingRight;
@@ -769,7 +768,7 @@
       laudos.style.paddingLeft = '12mm';
       laudos.style.paddingRight = '12mm';
 
-      // aplica "print-mode" para html2pdf respeitar header/footer que empurram conteúdo
+      // aplica "print-mode" para html2pdf seguir mesmo layout de impressão
       document.body.classList.add('print-mode');
 
       const opt = {

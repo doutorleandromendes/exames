@@ -132,92 +132,93 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* ===== Impressão: elementos fixos e espaçamentos exatos ===== */
-    @media print {
-      @page { size: A4 portrait; margin: 0; }
+    /* ===== Impressão: elementos que repetem e empurram o conteúdo ===== */
+@media print {
+  @page { size: A4 portrait; margin: 0; }
 
-      /* Variáveis para ajustar facilmente as alturas/folgas na sua impressora */
-      :root{
-        --pad-lr: 12mm;          /* recuo lateral padrão */
-        --h-header: 30mm;        /* altura do bloco do cabeçalho (logo + título + barra) */
-        --h-ident: 18mm;         /* altura do bloco de identificação (Nome, DN, Datas) */
-        --h-footer: 20mm;        /* altura do rodapé (barra preta com endereço) */
-        --gap-after-header: 1.6em; /* ~1 quebra de linha após identificação */
-        --gap-before-footer: 3.2em;/* ~2 quebras de linha antes do rodapé */
-        --gap-assinatura: 6mm;   /* espaço entre assinatura e barra preta */
-      }
+  /* Ajustes finos (mude só se precisar calibrar no seu impressor) */
+  :root{
+    --pad-lr: 12mm;             /* recuo lateral */
+    --gap-after-header: 1.2em;  /* ~1 linha após a barra cinza do cabeçalho */
+    --gap-before-footer: 2.4em; /* ~2 linhas antes da barra preta do rodapé */
+  }
 
-      .formulario, .acoes, details.debug { display: none !important; }
-      .laudos-container { display: block !important; }
+  .formulario, .acoes, details.debug { display: none !important; }
 
-      html, body {
-        width: 210mm;
-        height: auto !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #fff !important;
-      }
+  /* O container vira "tabela" para header/footer ocuparem espaço e repetirem */
+  .laudos-container {
+    display: table !important;
+    width: 100% !important;
+    background: #fff !important;
+  }
 
-      /* Laterais iguais às do layout */
-      .lm-header, .header-info, .exames-list, .assinatura-digital, .lm-footer {
-        padding-left: var(--pad-lr) !important;
-        padding-right: var(--pad-lr) !important;
-      }
+  html, body {
+    width: 210mm;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
 
-      /* ======= Cabeçalho e Identificação fixos em TODAS as páginas ======= */
-      .lm-header {
-        position: fixed;
-        top: 0;
-        left: 0; right: 0;
-        background: #fff;
-        z-index: 10;
-      }
-      .header-info {
-        position: fixed;
-        top: var(--h-header);
-        left: 0; right: 0;
-        background: #fff;
-        z-index: 9;
-      }
+  /* Laterais iguais às do layout */
+  .lm-header, .header-info, .exames-list, .assinatura-digital, .lm-footer {
+    padding-left: var(--pad-lr) !important;
+    padding-right: var(--pad-lr) !important;
+  }
 
-      /* ======= Rodapé fixo em TODAS as páginas ======= */
-      .lm-footer {
-        position: fixed;
-        bottom: 0;
-        left: 0; right: 0;
-        z-index: 10;
-      }
-      /* Assinatura digital como parte do rodapé, acima da barra preta */
-      .assinatura-digital {
-        position: fixed;
-        bottom: calc(var(--h-footer) + var(--gap-assinatura));
-        left: 0; right: 0;
-        margin: 0 !important;
-        background: #fff;   /* evita “transparências” sobre conteúdo */
-        z-index: 10;
-      }
+  /* ========= Cabeçalho REPETIDO (ocupa espaço e empurra o conteúdo) ========= */
+  /* Os dois blocos do topo compõem o cabeçalho que se repete */
+  .lm-header,
+  .header-info {
+    display: table-header-group !important;
+  }
 
-      /* ======= Área útil dos resultados =======
-         Começa após (cabeçalho + identificação) + 1 linha,
-         termina 2 linhas antes do rodapé (somando a altura do rodapé). */
-      .exames-list {
-        margin-top: calc(var(--h-header) + var(--h-ident) + var(--gap-after-header)) !important;
-        margin-bottom: calc(var(--h-footer) + var(--gap-before-footer)) !important;
-      }
+  /* Remove posições fixas no print (vamos usar a mecânica de tabela) */
+  .lm-header, .header-info, .lm-footer, .assinatura-digital {
+    position: static !important;
+    background: #fff !important;
+    z-index: auto !important;
+  }
 
-      /* Evitar cortes feios no meio de um exame */
-      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-      .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
+  /* (1) Exatamente UMA quebra entre a barra cinza e a identificação */
+  .lm-header__rule { margin-top: 10px !important; } /* sua barra cinza abaixo do logo/título */
+  .header-info { margin: var(--gap-after-header) 0 0 0 !important; }
 
-      /* Resultado nunca ultrapassa a largura útil do A4 */
-      .resultado-box { max-width: calc(210mm - (2 * var(--pad-lr))); display: inline-block; }
+  /* ========= Rodapé REPETIDO (ocupa espaço e empurra o conteúdo) ========= */
+  .lm-footer {
+    display: table-footer-group !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
 
-      /* Previne que assinatura e rodapé “invadam” corpo em quebras */
-      .lm-footer, .assinatura-digital { break-inside: avoid; page-break-inside: avoid; }
-    }
-  </style>
-</head>
-<body>
+  /* Assinatura digital: parte do rodapé, aparece acima da barra preta */
+  .assinatura-digital {
+    display: block !important;
+    text-align: center !important;
+    margin: 0 0 var(--gap-before-footer) 0 !important; /* ~2 linhas antes da barra preta */
+  }
+
+  /* ========= Área do corpo ========= */
+  /* Sem margens artificiais: header/footer já “reservam” espaço */
+  .exames-list {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Evitar cortes no meio de um exame */
+  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+  .exames-list > .laudo:last-child { margin-bottom: 0 !important; }
+
+  /* Garantia de largura útil do A4 para a caixa do resultado */
+  .resultado-box {
+    max-width: calc(210mm - (2 * var(--pad-lr))) !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+}
+
   <div class="formulario">
     <h2>Gerador de Laudos</h2>
 

@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
   <!-- html2pdf (html2canvas + jsPDF bundle) para gerar PDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <!-- jsPDF puro para fallback (Safari/iOS/Chrome quando html2pdf “engasga”) -->
+  <!-- jsPDF puro para fallback -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <style>
@@ -126,25 +126,29 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
-    /* ========= IMPRESSÃO: header/rodapé repetem e empurram o conteúdo ========= */
+    /* ========= IMPRESSÃO (A4 fixo, header/rodapé fixos, área útil limitada) ========= */
     @media print {
       :root{
         /* laterais iguais ao layout */
         --pad-lr: 12mm;
-        /* alturas do topo */
-        --h-header: 28mm;           /* logo + títulos + barra */
-        --h-ident: 22mm;            /* bloco de identificação (4 linhas) */
-        --gap-after-ident: 4mm;     /* ~1 quebra entre identificação e corpo */
-        /* base */
-        --h-footer: 12mm;           /* barra preta com endereço */
-        --gap-before-footer: 8mm;   /* ~2 quebras acima da barra (assinatura) */
+
+        /* ALTURAS EXATAS (sem folga extra) */
+        --h-header: 30mm;        /* logo + títulos + barra cinza */
+        --h-ident: 20mm;         /* bloco de identificação */
+        --gap-top: 4mm;          /* ~1 linha entre identificação e corpo */
+
+        --h-footer: 12mm;        /* barra preta com endereço */
+        --gap-bottom: 8mm;       /* ~2 linhas para assinatura acima da barra */
       }
 
-      /* A área útil de cada página começa DEPOIS do cabeçalho+ident e termina ANTES do rodapé */
+      /* A4 SEMPRE; área útil = entre topo fixo e rodapé fixo */
       @page {
         size: A4 portrait;
-        margin: calc(var(--h-header) + var(--h-ident) + var(--gap-after-ident)) var(--pad-lr)
-                calc(var(--h-footer) + var(--gap-before-footer)) var(--pad-lr);
+        margin:
+          calc(var(--h-header) + var(--h-ident) + var(--gap-top))
+          var(--pad-lr)
+          calc(var(--h-footer) + var(--gap-bottom))
+          var(--pad-lr);
       }
 
       .formulario, .acoes, details.debug { display: none !important; }
@@ -157,11 +161,10 @@
         background: #fff !important;
       }
 
-      /* ===== Cabeçalho + Identificação (FIXOS e totalmente dentro da margem superior) ===== */
+      /* ===== TOPO FIXO ===== */
       .lm-header{
         position: fixed !important;
-        top: 0;
-        left: 0; right: 0;
+        top: 0; left: 0; right: 0;
         background: #fff !important;
         z-index: 100;
         padding-left: var(--pad-lr) !important;
@@ -169,19 +172,19 @@
       }
       .header-info{
         position: fixed !important;
-        top: var(--h-header);         /* começa onde termina o cabeçalho */
+        top: var(--h-header);
         left: 0; right: 0;
-        margin: 0 !important;         /* sem margem extra (o “1 linha” já está na @page) */
+        margin: 0 !important; /* a “1 linha” já está na @page (gap-top) */
         background: #fff !important;
         z-index: 90;
         padding-left: var(--pad-lr) !important;
         padding-right: var(--pad-lr) !important;
       }
 
-      /* ===== Rodapé (assinatura + barra preta) ===== */
+      /* ===== RODAPÉ FIXO ===== */
       .assinatura-digital{
         position: fixed !important;
-        bottom: calc(var(--h-footer) + 2mm);  /* ~2 mm de respiro acima da barra */
+        bottom: calc(var(--h-footer) + 2mm); /* assinatura pouco acima da barra preta */
         left: 0; right: 0;
         margin: 0 !important;
         text-align: center !important;
@@ -192,22 +195,20 @@
       }
       .lm-footer{
         position: fixed !important;
-        bottom: 0;
-        left: 0; right: 0;
-        background: #111 !important;        /* garante a caixa preta */
+        bottom: 0; left: 0; right: 0;
+        background: #111 !important;
         color: #f5f5f5 !important;
-        -webkit-print-color-adjust: exact; 
-        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
         z-index: 100;
         padding-left: var(--pad-lr) !important;
         padding-right: var(--pad-lr) !important;
       }
 
-      /* ===== Corpo: sem centralização vertical e sem sobreposição ===== */
+      /* ===== CORPO (somente dentro da área útil) ===== */
       .exames-list{ margin: 0 !important; padding: 0 !important; }
       .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
-      /* Resultado centralizado na largura útil do A4 e com quebras */
+      /* Resultado centralizado e com quebra quando necessário */
       .resultado-box{
         max-width: calc(210mm - (2 * var(--pad-lr))) !important;
         margin-left: auto !important;
@@ -218,33 +219,9 @@
       }
     }
 
-    /* ====== Modo PDF (botão “Salvar PDF”): aplica o MESMO layout de impressão ====== */
-    body.print-mode .laudos-container { display: block !important; }
-    body.print-mode .lm-header,
-    body.print-mode .header-info,
-    body.print-mode .assinatura-digital,
-    body.print-mode .lm-footer {
-      position: fixed !important;
-      left: 0; right: 0;
-      padding-left: 12mm !important;
-      padding-right: 12mm !important;
-      background: #fff !important;
-      z-index: 100;
-    }
-    body.print-mode .lm-footer{
-      background:#111 !important; color:#f5f5f5 !important;
-      -webkit-print-color-adjust: exact; print-color-adjust: exact;
-      bottom: 0;
-    }
-    body.print-mode .assinatura-digital{ bottom: 14mm; } /* aproxima da borda inferior */
-    body.print-mode .header-info{ top: 28mm; }
-    body.print-mode .lm-header{ top: 0; }
-    body.print-mode .exames-list{ margin:0 !important; padding:0 !important; }
-    body.print-mode .resultado-box{
-      max-width: calc(210mm - 24mm) !important;
-      margin-left: auto !important; margin-right: auto !important;
-      white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important;
-    }
+    /* ====== (opcional) modo PDF do botão “Salvar PDF”: segue o mesmo layout ======
+       Se notar diferenças no botão “Salvar PDF”, posso alinhar o html2pdf
+       para respeitar estas mesmas medidas A4 e posições fixas. */
   </style>
 </head>
 <body>
@@ -579,36 +556,30 @@
       const cont = document.getElementById('laudos');
       if (!document.getElementById('lmHeader')) {
         cont.innerHTML = `
-          <div class="print-header">
-            <header class="lm-header" id="lmHeader">
-              <div class="lm-header__wrap">
-                <div class="lm-header__meta">
-                  <div class="lm-header__clinic">Consultório · Dr. Leandro Mendes</div>
-                  <div class="lm-header__title">RESULTADO DE EXAME</div>
-                </div>
-                <img class="lm-header__logo" src="logo_clinica.png" alt="Logo">
+          <header class="lm-header" id="lmHeader">
+            <div class="lm-header__wrap">
+              <div class="lm-header__meta">
+                <div class="lm-header__clinic">Consultório · Dr. Leandro Mendes</div>
+                <div class="lm-header__title">RESULTADO DE EXAME</div>
               </div>
-              <div class="lm-header__rule"></div>
-              <img class="lm-watermark" src="Fundo_LM.png" alt="">
-            </header>
-            <div class="header-info" id="headerInfo"></div>
-          </div>
+              <img class="lm-header__logo" src="logo_clinica.png" alt="Logo">
+            </div>
+            <div class="lm-header__rule"></div>
+            <img class="lm-watermark" src="Fundo_LM.png" alt="">
+          </header>
+          <div class="header-info" id="headerInfo"></div>
 
-          <div class="print-body">
-            <div class="exames-list" id="examesList"></div>
-          </div>
+          <div class="exames-list" id="examesList"></div>
 
-          <div class="print-footer">
-            <div class="assinatura-digital">Assinado Digitalmente por: Leandro César Mendes - CRM 134.985SP</div>
-            <footer class="lm-footer" id="lmFooter">
-              <div class="lm-footer__content">
-                Consultório Dr. Leandro Mendes – Euroville Tower Corporate<br>
-                Praça Maastrich, 200, sala 603, Bragança Paulista-SP<br>
-                <a href="mailto:doutorleandromendes@gmail.com">doutorleandromendes@gmail.com</a> |
-                <a href="tel:+5511996112338">(11) 99611-2338</a>
-              </div>
-            </footer>
-          </div>`;
+          <div class="assinatura-digital">Assinado Digitalmente por: Leandro César Mendes - CRM 134.985SP</div>
+          <footer class="lm-footer" id="lmFooter">
+            <div class="lm-footer__content">
+              Consultório Dr. Leandro Mendes – Euroville Tower Corporate<br>
+              Praça Maastrich, 200, sala 603, Bragança Paulista-SP<br>
+              <a href="mailto:doutorleandromendes@gmail.com">doutorleandromendes@gmail.com</a> |
+              <a href="tel:+5511996112338">(11) 99611-2338</a>
+            </div>
+          </footer>`;
       }
       cont.style.display='block';
     }
@@ -760,7 +731,7 @@
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 
-      // garante visível
+      // garante visível (tela)
       const prevDisplay = laudos.style.display;
       const prevPL = laudos.style.paddingLeft;
       const prevPR = laudos.style.paddingRight;
@@ -768,9 +739,8 @@
       laudos.style.paddingLeft = '12mm';
       laudos.style.paddingRight = '12mm';
 
-      // aplica "print-mode" para html2pdf seguir mesmo layout de impressão
-      document.body.classList.add('print-mode');
-
+      // OBS: se quiser que o botão siga exatamente as mesmas regras do @media print,
+      // posso adicionar um "print-mode" aqui e replicar as posições fixas no PDF.
       const opt = {
         margin: 0,
         filename: nomeArquivo,
@@ -807,8 +777,7 @@
         }
       }
 
-      // desfaz o modo PDF e restaura estilos
-      document.body.classList.remove('print-mode');
+      // restaura estilos
       laudos.style.display = prevDisplay || laudos.style.display;
       laudos.style.paddingLeft = prevPL || '';
       laudos.style.paddingRight = prevPR || '';

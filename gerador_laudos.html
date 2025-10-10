@@ -133,18 +133,17 @@
     @media print {
   :root{
     --h-header-mm: 32;   /* altura visual do cabeçalho (logo+título+barra) */
-    --h-footer-mm: 12;   /* barra preta do rodapé */
-    --gap-top-mm:   4;   /* ~1 linha entre identificação e 1º resultado */
+    --h-ident-mm:  20;   /* altura do bloco de Identificação (Nome/DN/Datas) */
+    --h-footer-mm: 12;   /* altura da barra preta do rodapé */
+    --gap-top-mm:   4;   /* ~1 linha entre Identificação e 1º resultado */
     --gap-bottom-mm:10;  /* respiro antes do rodapé */
+    --mt-mm: calc(var(--h-header-mm) + var(--h-ident-mm) + var(--gap-top-mm));
   }
 
-  /* AQUI ESTÁ O PULO DO GATO:
-     - Topo SEM margem (0mm), para o header fixed ficar colado no topo físico da folha.
-     - Laterais em 12mm como já estava.
-     - Base reserva rodapé + folga. */
+  /* A4; todas as páginas reservam topo/base igualmente */
   @page {
     size: A4 portrait;
-    margin: 0mm 12mm calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm 12mm;
+    margin: var(--mt-mm)mm 12mm calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm 12mm;
   }
 
   .formulario, .acoes, details.debug { display: none !important; }
@@ -157,10 +156,11 @@
     background: #fff !important;
   }
 
-  /* ===== TOPO FIXO ===== */
+  /* ===== TOPO FIXO (desenhado na ÁREA DE MARGEM via offset negativo) ===== */
   .lm-header{
     position: fixed !important;
-    top: 0; left: 0; right: 0;                /* agora é topo físico da página */
+    top: calc(-1 * var(--mt-mm) * 1mm) !important;         /* sobe para o topo físico */
+    left: 0; right: 0;
     height: calc(var(--h-header-mm) * 1mm) !important;
     background: #fff !important;
     z-index: 9999 !important;
@@ -169,8 +169,7 @@
   }
   .header-info{
     position: fixed !important;
-    /* o JS vai definir o top EXATO em px no beforeprint; aqui deixamos 0 como fallback */
-    top: 0;
+    top: calc((-1 * var(--mt-mm) + var(--h-header-mm)) * 1mm) !important; /* logo após o cabeçalho */
     left: 0; right: 0;
     margin: 0 !important;
     background: #fff !important;
@@ -182,7 +181,7 @@
   /* ===== BASE FIXA ===== */
   .assinatura-digital{
     position: fixed !important;
-    bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important;
+    bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important; /* ~2mm acima da barra preta */
     left: 0; right: 0;
     margin: 0 !important;
     text-align: center !important;
@@ -204,8 +203,8 @@
   }
 
   /* ===== CORPO =====
-     - NÃO damos padding-top aqui; o JS aplica o valor EXATO medido (header+ident+gap).
-     - Mantemos um padding-bottom mínimo (respiro), além do dinâmico do JS. */
+     sem padding-top: a margem de @page já reserva espaço em TODAS as páginas
+     mantemos só um padding-bottom mínimo para nunca encostar no rodapé */
   .exames-list {
     margin: 0 !important;
     position: relative;
@@ -224,7 +223,7 @@
     word-break: break-word !important;
   }
 
-  /* IMPORTANTÍSSIMO: não imprimir o paginador interno do botão "Salvar PDF" */
+  /* Não imprimir a estrutura do botão "Salvar PDF" */
   .pdf-pages { display: none !important; }
 }
 
@@ -667,26 +666,21 @@
   if (info)  info.style.top     = hHeaderPx + 'px';
   if (assin) assin.style.bottom = (hFooterPx + (2 * 96/25.4)) + 'px'; // ~2mm acima da barra
 
-  /* 2) Empurrar o conteúdo (cinto e suspensório) */
-  if (bodyList) {
-    const padTop = hHeaderPx + hInfoPx + gapTopPx;
-    const padBot = hFooterPx + gapBottomPx;
+  /* 2) (Simplificado) Corpo sem padding-top; @page já reserva o topo em TODAS as páginas.
+      Mantemos apenas um respiro inferior adicional, se desejar. */
+if (bodyList) {
+  const padBot = hFooterPx + gapBottomPx; // ~ rodapé + folga
 
-    // inline (funciona na maioria dos engines)
-    bodyList.style.paddingTop    = padTop + 'px';
-    bodyList.style.paddingBottom = padBot + 'px';
+  // zera qualquer padding-top aplicado anteriormente
+  bodyList.style.paddingTop = '';
+  // respiro antes do rodapé (opcional; você também já tem um mínimo no CSS)
+  bodyList.style.paddingBottom = padBot + 'px';
 
-    // forçar !important via <style media="print">
-    let dynPad = document.getElementById('dynamicBodyPad');
-    const cssPad = `.exames-list{ padding-top:${padTop}px !important; padding-bottom:${padBot}px !important; }`;
-    if (!dynPad) {
-      dynPad = document.createElement('style');
-      dynPad.id = 'dynamicBodyPad';
-      dynPad.media = 'print';
-      document.head.appendChild(dynPad);
-    }
-    dynPad.textContent = cssPad;
-  }
+  // remove eventual estilo injetado anteriormente com !important
+  const dynPad = document.getElementById('dynamicBodyPad');
+  if (dynPad) dynPad.remove();
+}
+
 
   /* 3) @page: topo 0mm (IMPORTANTÍSSIMO), laterais 12mm, base reservada */
   let dyn = document.getElementById('dynamicPrintCSS');

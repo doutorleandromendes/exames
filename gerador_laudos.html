@@ -128,105 +128,106 @@
 
     /* ========= IMPRESSÃO =========
        - header/ident e rodapé repetem (fixed)
-       - Margens dinâmicas injetadas via JS (medidas reais)
-       - “Cinto e suspensório”: conteúdo é empurrado com padding calculado */
-   @media print {
-  /* Alturas fixas em mm para impressão (evita variações do motor de print) */
-  :root{
-    --h-header-mm: 32;   /* altura total do cabeçalho (logo + título + barra) */
-    --h-footer-mm: 12;   /* altura da barra preta de rodapé */
-    --gap-top-mm: 4;     /* ~1 linha entre identificação e o 1º resultado */
-    --gap-bottom-mm: 10; /* folga visual antes do rodapé (ajuste fino 8–12) */
-  }
+       - Margens em mm já reservam CABEÇALHO + IDENTIFICAÇÃO
+       - JS ainda “empurra” a área útil (cinto e suspensório) */
+    @media print {
+      /* Alturas fixas em mm para impressão */
+      :root{
+        --h-header-mm: 32;   /* cabeçalho (logo + título + barra) */
+        --h-ident-mm:  20;   /* NOVO: altura da Identificação (Nome/DN/Datas) */
+        --h-footer-mm: 12;   /* barra preta do rodapé */
+        --gap-top-mm:   4;   /* ~1 linha entre Identificação e 1º resultado */
+        --gap-bottom-mm:10;  /* folga visual antes do rodapé (8–12) */
+      }
 
-  /* A4 sempre; a área útil vai debaixo do header+ident e acima do rodapé */
-  @page {
-    size: A4 portrait;
-    margin:
-      calc(var(--h-header-mm) + var(--gap-top-mm))mm /* topo = header+ident já “empurrados” via JS; este gap garante fallback */
-      12mm
-      calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm
-      12mm;
-  }
+      @page {
+        size: A4 portrait;
+        /* topo reserva header + identificação + 1 linha;
+           base reserva rodapé + folga visual */
+        margin:
+          calc(var(--h-header-mm) + var(--h-ident-mm) + var(--gap-top-mm))mm
+          12mm
+          calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm
+          12mm;
+      }
 
-  .formulario, .acoes, details.debug { display: none !important; }
-  .laudos-container { display: block !important; }
+      .formulario, .acoes, details.debug { display: none !important; }
+      .laudos-container { display: block !important; }
 
-  html, body {
-    width: 210mm;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #fff !important;
-  }
+      html, body {
+        width: 210mm;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #fff !important;
+      }
 
-  /* ===== TOPO FIXO ===== */
-  .lm-header{
-    position: fixed !important;
-    top: 0; left: 0; right: 0;
-    height: calc(var(--h-header-mm) * 1mm) !important; /* trava a altura do header */
-    background: #fff !important;
-    z-index: 9999 !important;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
-  .header-info{
-    position: fixed !important;
-    top: calc(var(--h-header-mm) * 1mm) !important;    /* identificação começa APÓS o cabeçalho */
-    left: 0; right: 0;
-    margin: 0 !important;
-    background: #fff !important;
-    z-index: 9999 !important;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== TOPO FIXO ===== */
+      .lm-header{
+        position: fixed !important;
+        top: 0; left: 0; right: 0;
+        height: calc(var(--h-header-mm) * 1mm) !important;
+        background: #fff !important;
+        z-index: 9999 !important;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
+      .header-info{
+        position: fixed !important;
+        top: calc(var(--h-header-mm) * 1mm) !important;  /* Identificação começa após o header */
+        left: 0; right: 0;
+        margin: 0 !important;
+        background: #fff !important;
+        z-index: 9999 !important;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
 
-  /* ===== BASE FIXA ===== */
-  .assinatura-digital{
-    position: fixed !important;
-    bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important; /* assinatura ~2mm acima da barra preta */
-    left: 0; right: 0;
-    margin: 0 !important;
-    text-align: center !important;
-    background: #fff !important;
-    z-index: 100;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
-  .lm-footer{
-    position: fixed !important;
-    bottom: 0; left: 0; right: 0;
-    height: calc(var(--h-footer-mm) * 1mm) !important;       /* trava a altura da barra preta */
-    background: #111 !important;
-    color: #f5f5f5 !important;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-    z-index: 100;
-    padding-left: 12mm !important;
-    padding-right: 12mm !important;
-  }
+      /* ===== BASE FIXA ===== */
+      .assinatura-digital{
+        position: fixed !important;
+        bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important;
+        left: 0; right: 0;
+        margin: 0 !important;
+        text-align: center !important;
+        background: #fff !important;
+        z-index: 100;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
+      .lm-footer{
+        position: fixed !important;
+        bottom: 0; left: 0; right: 0;
+        height: calc(var(--h-footer-mm) * 1mm) !important;
+        background: #111 !important;
+        color: #f5f5f5 !important;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        z-index: 100;
+        padding-left: 12mm !important;
+        padding-right: 12mm !important;
+      }
 
-  /* ===== CORPO =====
-     - O JS aplica padding-top e padding-bottom dinâmicos (cinto e suspensório).
-     - Aqui garantimos ainda um padding-bottom mínimo para NUNCA encostar no rodapé.
-  */
-  .exames-list {
-    margin: 0 !important;
-    position: relative;
-    z-index: 0;
-    padding-bottom: calc(var(--gap-bottom-mm) * 1mm) !important; /* respiro extra antes do rodapé */
-    /* NÃO defina padding-top aqui; deixe o JS aplicar o valor exato medido */
-  }
+      /* ===== CORPO =====
+         JS aplica padding-top/bottom medidos; aqui garantimos
+         um padding-bottom mínimo para nunca encostar no rodapé. */
+      .exames-list {
+        margin: 0 !important;
+        position: relative;
+        z-index: 0;
+        padding-bottom: calc(var(--gap-bottom-mm) * 1mm) !important;
+        /* NÃO definir padding-top aqui; o JS coloca o valor exato medido */
+      }
 
-  .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
 
-  .resultado-box{
-    max-width: calc(210mm - 24mm) !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-    white-space: normal !important;
-    overflow-wrap: anywhere !important;
-    word-break: break-word !important;
-  }
-}
+      .resultado-box{
+        max-width: calc(210mm - 24mm) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+      }
+    }
 
     /* ====== Estilos do paginador do botão “Salvar PDF” (não afetam tela/print) ====== */
     .pdf-pages { position: fixed; left: -10000px; top: 0; width: 210mm; }
@@ -666,11 +667,12 @@
       const topMm    = pxToMm(hHeaderPx + hInfoPx) + gapTopMm;
       const bottomMm = pxToMm(hFooterPx) + gapBottomMm;
 
-      // Posicionamentos fixos coerentes com a medida real
+      // Posicionamentos fixos coerentes com a medida real (serão
+      // superados pelo CSS em mm, mas ajudam em engines que não respeitam !important)
       if (info)  info.style.top     = hHeaderPx + 'px';
       if (assin) assin.style.bottom = (hFooterPx + mmToPx(2)) + 'px';
 
-      // >>> Empurra o fluxo do conteúdo dentro da área útil (cinto e suspensório)
+      // Empurra o fluxo do conteúdo dentro da área útil (cinto e suspensório)
       if (bodyList) {
         const paddingTopPx    = hHeaderPx + hInfoPx + mmToPx(gapTopMm);
         const paddingBottomPx = hFooterPx + mmToPx(gapBottomMm);

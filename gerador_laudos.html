@@ -176,6 +176,14 @@
     <select id="exame"></select>
     <div id="statusExames" class="status">Carregando exames…</div>
 
+    <!-- Nome do Teste manual (NOVO) -->
+    <label><input type="checkbox" id="exameManualToggle" /> Inserir Nome do Teste manual</label>
+    <div id="exame-manual-wrap" style="display:none;">
+      <label for="exameManual">Nome do Teste (manual):</label>
+      <input type="text" id="exameManual" placeholder="Digite o nome do teste" />
+    </div>
+    <!-- /NOVO -->
+
     <label for="amostra">Amostra:</label>
     <select id="amostra">
       <option>Sangue Total</option>
@@ -207,6 +215,14 @@
       <option>Coloração de Grocott-Gomori</option>
       <option>Microscopia com KOH</option>
     </select>
+
+    <!-- Método manual (NOVO) -->
+    <label><input type="checkbox" id="metodoManualToggle" /> Inserir Método manual</label>
+    <div id="metodo-manual-wrap" style="display:none;">
+      <label for="metodoManual">Método (manual):</label>
+      <input type="text" id="metodoManual" placeholder="Digite o método" />
+    </div>
+    <!-- /NOVO -->
 
     <!-- Valor de Referência: opt-in manual -->
     <label><input type="checkbox" id="vrManualToggle" /> Inserir Valor de Referência manual</label>
@@ -273,10 +289,24 @@
       document.getElementById('data').value = new Date().toISOString().split('T')[0];
     });
 
+    // === Mostrar/ocultar Nome do Teste manual (NOVO) ===
+    document.addEventListener('DOMContentLoaded', () => {
+      const t = document.getElementById('exameManualToggle');
+      const w = document.getElementById('exame-manual-wrap');
+      if (t && w) t.addEventListener('change', ()=>{ w.style.display = t.checked ? 'block' : 'none'; });
+    });
+
     // === Mostrar/ocultar Material (Amostra) manual ===
     document.addEventListener('DOMContentLoaded', () => {
       const t = document.getElementById('amostraManualToggle');
       const w = document.getElementById('amostra-manual-wrap');
+      if (t && w) t.addEventListener('change', ()=>{ w.style.display = t.checked ? 'block' : 'none'; });
+    });
+
+    // === Mostrar/ocultar Método manual (NOVO) ===
+    document.addEventListener('DOMContentLoaded', () => {
+      const t = document.getElementById('metodoManualToggle');
+      const w = document.getElementById('metodo-manual-wrap');
       if (t && w) t.addEventListener('change', ()=>{ w.style.display = t.checked ? 'block' : 'none'; });
     });
 
@@ -518,7 +548,13 @@
       }
 
       const dataTeste = toBRDate(document.getElementById('data').value);
-      const exame = (document.getElementById('exame').value || '').trim();
+
+      // Nome do Teste (com override manual, se marcado e preenchido)
+      let exame = (document.getElementById('exame').value || '').trim();
+      if (document.getElementById('exameManualToggle')?.checked) {
+        const exm = (document.getElementById('exameManual')?.value || '').trim();
+        if (exm) exame = exm;
+      }
 
       // Amostra (com override manual, se marcado e preenchido)
       let amostra = document.getElementById('amostra').value;
@@ -527,7 +563,12 @@
         if (a) amostra = a;
       }
 
-      const metodo = document.getElementById('metodo').value;
+      // Método (com override manual, se marcado e preenchido)
+      let metodo = document.getElementById('metodo').value;
+      if (document.getElementById('metodoManualToggle')?.checked) {
+        const m = (document.getElementById('metodoManual')?.value || '').trim();
+        if (m) metodo = m;
+      }
 
       // Resultado (respeita "manual")
       let resultadoBruto = '';

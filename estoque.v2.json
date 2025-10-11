@@ -399,7 +399,7 @@
       {
         "sku": "C-A",
         "nome": "Cryptococcus - Antígeno",
-        "estoque": 23,
+        "estoque": 22,
         "alerta": 10
       },
       {
@@ -429,7 +429,7 @@
       {
         "sku": "DSDP",
         "nome": "Dosagem sérica de Procalcitonina",
-        "estoque": 52,
+        "estoque": 51,
         "alerta": 5
       },
       {

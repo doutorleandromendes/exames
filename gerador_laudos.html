@@ -242,6 +242,14 @@
         word-break: break-word !important;
       }
 
+      /* === Ajuste solicitado: fontes menores para Amostra / VR / Método === */
+      .print-body .amostra,
+      .print-body .ref,
+      .print-body .metodo {
+        font-size: calc(12px - 2pt) !important; /* antes: calc(13px - 2pt) */
+        line-height: 1.35 !important;
+      }
+
       /* Não anexar URLs (mailto/tel) no impresso */
       a[href]:after,
       .print-page a[href]:after,
@@ -656,26 +664,6 @@
     }
 
     /* ======== Edição/Exclusão de laudos (tela) ======== */
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const list = document.getElementById('examesList');
-      if (!list) return;
-
-      list.addEventListener('click', (e)=>{
-        const btn = e.target.closest('button');
-        if (!btn) return;
-        const laudo = e.target.closest('.laudo');
-        if (!laudo) return;
-
-        if (btn.classList.contains('btn-del')) {
-          laudo.remove();
-          return;
-        }
-        if (btn.classList.contains('btn-edit')) {
-          abrirEditorDeLaudo(laudo);
-        }
-      });
-    });
-
     function abrirEditorDeLaudo(laudo){
       // Evita vários editores no mesmo laudo
       laudo.querySelector('.laudo-editor')?.remove();
@@ -766,6 +754,24 @@
         .replace(/"/g,'&quot;')
         .replace(/'/g,'&#39;');
     }
+
+    /* ===== Delegação global: Editar/Excluir (funciona para itens dinâmicos) ===== */
+    document.addEventListener('click', (e) => {
+      const delBtn  = e.target.closest('.btn-del');
+      const editBtn = e.target.closest('.btn-edit');
+      if (!delBtn && !editBtn) return;
+
+      const laudo = e.target.closest('.laudo');
+      if (!laudo) return;
+
+      if (delBtn) {
+        laudo.remove();
+        return;
+      }
+      if (editBtn) {
+        abrirEditorDeLaudo(laudo);
+      }
+    });
 
     /* ================== Impressão: construir páginas estáticas (5 laudos por página) ================== */
     function buildPrintDocument(){
@@ -972,7 +978,7 @@
         ? (document.getElementById('pacienteNomeManual').value || '').trim()
         : (sel.split('|')[0] || '').trim();
       const dataISO = (document.getElementById('data').value || '').trim();
-      const dataNome = dataISO ? dataISO.split('-').reverse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
+      const dataNome = dataISO ? dataISO.split('-').verse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 

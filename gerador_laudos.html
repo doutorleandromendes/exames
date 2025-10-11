@@ -30,7 +30,7 @@
       line-height: 1.6;
       color: var(--txt);
       margin: 0;
-      /* redução global de 1 ponto (tela) — mantida como antes */
+      /* redução global de 1 ponto (tela) */
       font-size: calc(14px - 1pt);
       padding: var(--pad-top) var(--pad-x) 60px var(--pad-x);
       background: #fff;
@@ -128,6 +128,26 @@
     .status.ok { color: #0a7f2e; }
     .status.err { color: #b00020; }
 
+    /* ===== Controles de edição/exclusão (tela) ===== */
+    .laudo-actions{
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .laudo-actions button{
+      padding: 6px 10px;
+      font-size: 12px;
+      background: #e0e0e0;
+      color: #111;
+      border-radius: 4px;
+    }
+    .laudo-actions .btn-edit{ background: #ffd666; }
+    .laudo-actions .btn-del{ background: #ff7676; color: #fff; }
+
+    .laudo-editor{ margin-top: 8px; border: 1px dashed #ccc; padding: 10px; border-radius: 6px; }
+    .laudo-editor label{ font-size: 12px; }
+    .laudo-editor input{ width: 100%; padding: 6px; font-size: 12px; }
+
     /* ====== Páginas estáticas para impressão (construídas no beforeprint) ====== */
     .print-pages { display: none; }
 
@@ -139,6 +159,8 @@
 
       /* Esconder UI e fluxo padrão */
       .formulario, .acoes, details.debug, .laudos-container { display: none !important; }
+      /* Esconder controles e editor no impresso */
+      .laudo-actions, .laudo-editor { display: none !important; }
 
       /* Mostrar o documento de impressão estático */
       .print-pages { display: block !important; margin: 0 !important; }
@@ -182,7 +204,7 @@
         position: absolute; left: 0; right: 0;
         text-align: center; font-weight: bold;
         background: #fff;
-        /* ↓ impressão -2pt */
+        /* impressão -2pt */
         font-size: calc(11px - 2pt);
       }
       .print-footer {
@@ -207,7 +229,7 @@
       .print-body .amostra, .print-body .ref{ color:#666; font-size: calc(13px - 2pt); margin:0; }
       .print-body .metodo{ color:#666; font-size: calc(13px - 2pt); margin:2px 0 10px; }
 
-      /* Resultado centralizado e altura nativa ainda menor (5px) */
+      /* Resultado centralizado e altura nativa 5px */
       .print-body .resultado-box{
         display: block !important;
         margin: 16px auto 8px !important;
@@ -617,6 +639,10 @@
         <p class="metodo"><strong>Método:</strong> ${metodo}</p>
         <div class="resultado-box"><strong>Resultado:</strong> ${resultadoBruto}</div>
         ${observacaoHTML}
+        <div class="laudo-actions">
+          <button type="button" class="btn-edit">Editar</button>
+          <button type="button" class="btn-del">Excluir</button>
+        </div>
       `;
       document.getElementById('examesList').appendChild(bloco);
     }
@@ -627,6 +653,118 @@
       setMetodoDefaultParaExame();
       const res = document.getElementById('resultado');
       if (res) res.focus();
+    }
+
+    /* ======== Edição/Exclusão de laudos (tela) ======== */
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const list = document.getElementById('examesList');
+      if (!list) return;
+
+      list.addEventListener('click', (e)=>{
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const laudo = e.target.closest('.laudo');
+        if (!laudo) return;
+
+        if (btn.classList.contains('btn-del')) {
+          laudo.remove();
+          return;
+        }
+        if (btn.classList.contains('btn-edit')) {
+          abrirEditorDeLaudo(laudo);
+        }
+      });
+    });
+
+    function abrirEditorDeLaudo(laudo){
+      // Evita vários editores no mesmo laudo
+      laudo.querySelector('.laudo-editor')?.remove();
+
+      // Extrai valores atuais
+      const nomeTeste = (laudo.querySelector('.exame-box')?.textContent || '').trim();
+      const amostra   = (laudo.querySelector('.amostra')?.textContent || '').replace(/^Amostra:\s*/i,'').trim();
+      const vrTxt     = (laudo.querySelector('.ref')?.textContent || '').replace(/^Valor de referência:\s*/i,'').trim();
+      const metodo    = (laudo.querySelector('.metodo')?.textContent || '').replace(/^Método:\s*/i,'').trim();
+      const resultado = (laudo.querySelector('.resultado-box')?.textContent || '').replace(/^Resultado:\s*/i,'').trim();
+      const obsEl     = laudo.querySelector('.observacao');
+      const observacao= obsEl ? (obsEl.textContent || '').replace(/^Observação:\s*/i,'').trim() : '';
+
+      const editor = document.createElement('div');
+      editor.className = 'laudo-editor';
+      editor.innerHTML = `
+        <div style="display:grid; gap:8px; grid-template-columns: 1fr 1fr;">
+          <label>Nome do teste <input type="text" class="le-teste" value="${escapeHTML(nomeTeste)}"></label>
+          <label>Material <input type="text" class="le-amostra" value="${escapeHTML(amostra)}"></label>
+          <label>Valor de referência <input type="text" class="le-vr" value="${escapeHTML(vrTxt)}"></label>
+          <label>Método <input type="text" class="le-metodo" value="${escapeHTML(metodo)}"></label>
+          <label style="grid-column:1 / -1;">Resultado <input type="text" class="le-resultado" value="${escapeHTML(resultado)}" style="width:100%"></label>
+          <label style="grid-column:1 / -1;">Observação <input type="text" class="le-obs" value="${escapeHTML(observacao)}" style="width:100%"></label>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          <button type="button" class="le-save">Salvar</button>
+          <button type="button" class="le-cancel">Cancelar</button>
+        </div>
+      `;
+      laudo.appendChild(editor);
+
+      editor.querySelector('.le-cancel').onclick = ()=> editor.remove();
+      editor.querySelector('.le-save').onclick = ()=>{
+        const get = cls => editor.querySelector(cls)?.value?.trim() ?? '';
+        const vTeste   = get('.le-teste');
+        const vAmostra = get('.le-amostra');
+        const vVR      = get('.le-vr');
+        const vMetodo  = get('.le-metodo');
+        const vRes     = get('.le-resultado');
+        const vObs     = get('.le-obs');
+
+        // Atualiza DOM mantendo estilos/estrutura
+        const exBox = laudo.querySelector('.exame-box');
+        if (exBox) exBox.textContent = vTeste;
+
+        const amEl = laudo.querySelector('.amostra');
+        if (amEl) amEl.innerHTML = `<strong>Amostra:</strong> ${escapeHTML(vAmostra)}`;
+
+        const vrEl = laudo.querySelector('.ref');
+        if (vrEl) vrEl.innerHTML = `<strong>Valor de referência:</strong> ${escapeHTML(vVR)}`;
+
+        const meEl = laudo.querySelector('.metodo');
+        if (meEl) meEl.innerHTML = `<strong>Método:</strong> ${escapeHTML(vMetodo)}`;
+
+        const reEl = laudo.querySelector('.resultado-box');
+        if (reEl) reEl.innerHTML = `<strong>Resultado:</strong> ${escapeHTML(vRes)}`;
+
+        let obEl = laudo.querySelector('.observacao');
+        // Remove <br> anterior se vamos remover a observação
+        if (!vObs && obEl) {
+          const prev = obEl.previousSibling;
+          if (prev && prev.nodeType === 1 && prev.tagName === 'BR') prev.remove();
+          obEl.remove();
+        }
+        // Cria/atualiza observação (com apenas 1 quebra antes)
+        if (vObs) {
+          if (!obEl) {
+            const br = document.createElement('br');
+            reEl?.insertAdjacentElement('afterend', br);
+            const p = document.createElement('p');
+            p.className = 'observacao';
+            p.innerHTML = `<strong>Observação:</strong> ${escapeHTML(vObs)}`;
+            br.insertAdjacentElement('afterend', p);
+          } else {
+            obEl.innerHTML = `<strong>Observação:</strong> ${escapeHTML(vObs)}`;
+          }
+        }
+
+        editor.remove();
+      };
+    }
+
+    function escapeHTML(s){
+      return String(s)
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;')
+        .replace(/'/g,'&#39;');
     }
 
     /* ================== Impressão: construir páginas estáticas (5 laudos por página) ================== */
@@ -648,7 +786,7 @@
       const hIdent  = info.getBoundingClientRect().height;
       const hFooter = footer.getBoundingClientRect().height;
 
-      // === 3 quebras reais entre identificação e 1º resultado ===
+      // 3 quebras reais entre identificação e 1º resultado
       const getLineHeight = (el) => {
         const cs = getComputedStyle(el);
         const lh = cs.lineHeight;
@@ -699,6 +837,9 @@
       newPage();
       for (const ex of exames) {
         const clone = ex.cloneNode(true);
+        // Remove controles/editores na cópia (só por segurança)
+        clone.querySelector('.laudo-actions')?.remove();
+        clone.querySelector('.laudo-editor')?.remove();
 
         /* 1) Máximo 5 por página */
         if (count === 5) { newPage(); }
@@ -804,8 +945,9 @@
       newPage();
       for (const ex of exames) {
         const clone = ex.cloneNode(true);
-        clone.style.pageBreakInside = 'avoid';
-        clone.style.breakInside = 'avoid';
+        // remove controles/editores na cópia
+        clone.querySelector('.laudo-actions')?.remove();
+        clone.querySelector('.laudo-editor')?.remove();
 
         /* 1) Máximo 5 por página */
         if (count === 5) { newPage(); }

@@ -30,7 +30,7 @@
       line-height: 1.6;
       color: var(--txt);
       margin: 0;
-      /* ↓ redução global de 1 ponto */
+      /* redução global de 1 ponto (tela) — mantida como antes */
       font-size: calc(14px - 1pt);
       padding: var(--pad-top) var(--pad-x) 60px var(--pad-x);
       background: #fff;
@@ -82,8 +82,8 @@
       font-size: calc(16px - 1pt);
       font-weight: bold;
       background: #f5f5f5;
-      /* ↓ altura nativa −30% (10px → 7px) mantendo autoexpansão por quebra de linha */
-      padding: 7px 20px;
+      /* altura nativa reduzida: 10px → 7px → 5px */
+      padding: 5px 20px;
       margin: 16px auto 8px;
       border-radius: 3px;
       display: inline-block;
@@ -182,38 +182,39 @@
         position: absolute; left: 0; right: 0;
         text-align: center; font-weight: bold;
         background: #fff;
-        font-size: calc(11px - 1pt);
+        /* ↓ impressão -2pt */
+        font-size: calc(11px - 2pt);
       }
       .print-footer {
         position: absolute; left: 0; right: 0; bottom: 0;
-        background:#111; color:#f5f5f5; text-align:center; font: 400 calc(11px - 1pt)/1.4 system-ui;
+        background:#111; color:#f5f5f5; text-align:center; font: 400 calc(11px - 2pt)/1.4 system-ui;
         padding-top: 10px; padding-bottom: 10px;
       }
 
-      /* Estilos internos reaproveitando os seus (com -1pt) */
+      /* Estilos internos (impressão -2pt) */
       .print-header .lm-header__wrap{ display:flex; align-items:flex-end; justify-content:flex-end; gap:16px; }
-      .print-header .lm-header__clinic{ font: 600 calc(12px - 1pt)/1.2 system-ui; color:#666; margin-bottom:6px; }
-      .print-header .lm-header__title{ font: 600 calc(20px - 1pt)/1.1 system-ui; color:#111; letter-spacing:.06em; text-transform: uppercase; }
+      .print-header .lm-header__clinic{ font: 600 calc(12px - 2pt)/1.2 system-ui; color:#666; margin-bottom:6px; }
+      .print-header .lm-header__title{ font: 600 calc(20px - 2pt)/1.1 system-ui; color:#111; letter-spacing:.06em; text-transform: uppercase; }
       .print-header .lm-header__logo{ height:44px; width:auto; object-fit:contain; opacity:.95; }
       .print-header .lm-header__rule{ height:2px; background:#2b2b2b; margin-top:10px; opacity:.25; }
 
       .print-ident .header-info{ display:flex; flex-wrap:wrap; gap:12px 18px; align-items:flex-end; margin: 6px 0 0; }
-      .print-ident .header-info p{ margin:0; font-size: calc(14px - 1pt); color:#333; }
+      .print-ident .header-info p{ margin:0; font-size: calc(14px - 2pt); color:#333; }
 
       .print-body .laudo{ break-inside: avoid; page-break-inside: avoid; margin-top: 16px; }
-      .print-body .exame-box{ font-weight:bold; font-style:italic; background:#e9e9e9; padding:6px 10px; text-align:left; margin:14px 0; border-radius:3px; font-size: calc(16px - 1pt); }
+      .print-body .exame-box{ font-weight:bold; font-style:italic; background:#e9e9e9; padding:6px 10px; text-align:left; margin:14px 0; border-radius:3px; font-size: calc(16px - 2pt); }
       .print-body .linha-top{ display:flex; justify-content:space-between; align-items:flex-start; margin:8px 0 4px; }
-      .print-body .amostra, .print-body .ref{ color:#666; font-size: calc(13px - 1pt); margin:0; }
-      .print-body .metodo{ color:#666; font-size: calc(13px - 1pt); margin:2px 0 10px; }
+      .print-body .amostra, .print-body .ref{ color:#666; font-size: calc(13px - 2pt); margin:0; }
+      .print-body .metodo{ color:#666; font-size: calc(13px - 2pt); margin:2px 0 10px; }
 
-      /* Resultado centralizado e 30% mais baixo (padding vertical 7px) */
+      /* Resultado centralizado e altura nativa ainda menor (5px) */
       .print-body .resultado-box{
         display: block !important;
         margin: 16px auto 8px !important;
         text-align: center !important;
         max-width: calc(210mm - 24mm) !important;
-        padding: 7px 20px !important; /* ↓ -30% */
-        font-size: calc(16px - 1pt);
+        padding: 5px 20px !important; /* 10px → 7px → 5px */
+        font-size: calc(16px - 2pt);
         white-space: normal !important;
         overflow-wrap: anywhere !important;
         word-break: break-word !important;
@@ -599,7 +600,10 @@
       let observacaoHTML = '';
       if (document.getElementById('obsToggle')?.checked) {
         const obs = (document.getElementById('obsText')?.value || '').trim();
-        if (obs) observacaoHTML = `<br><br><p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
+        if (obs) {
+          /* apenas 1 quebra de linha antes da observação */
+          observacaoHTML = `<br><p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
+        }
       }
 
       const bloco = document.createElement('div');
@@ -650,7 +654,7 @@
         const lh = cs.lineHeight;
         if (lh && lh.endsWith('px')) return parseFloat(lh);
         const fs = parseFloat(cs.fontSize || '14');
-        return 1.6 * fs; // fallback alinhado ao body
+        return 1.6 * fs; // fallback
       };
       const gapAfterIdent = 3 * getLineHeight(info);
       const gapBeforeFooter = mmToPx(10);

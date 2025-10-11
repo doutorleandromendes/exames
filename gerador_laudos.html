@@ -54,7 +54,7 @@
     .paciente-manual { display:none; gap: 10px; margin-bottom: 12px; }
     .paciente-manual .col { flex:1; }
 
-    /* Saída */
+    /* Saída (tela) */
     .laudos-container { display: none; position: relative; z-index:1; }
     .header-info { display:flex; flex-wrap:wrap; gap:12px 18px; align-items:flex-end; margin: 14px 0 10px; }
     .header-info p { margin:0; font-size:14px; color: var(--txt); }
@@ -127,19 +127,23 @@
     .status.err { color: #b00020; }
 
     /* ========= IMPRESSÃO =========
-       Reserva de topo em TODAS as páginas (header + identificação + gap)
-       Cabeçalho/ident são “desenhados” na área de margem com offset negativo
-       Corpo nunca passa por baixo; rodapé repetido com folga */
+       - Header e footer ABSOLUTAMENTE fixos em todas as páginas
+       - Identificação logo após o header
+       - Exatamente 1 quebra (gap) entre identificação e resultados
+       - Máximo 5 laudos por página (com quebra obrigatória)
+       - Sem alterar design/funcionalidades originais
+    */
     @media print {
       :root{
-        --h-header-mm: 32;   /* cabeçalho (logo+título+barra) */
-        --h-ident-mm:  20;   /* identificação (Nome/DN/Datas) */
-        --h-footer-mm: 12;   /* barra preta do rodapé */
-        --gap-top-mm:   4;   /* ~1 linha entre identificação e 1º resultado */
-        --gap-bottom-mm:10;  /* respiro antes do rodapé */
-        --mt-mm: calc(var(--h-header-mm) + var(--h-ident-mm) + var(--gap-top-mm));
+        --h-header-mm: 32;   /* altura do cabeçalho (logo + título + barra) */
+        --h-ident-mm:  20;   /* altura da identificação (Nome/DN/Datas) */
+        --h-footer-mm: 12;   /* altura da barra preta do rodapé */
+        --gap-after-ident-mm: 4;  /* 1 quebra entre identificação e 1º resultado */
+        --gap-bottom-mm: 10;      /* respiro antes do rodapé */
+        --mt-mm: calc(var(--h-header-mm) + var(--h-ident-mm) + var(--gap-after-ident-mm));
       }
 
+      /* Reserva de topo e base para TODAS as páginas */
       @page {
         size: A4 portrait;
         margin: var(--mt-mm)mm 12mm calc(var(--h-footer-mm) + var(--gap-bottom-mm))mm 12mm;
@@ -155,10 +159,10 @@
         background: #fff !important;
       }
 
-      /* ===== TOPO FIXO (desenho na área de margem com offset negativo) ===== */
+      /* ===== TOPO FIXO: desenhado na área de margem com offset negativo ===== */
       .lm-header{
         position: fixed !important;
-        top: calc(-1 * var(--mt-mm) * 1mm) !important;
+        top: calc(-1 * var(--mt-mm) * 1mm) !important;      /* topo físico do papel */
         left: 0; right: 0;
         height: calc(var(--h-header-mm) * 1mm) !important;
         background: #fff !important;
@@ -168,7 +172,7 @@
       }
       .header-info{
         position: fixed !important;
-        top: calc((-1 * var(--mt-mm) + var(--h-header-mm)) * 1mm) !important;
+        top: calc((-1 * var(--mt-mm) + var(--h-header-mm)) * 1mm) !important; /* logo após o header */
         left: 0; right: 0;
         margin: 0 !important;
         background: #fff !important;
@@ -180,7 +184,7 @@
       /* ===== BASE FIXA ===== */
       .assinatura-digital{
         position: fixed !important;
-        bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important;
+        bottom: calc(var(--h-footer-mm) * 1mm + 2mm) !important; /* assinatura ~2mm acima da barra preta */
         left: 0; right: 0;
         margin: 0 !important;
         text-align: center !important;
@@ -206,11 +210,13 @@
         margin: 0 !important;
         position: relative;
         z-index: 0;
-        /* sem padding-top: @page já reserva o topo para TODAS as páginas */
+        /* sem padding-top (o @page já reserva topo p/ todas as páginas) */
         padding-bottom: calc(var(--gap-bottom-mm) * 1mm) !important; /* respiro extra */
       }
 
-      .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+      /* Máximo 5 laudos por página */
+      .exames-list .laudo { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
+      .exames-list .laudo:nth-of-type(5n) { page-break-after: always; }
 
       .resultado-box{
         max-width: calc(210mm - 24mm) !important;
@@ -219,10 +225,13 @@
         white-space: normal !important;
         overflow-wrap: anywhere !important;
         word-break: break-word !important;
+        text-align: center !important;   /* sempre centralizado */
       }
 
-      /* NÃO imprimir a estrutura do “Salvar PDF” */
+      /* Não imprimir a estrutura do “Salvar PDF” */
       .pdf-pages { display: none !important; }
+      /* Não anexar URLs (mailto/tel) no impresso */
+      a[href]:after { content: none !important; }
     }
 
     /* ====== Estilos do paginador do botão “Salvar PDF” (não afetam a impressão) ====== */
@@ -639,19 +648,13 @@
       if (res) res.focus();
     }
 
-    /* ================== Impressão: remover injeções antigas ================== */
+    /* ================== Impressão: sem injeções dinâmicas, tudo no CSS ================== */
     function computeAndInjectPrintMargins() {
-      // Remover estilos dinâmicos antigos que podiam sobrescrever o @page
-      const dyn = document.getElementById('dynamicPrintCSS');
-      if (dyn) dyn.remove();
-      const dynPad = document.getElementById('dynamicBodyPad');
-      if (dynPad) dynPad.remove();
-
-      // Garantir que não restem paddings inline conflitantes
+      // Limpesa defensiva de estilos dinâmicos herdados
+      const dyn = document.getElementById('dynamicPrintCSS'); if (dyn) dyn.remove();
+      const dynPad = document.getElementById('dynamicBodyPad'); if (dynPad) dynPad.remove();
       const bodyList = document.getElementById('examesList');
       if (bodyList) { bodyList.style.paddingTop=''; bodyList.style.paddingBottom=''; }
-
-      // Garantir que top/bottom inline não sobrescrevam o CSS de impressão
       const info  = document.getElementById('headerInfo');
       const assin = document.querySelector('.assinatura-digital');
       if (info)  info.style.top = '';
@@ -664,12 +667,9 @@
                              mql.addListener && mql.addListener(e => { if (e.matches) computeAndInjectPrintMargins(); });
     }
     window.addEventListener('beforeprint', computeAndInjectPrintMargins);
-    window.addEventListener('afterprint', () => {
-      // limpeza de segurança
-      computeAndInjectPrintMargins();
-    });
+    window.addEventListener('afterprint', computeAndInjectPrintMargins);
 
-    /* ================== Salvar PDF (independente do print) ================== */
+    /* ================== Salvar PDF: permanece como estava ================== */
     async function salvarPDF(){
       const laudos = document.getElementById('laudos');
       if (!laudos || !laudos.querySelector('#examesList .laudo')) {
@@ -702,7 +702,7 @@
       const pagesWrap = document.createElement('div');
       pagesWrap.className = 'pdf-pages';
 
-      let page, body;
+      let page, body, count = 0;
       function newPage(){
         page = document.createElement('div');
         page.className = 'pdf-page';
@@ -732,6 +732,7 @@
         page.appendChild(pf);
 
         pagesWrap.appendChild(page);
+        count = 0;
       }
 
       newPage();
@@ -740,10 +741,19 @@
         clone.style.pageBreakInside = 'avoid';
         clone.style.breakInside = 'avoid';
         body.appendChild(clone);
+        count++;
+
+        /* Máximo 5 por página no PDF também */
+        if (count === 5) {
+          newPage();
+          continue;
+        }
+
         if (body.scrollHeight > bodyHeightPx) {
           body.removeChild(clone);
           newPage();
           body.appendChild(clone);
+          count = 1;
         }
       }
 

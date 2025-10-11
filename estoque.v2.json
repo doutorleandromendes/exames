@@ -11,6 +11,18 @@
         "alerta": 10
       },
       {
+        "sku": "A-P",
+        "nome": "Anaplasma - Antígeno",
+        "estoque": 3,
+        "alerta": 1
+      },
+      {
+        "sku": "B-A",
+        "nome": "Babesia - Antígeno",
+        "estoque": 3,
+        "alerta": 1
+      },
+      {
         "sku": "CHIK",
         "nome": "Chikungunya - Anticorpos IgM",
         "estoque": 4,
@@ -39,6 +51,12 @@
         "nome": "Cryptococcus - Antígeno",
         "estoque": 3,
         "alerta": 10
+      },
+      {
+        "sku": "C-P",
+        "nome": "Cryptosporidium - Antígeno",
+        "estoque": 5,
+        "alerta": 1
       },
       {
         "sku": "D-AN",
@@ -81,6 +99,12 @@
         "nome": "Febre Amarela - Anticorpos IgM",
         "estoque": 5,
         "alerta": 5
+      },
+      {
+        "sku": "G-D",
+        "nome": "Giardia - Antígeno",
+        "estoque": 3,
+        "alerta": 1
       },
       {
         "sku": "G-A",
@@ -373,6 +397,18 @@
         "alerta": 10
       },
       {
+        "sku": "A-P",
+        "nome": "Anaplasma - Antígeno",
+        "estoque": 10,
+        "alerta": 5
+      },
+      {
+        "sku": "B-A",
+        "nome": "Babesia - Antígeno",
+        "estoque": 10,
+        "alerta": 5
+      },
+      {
         "sku": "CHIK",
         "nome": "Chikungunya - Anticorpos IgM",
         "estoque": 28,
@@ -401,6 +437,12 @@
         "nome": "Cryptococcus - Antígeno",
         "estoque": 22,
         "alerta": 10
+      },
+      {
+        "sku": "C-P",
+        "nome": "Cryptosporidium - Antígeno",
+        "estoque": 10,
+        "alerta": 5
       },
       {
         "sku": "D-AN",
@@ -442,6 +484,12 @@
         "sku": "FAI",
         "nome": "Febre Amarela - Anticorpos IgM",
         "estoque": 25,
+        "alerta": 5
+      },
+      {
+        "sku": "G-D",
+        "nome": "Giardia - Antígeno",
+        "estoque": 10,
         "alerta": 5
       },
       {

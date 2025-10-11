@@ -131,11 +131,15 @@
 
     /* ========= IMPRESSÃO ========= */
     @media print {
+      /* Ancoragem exata no A4 (evita deslocamentos) */
+      html, body { margin: 0 !important; padding: 0 !important; }
+      @page { size: A4 portrait; margin: 0; }
+
       /* Esconder UI e fluxo padrão */
       .formulario, .acoes, details.debug, .laudos-container { display: none !important; }
 
       /* Mostrar o documento de impressão estático */
-      .print-pages { display: block !important; }
+      .print-pages { display: block !important; margin: 0 !important; }
 
       /* Cada página A4 */
       .print-page {
@@ -147,6 +151,8 @@
         -webkit-print-color-adjust: exact; print-color-adjust: exact;
         background: #fff;
         overflow: hidden;
+        margin: 0 auto !important; /* centraliza em browsers que aplicam viewport diferente */
+        left: 0 !important; right: 0 !important;
       }
 
       /* Laterais iguais às do layout */
@@ -196,13 +202,22 @@
       .print-body .linha-top{ display:flex; justify-content:space-between; align-items:flex-start; margin:8px 0 4px; }
       .print-body .amostra, .print-body .ref{ color:#666; font-size:13px; margin:0; }
       .print-body .metodo{ color:#666; font-size:13px; margin:2px 0 10px; }
-      .print-body .resultado-box{ text-align:center; font-size:16px; font-weight:bold; background:#f5f5f5; padding:10px 20px; margin:16px auto 8px; border-radius:3px; display:inline-block; max-width:100%; box-sizing:border-box; white-space:normal; overflow-wrap:anywhere; word-break:break-word; }
+
+      /* Resultado centralizado horizontalmente (bloco) */
+      .print-body .resultado-box{
+        display: block !important;
+        margin: 16px auto 8px !important;
+        text-align: center !important;
+        max-width: calc(210mm - 24mm) !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        word-break: break-word !important;
+      }
 
       /* Não anexar URLs (mailto/tel) no impresso */
-      a[href]:after { content: none !important; }
-
-      /* @page: sem margens internas além das que já definimos na página */
-      @page { size: A4 portrait; margin: 0; }
+      a[href]:after,
+      .print-page a[href]:after,
+      .print-footer a[href]:after { content: "" !important; }
     }
   </style>
 </head>
@@ -623,7 +638,16 @@
       const hHeader = header.getBoundingClientRect().height;
       const hIdent  = info.getBoundingClientRect().height;
       const hFooter = footer.getBoundingClientRect().height;
-      const gapAfterIdent = mmToPx(4);   // 1 quebra = ~4mm
+
+      // === 3 quebras reais entre identificação e 1º resultado ===
+      const getLineHeight = (el) => {
+        const cs = getComputedStyle(el);
+        const lh = cs.lineHeight;
+        if (lh && lh.endsWith('px')) return parseFloat(lh);
+        const fs = parseFloat(cs.fontSize || '14');
+        return 1.6 * fs; // fallback alinhado ao body
+      };
+      const gapAfterIdent = 3 * getLineHeight(info);
       const gapBeforeFooter = mmToPx(10);
 
       const headerTop = 0;
@@ -666,18 +690,20 @@
       newPage();
       for (const ex of exames) {
         const clone = ex.cloneNode(true);
+
+        /* 1) Máximo 5 por página */
+        if (count === 5) { newPage(); }
+
+        /* 2) Pré-checa overflow ANTES de confirmar */
         body.appendChild(clone);
-        count++;
-
-        // força no máximo 5 por página
-        if (count === 5) { newPage(); continue; }
-
-        // além dos 5, ainda previne overflow por altura (caso observação grande)
-        if (body.scrollHeight > bodyHeight) {
+        const overflow = body.scrollHeight > body.clientHeight;
+        if (overflow) {
           body.removeChild(clone);
           newPage();
           body.appendChild(clone);
           count = 1;
+        } else {
+          count++;
         }
       }
     }
@@ -707,7 +733,16 @@
       const hHeaderPx = header ? header.getBoundingClientRect().height : 0;
       const hInfoPx   = info   ? info.getBoundingClientRect().height   : 0;
       const hFooterPx = footer ? footer.getBoundingClientRect().height : mmToPx(12);
-      const gapTopPx  = mmToPx(4);
+
+      /* 3 quebras reais também no PDF */
+      const getLineHeight = (el) => {
+        const cs = getComputedStyle(el);
+        const lh = cs.lineHeight;
+        if (lh && lh.endsWith('px')) return parseFloat(lh);
+        const fs = parseFloat(cs.fontSize || '14');
+        return 1.6 * fs;
+      };
+      const gapTopPx  = 3 * getLineHeight(info);
       const gapBotPx  = mmToPx(8);
 
       const pageWidthPx  = mmToPx(210);
@@ -762,16 +797,20 @@
         const clone = ex.cloneNode(true);
         clone.style.pageBreakInside = 'avoid';
         clone.style.breakInside = 'avoid';
+
+        /* 1) Máximo 5 por página */
+        if (count === 5) { newPage(); }
+
+        /* 2) Pré-checa overflow ANTES de confirmar */
         body.appendChild(clone);
-        count++;
-
-        if (count === 5) { newPage(); continue; }
-
-        if (body.scrollHeight > bodyHeightPx) {
+        const overflow = body.scrollHeight > body.clientHeight;
+        if (overflow) {
           body.removeChild(clone);
           newPage();
           body.appendChild(clone);
           count = 1;
+        } else {
+          count++;
         }
       }
 

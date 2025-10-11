@@ -84,7 +84,7 @@
       background: #f5f5f5;
       /* altura nativa reduzida: 10px → 7px → 5px */
       padding: 5px 20px;
-      margin: 16px auto 8px;
+      margin: 16px auto 4px; /* ↓ era 8px */
       border-radius: 3px;
       display: inline-block;
       max-width: 100%;
@@ -100,7 +100,7 @@
       color: #000;
       background: transparent;
       font-size: calc(10.67px - 1pt);
-      margin: 6px 0 0;
+      margin: 2px 0 0; /* ↓ era 6px */
     }
 
     .assinatura-digital {
@@ -232,7 +232,7 @@
       /* Resultado centralizado e altura nativa 5px */
       .print-body .resultado-box{
         display: block !important;
-        margin: 16px auto 8px !important;
+        margin: 12px auto 2px !important; /* ↓ era 16px auto 8px */
         text-align: center !important;
         max-width: calc(210mm - 24mm) !important;
         padding: 5px 20px !important; /* 10px → 7px → 5px */
@@ -242,13 +242,22 @@
         word-break: break-word !important;
       }
 
-      /* === Ajuste solicitado: fontes menores para Amostra / VR / Método === */
+      /* Amostra / VR / Método menores */
       .print-body .amostra,
       .print-body .ref,
       .print-body .metodo {
         font-size: calc(12px - 2pt) !important; /* antes: calc(13px - 2pt) */
         line-height: 1.35 !important;
       }
+
+      /* Observação bem próxima do Resultado */
+      .print-body .observacao{
+        margin: 0 !important;
+        line-height: 1.3 !important;
+      }
+
+      /* Salvaguarda contra margens padrão de <p> no impresso */
+      .print-body p { margin: 0 0 2px !important; }
 
       /* Não anexar URLs (mailto/tel) no impresso */
       a[href]:after,
@@ -631,8 +640,8 @@
       if (document.getElementById('obsToggle')?.checked) {
         const obs = (document.getElementById('obsText')?.value || '').trim();
         if (obs) {
-          /* apenas 1 quebra de linha antes da observação */
-          observacaoHTML = `<br><p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
+          /* sem quebra de linha artificial antes da observação */
+          observacaoHTML = `<p class="observacao"><strong>Observação:</strong> ${obs}</p>`;
         }
       }
 
@@ -722,21 +731,19 @@
         if (reEl) reEl.innerHTML = `<strong>Resultado:</strong> ${escapeHTML(vRes)}`;
 
         let obEl = laudo.querySelector('.observacao');
-        // Remove <br> anterior se vamos remover a observação
+        // Remove <br> anterior se existir
         if (!vObs && obEl) {
           const prev = obEl.previousSibling;
           if (prev && prev.nodeType === 1 && prev.tagName === 'BR') prev.remove();
           obEl.remove();
         }
-        // Cria/atualiza observação (com apenas 1 quebra antes)
+        // Cria/atualiza observação (AGORA sem <br>)
         if (vObs) {
           if (!obEl) {
-            const br = document.createElement('br');
-            reEl?.insertAdjacentElement('afterend', br);
             const p = document.createElement('p');
             p.className = 'observacao';
             p.innerHTML = `<strong>Observação:</strong> ${escapeHTML(vObs)}`;
-            br.insertAdjacentElement('afterend', p);
+            reEl?.insertAdjacentElement('afterend', p);
           } else {
             obEl.innerHTML = `<strong>Observação:</strong> ${escapeHTML(vObs)}`;
           }

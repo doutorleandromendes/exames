@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>Acessando PACS...</title>
+</head>
+<body>
+<p>Conectando ao PACS...</p>
+<script>
+  // Lê parâmetros da URL
+  const params = new URLSearchParams(window.location.search);
+  const user = params.get('user') || '';
+  const pass = params.get('pass') || '';
+
+  // Cria e envia o formulário de login
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = 'https://pacs.husf.com.br/j_spring_security_check';
+
+  // Campos do PACS
+  const u = document.createElement('input');
+  u.type = 'hidden';
+  u.name = 'j_username';
+  u.value = user;
+
+  const p = document.createElement('input');
+  p.type = 'hidden';
+  p.name = 'j_password';
+  p.value = pass;
+
+  form.appendChild(u);
+  form.appendChild(p);
+  document.body.appendChild(form);
+
+  // Envia o formulário automaticamente
+  form.submit();
+</script>
+</body>
+</html>

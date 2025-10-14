@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orçamento de Exames - Clínica</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+    background-color: #f8f9fa;
+    color: #333;
+  }
+  h1 {
+    text-align: center;
+    color: #0066cc;
+  }
+  label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+  }
+  input, select {
+    padding: 5px;
+    margin-top: 5px;
+  }
+  .exame-container {
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  }
+  .total {
+    margin-top: 20px;
+    font-size: 1.2em;
+    font-weight: bold;
+  }
+  .hidden {
+    display: none;
+  }
+  .verde {
+    color: green;
+    font-weight: bold;
+  }
+  .text-vinho {
+    color: #800020;
+    font-weight: bold;
+  }
+  button {
+    background-color: #0066cc;
+    color: #fff;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 20px;
+  }
+  button:hover {
+    background-color: #004c99;
+  }
+</style>
+</head>
+<body>
+
+<h1>Orçamento de Exames</h1>
+
+<div class="exame-container">
+  <label for="paciente">Nome do Paciente:</label>
+  <input type="text" id="paciente" placeholder="Digite o nome do paciente" />
+
+  <label for="exames">Selecione os exames:</label>
+  <select id="exames" multiple style="width:100%; height:100px;">
+    <option value="Hemograma|50">Hemograma - R$50,00</option>
+    <option value="Glicemia|40">Glicemia - R$40,00</option>
+    <option value="Colesterol|45">Colesterol - R$45,00</option>
+    <option value="Triglicerídeos|60">Triglicerídeos - R$60,00</option>
+    <option value="TGO|35">TGO - R$35,00</option>
+    <option value="TGP|35">TGP - R$35,00</option>
+    <option value="Urina tipo I|30">Urina tipo I - R$30,00</option>
+    <option value="Fezes|30">Fezes - R$30,00</option>
+  </select>
+
+  <button type="button" onclick="adicionarExameExtra()">Adicionar Exame Extra</button>
+  <div id="examesExtras"></div>
+
+  <label for="desconto">Desconto (%):</label>
+  <input type="number" id="desconto" min="0" max="100" value="0" style="width: 80px;" />
+
+  <label for="imposto">Imposto (%):</label>
+  <input id="imposto" type="number" min="0" max="100" value="0" style="width: 80px;" />
+
+  <button type="button" onclick="gerarOrcamento()">Gerar Orçamento</button>
+
+  <div id="resultado" class="hidden">
+    <p id="pacienteNome"></p>
+    <ul id="listaExames"></ul>
+    <p class="total" id="total"></p>
+    <p class="verde" id="descontoInfo"></p>
+    <p class="text-vinho" id="impostoInfo"></p>
+    <button onclick="salvarComoPDF()">Salvar como PDF</button>
+  </div>
+</div>
+
+<script>
+function adicionarExameExtra() {
+  const container = document.getElementById('examesExtras');
+  const inputNome = document.createElement('input');
+  const inputValor = document.createElement('input');
+  inputNome.placeholder = 'Nome do exame extra';
+  inputValor.placeholder = 'Valor';
+  inputValor.type = 'number';
+  inputValor.step = '0.01';
+  inputValor.style = 'width:100px;margin-left:10px';
+  const div = document.createElement('div');
+  div.style.marginTop = '10px';
+  div.appendChild(inputNome);
+  div.appendChild(inputValor);
+  container.appendChild(div);
+}
+
+function gerarOrcamento() {
+  const paciente = document.getElementById('paciente').value.trim();
+  if (!paciente) {
+    alert('Por favor, insira o nome do paciente.');
+    return;
+  }
+
+  const examesSelecionados = Array.from(document.getElementById('exames').selectedOptions);
+  let exames = [];
+  let total = 0;
+
+  examesSelecionados.forEach(opt => {
+    const [nome, valor] = opt.value.split('|');
+    exames.push({ nome, valor: parseFloat(valor) });
+    total += parseFloat(valor);
+  });
+
+  const extras = document.querySelectorAll('#examesExtras div');
+  extras.forEach(div => {
+    const inputs = div.getElementsByTagName('input');
+    const nome = inputs[0].value.trim();
+    const valor = parseFloat(inputs[1].value);
+    if (nome && !isNaN(valor)) {
+      exames.push({ nome, valor });
+      total += valor;
+    }
+  });
+
+  const desconto = parseFloat(document.getElementById('desconto').value) || 0;
+  const imposto = parseFloat(document.getElementById('imposto').value) || 0;
+
+  const totalPix = total * 0.95; // Pix/Dinheiro
+  const totalComDesconto = total * (1 - desconto / 100);
+  const totalPixComDesconto = totalPix * (1 - desconto / 100);
+
+  // Aplicar imposto sobre o total já com desconto
+  const totalComImposto = totalComDesconto * (1 + imposto / 100);
+  const totalPixComImposto = totalPixComDesconto * (1 + imposto / 100);
+
+  document.getElementById('pacienteNome').textContent = `Paciente: ${paciente}`;
+  const lista = document.getElementById('listaExames');
+  lista.innerHTML = '';
+  exames.forEach(ex => {
+    const li = document.createElement('li');
+    li.textContent = `${ex.nome} - R$ ${ex.valor.toFixed(2)}`;
+    lista.appendChild(li);
+  });
+
+  document.getElementById('total').textContent =
+    `Total: R$ ${total.toFixed(2)} (Crédito/Débito), R$ ${totalPix.toFixed(2)} (Pix/Dinheiro)`;
+
+  document.getElementById('descontoInfo').textContent =
+    desconto > 0
+      ? `Total com desconto de ${desconto}%: R$ ${totalComDesconto.toFixed(2)} (Crédito/Débito), R$ ${totalPixComDesconto.toFixed(2)} (Pix/Dinheiro)`
+      : '';
+
+  document.getElementById('impostoInfo').textContent =
+    imposto > 0
+      ? `Total com acréscimo de impostos (${imposto}%): R$ ${totalComImposto.toFixed(2)} (Crédito/Débito), R$ ${totalPixComImposto.toFixed(2)} (Pix/Dinheiro)`
+      : '';
+
+  document.getElementById('resultado').classList.remove('hidden');
+}
+
+function salvarComoPDF() {
+  const paciente = document.getElementById('paciente').value.trim();
+  if (!paciente) {
+    alert('Por favor, gere o orçamento antes de salvar.');
+    return;
+  }
+
+  const conteudo = document.getElementById('resultado').innerHTML;
+  const win = window.open('', '', 'height=800,width=600');
+  win.document.write('<html><head><title>Orçamento - ' + paciente + '</title>');
+  win.document.write('</head><body>');
+  win.document.write('<h2>Orçamento de Exames - Clínica</h2>');
+  win.document.write(conteudo);
+  win.document.write('</body></html>');
+  win.document.close();
+  win.print();
+}
+</script>
+
+</body>
+</html>

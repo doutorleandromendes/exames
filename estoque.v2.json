@@ -7,7 +7,7 @@
       {
         "sku": "A-A",
         "nome": "Adenovírus - Antígeno",
-        "estoque": 4,
+        "estoque": 3,
         "alerta": 10
       },
       {
@@ -49,7 +49,7 @@
       {
         "sku": "C-A",
         "nome": "Cryptococcus - Antígeno",
-        "estoque": 3,
+        "estoque": 5,
         "alerta": 10
       },
       {
@@ -85,7 +85,7 @@
       {
         "sku": "DSDP",
         "nome": "Dosagem sérica de Procalcitonina",
-        "estoque": 4,
+        "estoque": 2,
         "alerta": 5
       },
       {
@@ -313,7 +313,7 @@
       {
         "sku": "PCRDS",
         "nome": "Proteína C Reativa – Dosagem sérica",
-        "estoque": 5,
+        "estoque": 3,
         "alerta": 5
       },
       {
@@ -343,7 +343,7 @@
       {
         "sku": "PNEUMO",
         "nome": "Streptococcus pneumoniae - Antígeno",
-        "estoque": 4,
+        "estoque": 3,
         "alerta": 10
       },
       {

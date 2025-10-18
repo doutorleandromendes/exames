@@ -537,7 +537,7 @@
       {
         "sku": "HB-ADS",
         "nome": "Hepatite B - Antígeno de Superfície",
-        "estoque": 23,
+        "estoque": 22,
         "alerta": 10
       },
       {
@@ -549,7 +549,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 17,
+        "estoque": 15,
         "alerta": 5
       },
       {
@@ -561,7 +561,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 69,
+        "estoque": 68,
         "alerta": 5
       },
       {
@@ -573,13 +573,13 @@
       {
         "sku": "HSV1",
         "nome": "HSV1 (IgG/IgM)",
-        "estoque": 16,
+        "estoque": 15,
         "alerta": 5
       },
       {
         "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
-        "estoque": 15,
+        "estoque": 14,
         "alerta": 5
       },
       {
@@ -723,7 +723,7 @@
       {
         "sku": "S-AT",
         "nome": "Sífilis - Anticorpos Totais",
-        "estoque": 28,
+        "estoque": 27,
         "alerta": 5
       },
       {

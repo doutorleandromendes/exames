@@ -118,23 +118,48 @@
   function nameKey(s){ return unifyName(String(s||'')).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'').trim(); }
 
   async function loadCSV(){
-    try{
-      log('Carregando CSV…');
-      const r = await fetch(RAW_CSV_URL+'?_ts='+Date.now(), {cache:'reload'});
-      if(!r.ok) throw new Error('CSV '+r.status);
-      const text = await r.text();
-      const rawNames = String(text).split(/\r?\n/).map(l => (l.split(';')[0]||'').trim()).filter(Boolean);
-      const map={};
-      rawNames.forEach((n)=>{
-        const u = unifyName(n);
-        if(!map[u]) map[u] = { sku: slugifySKU(u), nome: u, categoria:'', estoque:'', alerta: (u.toLowerCase().includes('antígeno')||u.toLowerCase().includes('antigeno'))?10:5 };
-      });
-      produtos = Object.values(map).sort((a,b)=> a.nome.localeCompare(b.nome, 'pt', {sensitivity:'base'}));
-      render();
-      log('Lista carregada ('+locationSel+').');
-      await loadJSON();
-    }catch(e){ showErr('Erro ao carregar CSV: '+(e&&e.message?e.message:e)); log('Falha ao carregar CSV'); }
+  try{
+    log('Carregando CSV…');
+
+    // Lê o CSV via API autenticada (usa o token do authHeaders)
+    const apiUrl = `https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=${encodeURIComponent(typeof BRANCH !== 'undefined' ? BRANCH : 'main')}`;
+
+    const r = await fetch(apiUrl, {
+      headers: new Headers([
+        ...authHeaders(),                       // precisa do token salvo (gh_token_v1)
+        ['Accept','application/vnd.github.raw'] // entrega o arquivo "cru" (texto)
+      ]),
+      mode: 'cors',
+      cache: 'no-store'
+    });
+
+    if(!r.ok) throw new Error('CSV '+r.status);
+    const text = await r.text();
+
+    // ===== seu parsing original, intacto =====
+    const rawNames = String(text).split(/\r?\n/).map(l => (l.split(';')[0]||'').trim()).filter(Boolean);
+    const map = {};
+    rawNames.forEach((n)=>{
+      const u = unifyName(n);
+      if(!map[u]) map[u] = {
+        sku: slugifySKU(u),
+        nome: u,
+        categoria: '',
+        estoque: '',
+        alerta: (u.toLowerCase().includes('antígeno') || u.toLowerCase().includes('antigeno')) ? 10 : 5
+      };
+    });
+    produtos = Object.values(map).sort((a,b)=> a.nome.localeCompare(b.nome, 'pt', {sensitivity:'base'}));
+    render();
+    log('Lista carregada ('+locationSel+').');
+
+    await loadJSON(); // mantém seu fluxo
+  }catch(e){
+    showErr('Erro ao carregar CSV: '+(e && e.message ? e.message : e));
+    log('Falha ao carregar CSV');
   }
+}
+
 
   function authHeaders(){
     const h = new Headers();
@@ -410,36 +435,52 @@ return { exists: true, sha: data.sha, json: JSON.parse(text) };
 })();
 </script>
 <script>
-  async function carregarConfig(url) {
-    const resp = await fetch(url + (url.includes('?') ? '&' : '?') + '_=' + Date.now());
-    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ao buscar ' + url);
-    const texto = await resp.text();
-    try { 
-      return JSON.parse(texto); 
-    } catch (e1) {
-      try { 
-        return JSON5.parse(texto); 
-      } catch (e2) { 
-        throw new Error('JSON inválido em ' + url + ': ' + (e2?.message || e2)); 
-      }
-    }
+  // Função auxiliar para incluir o token salvo no localStorage (gh_token_v1)
+  function authHeaders() {
+    const h = new Headers();
+    h.set("Accept", "application/vnd.github+json");
+    h.set("X-GitHub-Api-Version", "2022-11-28");
+    const token = localStorage.getItem("gh_token_v1") || "";
+    if (token) h.set("Authorization", "Bearer " + token.trim());
+    return h;
   }
-  
+
+  // Lê o JSON via API autenticada (com suporte a CORS)
+  async function carregarConfigViaAPI(path) {
+    const apiUrl = `https://api.github.com/repos/doutorleandromendes/exames/contents/${encodeURIComponent(path)}?ref=main`;
+
+    const resp = await fetch(apiUrl, {
+      headers: new Headers([
+        ...authHeaders(),
+        ["Accept", "application/vnd.github.raw+json"] // força conteúdo bruto (não base64)
+      ]),
+      mode: "cors",
+      cache: "no-store"
+    });
+
+    if (!resp.ok)
+      throw new Error("HTTP " + resp.status + " ao buscar " + path + " via API");
+
+    // Conteúdo já vem como JSON puro
+    return resp.json();
+  }
+
   async function lerConfiguracaoEstoque() {
-    const url = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/estoque.v2.json'; // ajuste se o caminho for diferente
-    return carregarConfig(url);
+    // usa API e token, não o raw.githubusercontent.com
+    return carregarConfigViaAPI("estoque.v2.json");
   }
-  
-  // Exemplo de inicialização
+
+  // Inicialização
   (async () => {
     try {
       window.__CFG__ = await lerConfiguracaoEstoque();
-      // continue sua inicialização usando window.__CFG__
+      console.log("Configuração carregada:", window.__CFG__);
+      // continue sua inicialização normal aqui
     } catch (err) {
       console.error(err);
-      alert('Erro ao ler estoque.v2.json: ' + err.message);
+      alert("Erro ao ler estoque.v2.json (via API): " + err.message);
     }
   })();
-  </script>  
+</script>
 </body>
 </html>

@@ -12,6 +12,22 @@
   <!-- jsPDF puro (fallback) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
+  <script>
+    /* ====== TOKEN EMBUTIDO (uso local/privado) ====== */
+    // ⛔️ Substitua pelo seu token real:
+    const GITHUB_TOKEN = "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";
+
+    function authHeaders(){
+      const h = new Headers();
+      h.set("Accept","application/vnd.github+json");
+      h.set("X-GitHub-Api-Version","2022-11-28");
+      if (GITHUB_TOKEN && GITHUB_TOKEN.startsWith("ghp_")) {
+        h.set("Authorization","Bearer " + GITHUB_TOKEN);
+      }
+      return h;
+    }
+  </script>
+
   <style>
     :root{
       --pad-x: 80px;
@@ -373,7 +389,7 @@
   <script>
     /* ================== Helpers ================== */
     const pacientesURL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
-    const examesURL    = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv';
+    const examesURL    = 'https://raw.githubusercontent.com/doutorleandromendes/exames/refs/heads/main/products.csv'; /* não será usado; mantido apenas como referência */
 
     function fetchNoCache(url, opts = {}) {
       const sep = url.includes('?') ? '&' : '?';
@@ -444,9 +460,25 @@
       })
       .catch(()=>{ document.getElementById('statusPac').textContent = 'Erro ao carregar pacientes'; });
 
-    fetchNoCache(examesURL)
-      .then(r=>r.text())
-      .then(csv=>{
+    /* === NOVO: carregarExames via API do GitHub com token (substitui fetch ao raw) === */
+    async function carregarExames(){
+      const statusEl = document.getElementById('statusExames');
+      try{
+        const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
+        const resp = await fetch(apiUrl, {
+          headers: new Headers([
+            ...authHeaders(),
+            ["Accept","application/vnd.github.raw"] // entrega o CSV cru (texto)
+          ]),
+          mode: 'cors',
+          cache: 'no-store',
+          credentials: 'omit'
+        });
+        if (!resp.ok) throw new Error('HTTP '+resp.status);
+
+        const csv = await resp.text();
+
+        // ===== parsing original mantido =====
         let parsed = Papa.parse(csv, { header: true, delimiter: ';', skipEmptyLines: true });
         let exames = [];
         if (parsed.meta && parsed.data && parsed.data.length) {
@@ -468,11 +500,15 @@
           const opt=document.createElement('option');
           opt.value=nome; opt.textContent=nome; sel.appendChild(opt);
         });
-        document.getElementById('statusExames').textContent = `Exames carregados: ${exames.length}`;
+        statusEl.textContent = `Exames carregados: ${exames.length}`;
         sel.addEventListener('change', () => { atualizarCampoResultado(); setMetodoDefaultParaExame(); });
         atualizarCampoResultado(); setMetodoDefaultParaExame();
-      })
-      .catch(()=>{ document.getElementById('statusExames').textContent = 'Erro ao carregar exames'; });
+      }catch(e){
+        console.error(e);
+        statusEl.textContent = 'Erro ao carregar exames';
+      }
+    }
+    carregarExames();
 
     /* ================== Campo Resultado dinâmico ================== */
     function addResultadoManualToggle(container){
@@ -985,7 +1021,8 @@
         ? (document.getElementById('pacienteNomeManual').value || '').trim()
         : (sel.split('|')[0] || '').trim();
       const dataISO = (document.getElementById('data').value || '').trim();
-      const dataNome = dataISO ? dataISO.split('-').verse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
+      /* corrigido: reverse() em vez de verse() */
+      const dataNome = dataISO ? dataISO.split('-').reverse().join('-') : new Date().toLocaleDateString('pt-BR').replaceAll('/','-');
       const safe = s => (s || 'Paciente').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g,'_');
       const nomeArquivo = `Laudos_${safe(nomePaciente)}_${safe(dataNome)}.pdf`;
 

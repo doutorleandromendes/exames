@@ -429,7 +429,7 @@
       {
         "sku": "CI",
         "nome": "CMV (IgG/IgM)",
-        "estoque": 37,
+        "estoque": 36,
         "alerta": 5
       },
       {
@@ -477,7 +477,7 @@
       {
         "sku": "EV",
         "nome": "Epstein-Barr - Anticorpos Heterófilos",
-        "estoque": 34,
+        "estoque": 33,
         "alerta": 5
       },
       {
@@ -531,7 +531,7 @@
       {
         "sku": "HB-AA",
         "nome": "Hepatite B - Anticorpo AntiHBs",
-        "estoque": 32,
+        "estoque": 31,
         "alerta": 5
       },
       {
@@ -549,7 +549,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 15,
+        "estoque": 14,
         "alerta": 5
       },
       {
@@ -561,7 +561,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 68,
+        "estoque": 67,
         "alerta": 5
       },
       {
@@ -573,13 +573,13 @@
       {
         "sku": "HSV1",
         "nome": "HSV1 (IgG/IgM)",
-        "estoque": 15,
+        "estoque": 14,
         "alerta": 5
       },
       {
         "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
-        "estoque": 14,
+        "estoque": 13,
         "alerta": 5
       },
       {
@@ -705,7 +705,7 @@
       {
         "sku": "RI",
         "nome": "Rubeola (IgG/IgM)",
-        "estoque": 17,
+        "estoque": 16,
         "alerta": 5
       },
       {

@@ -25,6 +25,7 @@ const PORT = process.env.PORT || 3000;
 
 // ====== ENV ======
 const DATABASE_URL = process.env.DATABASE_URL;
+const DATABASE_URL_UNPOOLED = process.env.DATABASE_URL_UNPOOLED || null;
 const PGSSLMODE = process.env.PGSSLMODE || 'require';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || null;
 const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null;
@@ -42,6 +43,13 @@ const pool = new Pool({
     // Força SSL mas ignora verificação do certificado (necessário para Supabase, pelo menos enquanto não configuramos o CA)
     ssl: { rejectUnauthorized: false }
   });
+  
+// Pool dedicado para migrações (usa conexão direta quando disponível)
+const migratorPool = new Pool({
+    connectionString: DATABASE_URL_UNPOOLED || DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+
   
 
 async function sendWelcomeAndMark({ userId, email, name, login, plain }) {
@@ -141,7 +149,7 @@ const authRequired = async (req,res,next)=>{
 
 // ====== MIGRAÇÕES ======
 async function migrate(){
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS users(
       id SERIAL PRIMARY KEY,
       email TEXT UNIQUE,
@@ -151,7 +159,7 @@ async function migrate(){
       expires_at TIMESTAMPTZ
     );`);
 
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS courses(
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -160,7 +168,7 @@ async function migrate(){
       expires_at TIMESTAMPTZ
     );`);
 
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS course_members(
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
@@ -169,7 +177,7 @@ async function migrate(){
       PRIMARY KEY (user_id, course_id)
     );`);
 
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS videos(
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -178,7 +186,7 @@ async function migrate(){
       duration_seconds INTEGER
     );`);
 
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS video_files (
       id SERIAL PRIMARY KEY,
       video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -188,7 +196,7 @@ async function migrate(){
     );
   `);
 
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS sessions(
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -196,7 +204,7 @@ async function migrate(){
       started_at TIMESTAMPTZ DEFAULT now()
     );`);
 
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS events(
       id SERIAL PRIMARY KEY,
       session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
@@ -206,15 +214,15 @@ async function migrate(){
     );`);
 
   // ---- colunas novas/idempotentes (antes dos índices) ----
-  await pool.query(`ALTER TABLE users   ADD COLUMN IF NOT EXISTS temp_password TEXT`);
-  await pool.query(`ALTER TABLE users   ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ`);
-  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS archived boolean DEFAULT false`);
-  await pool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
-  await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ`);
-  await pool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS sort_index INTEGER`);
+  await migratorPool.query(`ALTER TABLE users   ADD COLUMN IF NOT EXISTS temp_password TEXT`);
+  await migratorPool.query(`ALTER TABLE users   ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMPTZ`);
+  await migratorPool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS archived boolean DEFAULT false`);
+  await migratorPool.query(`ALTER TABLE courses ADD COLUMN IF NOT EXISTS start_date TIMESTAMPTZ`);
+  await migratorPool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS available_from TIMESTAMPTZ`);
+  await migratorPool.query(`ALTER TABLE videos  ADD COLUMN IF NOT EXISTS sort_index INTEGER`);
 
   // ---- watch_segments ----
-  await pool.query(`
+  await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS watch_segments (
       id SERIAL PRIMARY KEY,
       session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -223,13 +231,13 @@ async function migrate(){
       CHECK (end_sec >= start_sec)
     );
   `);
-  await pool.query(`
+  await migratorPool.query(`
     CREATE INDEX IF NOT EXISTS watch_segments_session_idx
       ON watch_segments(session_id, start_sec, end_sec);
   `);
 
   // Pedidos de acesso (pendentes/aprovados/rejeitados)
-await pool.query(`
+await migratorPool.query(`
   CREATE TABLE IF NOT EXISTS access_requests (
     id SERIAL PRIMARY KEY,
     full_name TEXT NOT NULL,
@@ -242,19 +250,19 @@ await pool.query(`
     processed_by INTEGER REFERENCES users(id) ON DELETE SET NULL
   );
 `);
-await pool.query(`CREATE INDEX IF NOT EXISTS access_requests_status_idx ON access_requests(status, created_at DESC)`);
-await pool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  ON access_requests(LOWER(email))`);
+await migratorPool.query(`CREATE INDEX IF NOT EXISTS access_requests_status_idx ON access_requests(status, created_at DESC)`);
+await migratorPool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  ON access_requests(LOWER(email))`);
 
 
   // ---- índices (depois das colunas existirem) ----
-  await pool.query(`CREATE INDEX IF NOT EXISTS video_files_video_idx
+  await migratorPool.query(`CREATE INDEX IF NOT EXISTS video_files_video_idx
                       ON video_files(video_id, sort_index NULLS LAST, id)`);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS videos_course_order_idx
+  await migratorPool.query(`CREATE INDEX IF NOT EXISTS videos_course_order_idx
                       ON videos(course_id, sort_index NULLS LAST, id)`);
 
   // Unicidade por (course_id, r2_key) — e remove possíveis índices antigos em r2_key
-  await pool.query(`
+  await migratorPool.query(`
     DO $$
     BEGIN
       IF EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='videos_r2_key_key') THEN
@@ -264,7 +272,7 @@ await pool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  ON acces
         EXECUTE 'DROP INDEX videos_r2_key_idx';
       END IF;
     END $$;`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS videos_course_r2_key_unique ON videos(course_id, r2_key)`);
+  await migratorPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS videos_course_r2_key_unique ON videos(course_id, r2_key)`);
 }
 migrate().catch(e=>console.error('migration error', e));
 

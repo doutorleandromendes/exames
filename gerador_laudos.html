@@ -105,7 +105,7 @@
       display: inline-block;
       max-width: 100%;
       box-sizing: border-box;
-      white-space: normal;
+      white-space: pre-wrap;
       overflow-wrap: anywhere;
       word-break: break-word;
     }
@@ -253,7 +253,7 @@
         max-width: calc(210mm - 24mm) !important;
         padding: 5px 20px !important; /* 10px → 7px → 5px */
         font-size: calc(16px - 2pt);
-        white-space: normal !important;
+        white-space: pre-wrap !important;
         overflow-wrap: anywhere !important;
         word-break: break-word !important;
       }
@@ -516,11 +516,15 @@
       const chk = document.createElement('input'); chk.type = 'checkbox'; chk.id = 'resultadoManualToggle';
       lbl.appendChild(chk); lbl.appendChild(document.createTextNode(' Inserir Resultado manual'));
       container.appendChild(lbl);
-      const manual = document.createElement('input');
-      manual.type = 'text'; manual.id = 'resultadoManual';
-      manual.placeholder = 'Digite o resultado (texto livre)';
-      manual.style.fontWeight = 'bold'; manual.style.textAlign = 'center'; manual.style.display = 'none';
-      container.appendChild(manual);
+const manual = document.createElement('textarea');
+manual.id = 'resultadoManual';
+manual.rows = 3; // ajuste se quiser mais linhas
+manual.placeholder = 'Digite o resultado (texto livre; Enter faz nova linha)';
+manual.style.fontWeight = 'bold';
+manual.style.textAlign = 'center';
+manual.style.display = 'none';
+manual.style.resize = 'vertical'; // permitir redimensionar
+container.appendChild(manual);
       chk.addEventListener('change', ()=>{
         const base = document.getElementById('resultado');
         const usarManual = chk.checked;

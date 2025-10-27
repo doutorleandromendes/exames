@@ -217,22 +217,28 @@ function adicionarExameExtra() {
       }).filter(row => row && row["Product Name"] && row["Price"] && row["Pix Price"]);
     }
 
+    /* ==== ATUALIZADA: sempre API + fallback sem token em caso de 401 ==== */
     async function carregarExames() {
       const meta = document.querySelector('meta[name="github-token"]');
       const GH_TOKEN = meta ? (meta.content || '').trim() : '';
 
-      // Sempre via API; nada de raw.githubusercontent.com
       const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
 
-      // Tenta RAW direto; se vier JSON, decodifica base64
-      const headers = {
-        Accept: 'application/vnd.github.raw',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...(GH_TOKEN ? { Authorization: `Bearer ${GH_TOKEN}` } : {})
-      };
+      async function fetchCsv(useAuth) {
+        const headers = {
+          Accept: 'application/vnd.github.raw',
+          'X-GitHub-Api-Version': '2022-11-28',
+          ...(useAuth && GH_TOKEN ? { Authorization: `Bearer ${GH_TOKEN}` } : {})
+        };
+        return fetch(apiUrl, { headers, mode: 'cors', cache: 'no-store', credentials: 'omit' });
+      }
 
-      let data;
-      const resp = await fetch(apiUrl, { headers, mode: 'cors', cache: 'no-store', credentials: 'omit' });
+      // tenta com token (se houver), senão já vai anônimo
+      let resp = await fetchCsv(Boolean(GH_TOKEN));
+      if (resp.status === 401 && GH_TOKEN) {
+        console.warn('Token inválido/sem permissão — tentando sem Authorization…');
+        resp = await fetchCsv(false);
+      }
 
       if (!resp.ok) {
         console.error('GitHub API erro:', resp.status, resp.statusText);
@@ -240,19 +246,16 @@ function adicionarExameExtra() {
       }
 
       const ct = resp.headers.get('content-type') || '';
+      let data;
       if (ct.includes('text/plain') || ct.includes('text/csv')) {
-        // Recebeu o CSV puro (RAW)
         data = await resp.text();
       } else {
-        // Recebeu JSON do endpoint "contents" -> decodificar base64
         const json = await resp.json();
         if (json && json.content && json.encoding === 'base64') {
-          // remove quebras e decodifica
           const b64 = String(json.content).replace(/\n/g, '');
           try {
             data = decodeURIComponent(escape(window.atob(b64)));
           } catch {
-            // fallback sem UTF-8 decode
             data = window.atob(b64);
           }
         } else {
@@ -261,7 +264,7 @@ function adicionarExameExtra() {
         }
       }
 
-      // --- seu parsing permanece igual ---
+      // parsing original mantido
       let linhas = data.trim().split("\n");
       if (!linhas[0].toLowerCase().includes("product name")) {
         linhas.unshift("Product Name;Price;Pix Price;Description");
@@ -280,8 +283,8 @@ function adicionarExameExtra() {
 
         if (isMicro) {
           label.innerHTML = `
-            <input type="checkbox" value="\${nomeProd}" data-preco="\${preco}" data-pix="\${pix}">
-            \${nomeProd} (R$ \${preco} / Pix R$ \${pix})
+            <input type="checkbox" value="${nomeProd}" data-preco="${preco}" data-pix="${pix}">
+            ${nomeProd} (R$ ${preco} / Pix R$ ${pix})
             <div class="microscopia-controls hidden">
               <div style="display:flex; gap:8px; margin-top:6px;">
                 <input type="text" placeholder="Material (ex.: sangue, secreção, raspado...)" class="material-input" style="flex:1; padding:6px;">
@@ -292,7 +295,7 @@ function adicionarExameExtra() {
             </div>
           `;
         } else {
-          label.innerHTML = `<input type="checkbox" value="\${nomeProd}" data-preco="\${preco}" data-pix="\${pix}"> \${nomeProd} (R$ \${preco} / Pix R$ \${pix})`;
+          label.innerHTML = `<input type="checkbox" value="${nomeProd}" data-preco="${preco}" data-pix="${pix}"> ${nomeProd} (R$ ${preco} / Pix R$ ${pix})`;
         }
         container.appendChild(label);
         label.classList.add("exame-item");
@@ -312,7 +315,7 @@ function adicionarExameExtra() {
             label._materiais.forEach((mat, idx) => {
               const chip = document.createElement('span');
               chip.className = 'chip';
-              chip.innerHTML = `\${mat} <span class="rm" data-idx="\${idx}" title="remover">×</span>`;
+              chip.innerHTML = `${mat} <span class="rm" data-idx="${idx}" title="remover">×</span>`;
               lista.appendChild(chip);
             });
           }

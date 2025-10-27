@@ -220,8 +220,15 @@ function adicionarExameExtra() {
     async function carregarExames() {
       const meta = document.querySelector('meta[name="github-token"]');
       const GH_TOKEN = meta ? (meta.content || '').trim() : '';
-      const headers = GH_TOKEN ? { Authorization: `Bearer ${GH_TOKEN}` } : {};
-      const response = await fetch(URL_CSV, { headers });
+
+      // usar a API em vez do raw (respeita o token e o rate limit autenticado)
+      const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
+      const headers = {
+        Accept: 'application/vnd.github.raw',
+        ...(GH_TOKEN ? { Authorization: `Bearer ${GH_TOKEN}` } : {})
+      };
+
+      const response = await fetch(apiUrl, { headers, mode: 'cors', cache: 'no-store', credentials: 'omit' });
       let data = await response.text();
       
     let linhas = data.trim().split("\n");

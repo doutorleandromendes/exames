@@ -13,6 +13,13 @@ import crypto from 'crypto';
 import { Pool } from 'pg';
 import { sendWelcomeEmail } from './mailer.js';
 
+// ---- SSL config helper (minimal, surgical) ----
+const __pgSslMode = (process.env.PGSSLMODE || '').toLowerCase();
+const __sslConfig = (__pgSslMode === 'disable')
+  ? false
+  : { rejectUnauthorized: (__pgSslMode === 'no-verify') ? false : true };
+// -----------------------------------------------
+
 const app = express();
 app.set('trust proxy', 1);
 
@@ -42,12 +49,12 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const pool = new Pool({
   connectionString: SUPABASE_POOLER_URL || DATABASE_URL,
   // Usa o Transaction Pooler (porta 6543) quando SUPABASE_POOLER_URL estiver definido; SSL com verificação de certificado
-  ssl: { rejectUnauthorized: true }
+  ssl: __sslConfig
 });
 // Pool dedicado para migrações (usa conexão direta quando disponível)
 const migratorPool = new Pool({
   connectionString: DATABASE_URL_UNPOOLED || DATABASE_URL,
-  ssl: { rejectUnauthorized: true }
+  ssl: __sslConfig
 });
 async function sendWelcomeAndMark({ userId, email, name, login, plain }) {
   // Segurança: só envia uma vez

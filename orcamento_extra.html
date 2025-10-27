@@ -217,7 +217,7 @@ function adicionarExameExtra() {
       }).filter(row => row && row["Product Name"] && row["Price"] && row["Pix Price"]);
     }
 
-    /* ==== ATUALIZADA: sempre API + fallback sem token em caso de 401 ==== */
+    /* ==== ATUALIZADA: sempre API + fallback sem token + robustez de content-type ==== */
     async function carregarExames() {
       const meta = document.querySelector('meta[name="github-token"]');
       const GH_TOKEN = meta ? (meta.content || '').trim() : '';
@@ -245,11 +245,14 @@ function adicionarExameExtra() {
         throw new Error(`Falha ao baixar CSV: HTTP ${resp.status}`);
       }
 
-      const ct = resp.headers.get('content-type') || '';
+      // Detecta corretamente CSV texto vs JSON base64
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
       let data;
-      if (ct.includes('text/plain') || ct.includes('text/csv')) {
+      if (!ct.includes('json')) {
+        // CSV cru (texto)
         data = await resp.text();
       } else {
+        // JSON: decodifica content base64
         const json = await resp.json();
         if (json && json.content && json.encoding === 'base64') {
           const b64 = String(json.content).replace(/\n/g, '');
@@ -264,7 +267,7 @@ function adicionarExameExtra() {
         }
       }
 
-      // parsing original mantido
+      // ===== parsing original mantido =====
       let linhas = data.trim().split("\n");
       if (!linhas[0].toLowerCase().includes("product name")) {
         linhas.unshift("Product Name;Price;Pix Price;Description");

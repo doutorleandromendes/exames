@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8"/>
 <title>Orçamento de Exames - Clínica</title>
-<meta name="github-token" content="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"/>
+<meta name="github-token" content="ghp_SEU_TOKEN_AQUI"/>
 <style>
     body { font-family: Arial, sans-serif; margin: 40px; }
     h2 { margin-top: 30px; }
@@ -221,86 +221,117 @@ function adicionarExameExtra() {
       const meta = document.querySelector('meta[name="github-token"]');
       const GH_TOKEN = meta ? (meta.content || '').trim() : '';
 
-      // usar a API em vez do raw (respeita o token e o rate limit autenticado)
+      // Sempre via API; nada de raw.githubusercontent.com
       const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
+
+      // Tenta RAW direto; se vier JSON, decodifica base64
       const headers = {
         Accept: 'application/vnd.github.raw',
+        'X-GitHub-Api-Version': '2022-11-28',
         ...(GH_TOKEN ? { Authorization: `Bearer ${GH_TOKEN}` } : {})
       };
 
-      const response = await fetch(apiUrl, { headers, mode: 'cors', cache: 'no-store', credentials: 'omit' });
-      let data = await response.text();
-      
-    let linhas = data.trim().split("\n");
-    if (!linhas[0].toLowerCase().includes("product name")) {
-      linhas.unshift("Product Name;Price;Pix Price;Description");
-      data = linhas.join("\n");
-    }
-    const exames = csvToArray(data);
+      let data;
+      const resp = await fetch(apiUrl, { headers, mode: 'cors', cache: 'no-store', credentials: 'omit' });
+
+      if (!resp.ok) {
+        console.error('GitHub API erro:', resp.status, resp.statusText);
+        throw new Error(`Falha ao baixar CSV: HTTP ${resp.status}`);
+      }
+
+      const ct = resp.headers.get('content-type') || '';
+      if (ct.includes('text/plain') || ct.includes('text/csv')) {
+        // Recebeu o CSV puro (RAW)
+        data = await resp.text();
+      } else {
+        // Recebeu JSON do endpoint "contents" -> decodificar base64
+        const json = await resp.json();
+        if (json && json.content && json.encoding === 'base64') {
+          // remove quebras e decodifica
+          const b64 = String(json.content).replace(/\n/g, '');
+          try {
+            data = decodeURIComponent(escape(window.atob(b64)));
+          } catch {
+            // fallback sem UTF-8 decode
+            data = window.atob(b64);
+          }
+        } else {
+          console.error('Resposta inesperada da API (sem content base64):', json);
+          throw new Error('Conteúdo inesperado ao ler products.csv via API.');
+        }
+      }
+
+      // --- seu parsing permanece igual ---
+      let linhas = data.trim().split("\n");
+      if (!linhas[0].toLowerCase().includes("product name")) {
+        linhas.unshift("Product Name;Price;Pix Price;Description");
+        data = linhas.join("\n");
+      }
+      const exames = csvToArray(data);
     
       const container = document.getElementById("exames");
       exames.forEach(exame => {
         const label = document.createElement("label");
         label.title = exame["Description"] || "";
         const nomeProd = exame["Product Name"];
-  const preco = exame["Price"];
-  const pix = exame["Pix Price"];
-  const isMicro = (nomeProd || "").toLowerCase().includes("microscopia");
+        const preco = exame["Price"];
+        const pix = exame["Pix Price"];
+        const isMicro = (nomeProd || "").toLowerCase().includes("microscopia");
 
-  if (isMicro) {
-    label.innerHTML = `
-      <input type="checkbox" value="${nomeProd}" data-preco="${preco}" data-pix="${pix}">
-      ${nomeProd} (R$ ${preco} / Pix R$ ${pix})
-      <div class="microscopia-controls hidden">
-        <div style="display:flex; gap:8px; margin-top:6px;">
-          <input type="text" placeholder="Material (ex.: sangue, secreção, raspado...)" class="material-input" style="flex:1; padding:6px;">
-          <button type="button" class="btn-mini add-material">+ material</button>
-        </div>
-        <div class="materiais-list" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;"></div>
-        <small style="display:block; margin-top:4px; color:#666;">Adicione 1+ materiais; cada material gera uma linha do exame com o mesmo preço.</small>
-      </div>
-    `;
-  } else {
-    label.innerHTML = `<input type="checkbox" value="${nomeProd}" data-preco="${preco}" data-pix="${pix}"> ${nomeProd} (R$ ${preco} / Pix R$ ${pix})`;
-  }
-  container.appendChild(label);
-  label.classList.add("exame-item");
+        if (isMicro) {
+          label.innerHTML = `
+            <input type="checkbox" value="\${nomeProd}" data-preco="\${preco}" data-pix="\${pix}">
+            \${nomeProd} (R$ \${preco} / Pix R$ \${pix})
+            <div class="microscopia-controls hidden">
+              <div style="display:flex; gap:8px; margin-top:6px;">
+                <input type="text" placeholder="Material (ex.: sangue, secreção, raspado...)" class="material-input" style="flex:1; padding:6px;">
+                <button type="button" class="btn-mini add-material">+ material</button>
+              </div>
+              <div class="materiais-list" style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;"></div>
+              <small style="display:block; margin-top:4px; color:#666;">Adicione 1+ materiais; cada material gera uma linha do exame com o mesmo preço.</small>
+            </div>
+          `;
+        } else {
+          label.innerHTML = `<input type="checkbox" value="\${nomeProd}" data-preco="\${preco}" data-pix="\${pix}"> \${nomeProd} (R$ \${preco} / Pix R$ \${pix})`;
+        }
+        container.appendChild(label);
+        label.classList.add("exame-item");
 
-  if (isMicro) {
-    const cb = label.querySelector('input[type=checkbox]');
-    const controls = label.querySelector('.microscopia-controls');
-    const addBtn = label.querySelector('.add-material');
-    const input = label.querySelector('.material-input');
-    const lista = label.querySelector('.materiais-list');
-    label._materiais = [];
-    cb.addEventListener('change', () => {
-      controls.classList.toggle('hidden', !cb.checked);
-    });
-    function renderMateriais() {
-      lista.innerHTML = '';
-      label._materiais.forEach((mat, idx) => {
-        const chip = document.createElement('span');
-        chip.className = 'chip';
-        chip.innerHTML = `${mat} <span class="rm" data-idx="${idx}" title="remover">×</span>`;
-        lista.appendChild(chip);
+        if (isMicro) {
+          const cb = label.querySelector('input[type=checkbox]');
+          const controls = label.querySelector('.microscopia-controls');
+          const addBtn = label.querySelector('.add-material');
+          const input = label.querySelector('.material-input');
+          const lista = label.querySelector('.materiais-list');
+          label._materiais = [];
+          cb.addEventListener('change', () => {
+            controls.classList.toggle('hidden', !cb.checked);
+          });
+          function renderMateriais() {
+            lista.innerHTML = '';
+            label._materiais.forEach((mat, idx) => {
+              const chip = document.createElement('span');
+              chip.className = 'chip';
+              chip.innerHTML = `\${mat} <span class="rm" data-idx="\${idx}" title="remover">×</span>`;
+              lista.appendChild(chip);
+            });
+          }
+          addBtn.addEventListener('click', () => {
+            const val = (input.value || '').trim();
+            if (!val) return;
+            label._materiais.push(val);
+            input.value = '';
+            renderMateriais();
+          });
+          lista.addEventListener('click', (e) => {
+            const rm = e.target.closest('.rm');
+            if (!rm) return;
+            const i = Number(rm.dataset.idx);
+            label._materiais.splice(i, 1);
+            renderMateriais();
+          });
+        }
       });
-    }
-    addBtn.addEventListener('click', () => {
-      const val = (input.value || '').trim();
-      if (!val) return;
-      label._materiais.push(val);
-      input.value = '';
-      renderMateriais();
-    });
-    lista.addEventListener('click', (e) => {
-      const rm = e.target.closest('.rm');
-      if (!rm) return;
-      const i = Number(rm.dataset.idx);
-      label._materiais.splice(i, 1);
-      renderMateriais();
-    });
-  }
-});
     }
 
     carregarExames();

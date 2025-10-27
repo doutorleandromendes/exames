@@ -27,6 +27,7 @@ const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
 const DATABASE_URL_UNPOOLED = process.env.DATABASE_URL_UNPOOLED || null;
 const PGSSLMODE = process.env.PGSSLMODE || 'require';
+const SUPABASE_POOLER_URL = process.env.SUPABASE_POOLER_URL || null;
 const ADMIN_SECRET = process.env.ADMIN_SECRET || null;
 const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null;
 const SEMESTER_END = process.env.SEMESTER_END || null;
@@ -39,19 +40,15 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 
 // ====== PG Pool ======
 const pool = new Pool({
-    connectionString: DATABASE_URL,
-    // Força SSL mas ignora verificação do certificado (necessário para Supabase, pelo menos enquanto não configuramos o CA)
-    ssl: { rejectUnauthorized: false }
-  });
-  
+  connectionString: SUPABASE_POOLER_URL || DATABASE_URL,
+  // Usa o Transaction Pooler (porta 6543) quando SUPABASE_POOLER_URL estiver definido; SSL com verificação de certificado
+  ssl: { rejectUnauthorized: true }
+});
 // Pool dedicado para migrações (usa conexão direta quando disponível)
 const migratorPool = new Pool({
-    connectionString: DATABASE_URL_UNPOOLED || DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-  });
-
-  
-
+  connectionString: DATABASE_URL_UNPOOLED || DATABASE_URL,
+  ssl: { rejectUnauthorized: true }
+});
 async function sendWelcomeAndMark({ userId, email, name, login, plain }) {
   // Segurança: só envia uma vez
   const chk = await pool.query(

@@ -675,7 +675,7 @@
       {
         "sku": "M-A",
         "nome": "MPOX - Antígeno",
-        "estoque": 27,
+        "estoque": 26,
         "alerta": 10
       },
       {
@@ -687,19 +687,19 @@
       {
         "sku": "M-A",
         "nome": "Mycoplasma - Antígeno",
-        "estoque": 27,
+        "estoque": 26,
         "alerta": 10
       },
       {
         "sku": "PRSC-A",
         "nome": "Painel Respiratório Simples (COVID19/InfluenzaA/InfluenzaB/VSR) - Antígenos",
-        "estoque": 17,
+        "estoque": 16,
         "alerta": 10
       },
       {
         "sku": "PCRDS",
         "nome": "Proteína C Reativa – Dosagem sérica",
-        "estoque": 44,
+        "estoque": 43,
         "alerta": 5
       },
       {
@@ -759,7 +759,7 @@
       {
         "sku": "VSR-A",
         "nome": "Vírus Sincicial Respiratório - Antígeno",
-        "estoque": 23,
+        "estoque": 22,
         "alerta": 10
       },
       {

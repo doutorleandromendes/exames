@@ -729,7 +729,7 @@
       {
         "sku": "PNEUMO",
         "nome": "Streptococcus pneumoniae - Antígeno",
-        "estoque": 17,
+        "estoque": 16,
         "alerta": 10
       },
       {
@@ -747,7 +747,7 @@
       {
         "sku": "VM-A",
         "nome": "Vírus Metapneumovírus - Antígeno",
-        "estoque": 16,
+        "estoque": 15,
         "alerta": 10
       },
       {

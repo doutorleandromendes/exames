@@ -567,7 +567,7 @@
       {
         "sku": "H-4G",
         "nome": "HIV - 4a geração",
-        "estoque": 30,
+        "estoque": 28,
         "alerta": 5
       },
       {
@@ -741,7 +741,7 @@
       {
         "sku": "TI",
         "nome": "Toxoplasmose - Anticorpos IgM",
-        "estoque": 25,
+        "estoque": 24,
         "alerta": 5
       },
       {

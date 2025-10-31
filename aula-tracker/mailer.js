@@ -18,7 +18,7 @@ Seu cadastro foi concluído.
 Login: ${login}
 Senha: ${password}
 
-Acesse: https://infectoaulas.com/login
+Acesse: https://infectoaulas2.onrender.com/login
 `,
     html: `<p>Olá <b>${name}</b>,</p>
            <p>Seu cadastro no InfectoAulas foi realizado.</p>

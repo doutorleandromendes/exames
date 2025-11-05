@@ -23,6 +23,7 @@ Hepatite C - Anticorpos Totais;100;90;Exame usado para o diagnóstico de hepatit
 Hepatite E - Anticorpos IgG;200;180;Detecta anticorpos da classe IgG contra o vírus da hepatite E. Esses anticorpos são produzidos precocemente na infecção e permanecem positivos por toda a vida.<br><br>
 Hepatite E - Anticorpos IgM;200;180;Detecta anticorpos da classe IgG contra o vírus da hepatite E. Esses anticorpos são produzidos precocemente na infecção e tornam-se negativos na fase de convalescença/cura. Eles auxiliam na confirmação do diagnóstico em paciente com suspeita clínica de hepatite E.<br><br>
 Sífilis - Anticorpos Totais;100;90;Exame usado para o diagnóstico de Sífilis. Os anticorpos totais treponêmicos (ou seja, aqueles que são dirigidos especificamente contra a bactéria causados da Sífilis) são produzidos entre 3 e 6 semanas após a infecção e permanecem positivos para toda a vida (mesmo após a cura). Eles são usados para a investigação de casos suspeitos de sífilis e, caso sejam positivos, tornam necessários outros exames para diferenciar infecções ativas/atuais de infecções resolvidas.<br><br>
+Sífilis - VDRL;180;162;Exame usado para auxiliar no manejo da Sífilis. Os anticorpos não-treponêmicos detectados e quantificados pela reação de VDRL permitem estadiar a sífilis no diagnóstico, monitorar a eficácia do tratamento e detectar eventuais recidivas ou reinfecções.<br><br>
 Clamídia - Antígeno;240;216;Exame usado para diagnóstico de infecção pela bactéria Chlamydia trachomatis. Nos seres humanos, essa é uma infecção de transmissão sexual que pode causar desde uretrite até infecções pélvicas profundas e infertilidade. Porém, a maioria dos casos não tem sintomas e, então é importante realizar o exame de forma preventiva, já que se trata de uma infecção que tem cura.<br><br>
 Gonorreia - Antígeno;240;216;Exame usado para o diagnóstico de infecção pela bactéria Neisseria gonorrhea. Essa é uma infecção sexualmente transmissível que pode causar sintomas restritos ao trato genital (como corrimento uretral) ou, até, infecção generalizada. O tratamento oportuno e correto alivia os sintomas, previne complicações e impede a transmissão.<br><br>
 MPOX - Antígeno;250;225;Exame usado como ferramenta auxiliar no diagnóstico de casos humanos de infecção pelo vírus MPOX (previamente conhecido como Monkeypox). Ele detecta fragmentos do vírus diretamente no material analisado. Em caso de positividade, é necessária a confirmação por métodos moleculares.<br><br>
@@ -88,6 +89,7 @@ Cryptosporidium - Antígeno;240;216;Exame usado para auxiliar no diagnóstico de
 Clostridioides difficile - Antígeno;180;162;Exame confirmatório usado para auxiliar no diagnóstico de diarreias associadas ao uso de antibióticos causadas pela bactéria Clostridioides difficile.<br><br>
 Clostridioides difficile - GDH;180;162;Exame de triagem usado para auxiliar no diagnóstico de diarreias associadas ao uso de antibióticos causadas pela bactéria Clostridioides difficile.<br><br>
 Dímero D – Dosagem;180;162;Exame usado para auxiliar no diagnóstico de quadros trombóticos, em conjunto com outros testes e o julgamento clínico do caso.<br><br>
+
 
 
 

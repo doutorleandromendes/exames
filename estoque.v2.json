@@ -723,7 +723,7 @@
       {
         "sku": "S-AT",
         "nome": "Sífilis - Anticorpos Totais",
-        "estoque": 27,
+        "estoque": 51,
         "alerta": 5
       },
       {
@@ -741,7 +741,7 @@
       {
         "sku": "TI",
         "nome": "Toxoplasmose - Anticorpos IgM",
-        "estoque": 28,
+        "estoque": 47,
         "alerta": 5
       },
       {

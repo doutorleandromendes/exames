@@ -423,7 +423,7 @@
       {
         "sku": "CLAM",
         "nome": "Clamídia - Antígeno",
-        "estoque": 16,
+        "estoque": 41,
         "alerta": 10
       },
       {
@@ -735,7 +735,7 @@
       {
         "sku": "PYOGENES",
         "nome": "Streptococcus pyogenes - Antígeno",
-        "estoque": 18,
+        "estoque": 43,
         "alerta": 10
       },
       {

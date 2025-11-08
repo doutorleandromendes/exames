@@ -717,7 +717,7 @@
       {
         "sku": "SC-A",
         "nome": "SARS-CoV2 (Covid) - Antígeno",
-        "estoque": 25,
+        "estoque": 24,
         "alerta": 10
       },
       {

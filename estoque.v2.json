@@ -699,7 +699,7 @@
       {
         "sku": "PCRDS",
         "nome": "Proteína C Reativa – Dosagem sérica",
-        "estoque": 43,
+        "estoque": 42,
         "alerta": 5
       },
       {
@@ -717,7 +717,7 @@
       {
         "sku": "SC-A",
         "nome": "SARS-CoV2 (Covid) - Antígeno",
-        "estoque": 24,
+        "estoque": 23,
         "alerta": 10
       },
       {

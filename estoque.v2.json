@@ -549,7 +549,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 16,
+        "estoque": 15,
         "alerta": 5
       },
       {
@@ -561,7 +561,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 64,
+        "estoque": 62,
         "alerta": 5
       },
       {
@@ -573,13 +573,13 @@
       {
         "sku": "HSV1",
         "nome": "HSV1 (IgG/IgM)",
-        "estoque": 22,
+        "estoque": 21,
         "alerta": 5
       },
       {
         "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
-        "estoque": 42,
+        "estoque": 41,
         "alerta": 5
       },
       {
@@ -723,7 +723,7 @@
       {
         "sku": "S-AT",
         "nome": "Sífilis - Anticorpos Totais",
-        "estoque": 51,
+        "estoque": 50,
         "alerta": 5
       },
       {

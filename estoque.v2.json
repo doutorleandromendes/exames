@@ -495,7 +495,7 @@
       {
         "sku": "G-A",
         "nome": "Gonorreia - Antígeno",
-        "estoque": 15,
+        "estoque": 14,
         "alerta": 10
       },
       {
@@ -507,7 +507,7 @@
       {
         "sku": "HP-A",
         "nome": "Helicobacter pylori - Antígeno",
-        "estoque": 9,
+        "estoque": 34,
         "alerta": 10
       },
       {
@@ -549,7 +549,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 15,
+        "estoque": 45,
         "alerta": 5
       },
       {
@@ -561,7 +561,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 62,
+        "estoque": 61,
         "alerta": 5
       },
       {
@@ -723,7 +723,7 @@
       {
         "sku": "S-AT",
         "nome": "Sífilis - Anticorpos Totais",
-        "estoque": 50,
+        "estoque": 49,
         "alerta": 5
       },
       {

@@ -507,7 +507,7 @@
       {
         "sku": "HP-A",
         "nome": "Helicobacter pylori - Antígeno",
-        "estoque": 34,
+        "estoque": 59,
         "alerta": 10
       },
       {
@@ -549,7 +549,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 45,
+        "estoque": 75,
         "alerta": 5
       },
       {
@@ -585,13 +585,13 @@
       {
         "sku": "IA-A",
         "nome": "Influenza A - Antígeno",
-        "estoque": 4,
+        "estoque": 29,
         "alerta": 10
       },
       {
         "sku": "IB-A",
         "nome": "Influenza B - Antígeno",
-        "estoque": 4,
+        "estoque": 29,
         "alerta": 10
       },
       {

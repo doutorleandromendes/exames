@@ -73,7 +73,7 @@
       {
         "sku": "DI",
         "nome": "Dengue (IgG/IgM)",
-        "estoque": 3,
+        "estoque": 2,
         "alerta": 5
       },
       {
@@ -85,7 +85,7 @@
       {
         "sku": "DSDP",
         "nome": "Dosagem sérica de Procalcitonina",
-        "estoque": 2,
+        "estoque": 1,
         "alerta": 5
       },
       {
@@ -133,7 +133,7 @@
       {
         "sku": "HAI",
         "nome": "Hepatite A - Anticorpos IgM",
-        "estoque": 5,
+        "estoque": 3,
         "alerta": 5
       },
       {
@@ -151,7 +151,7 @@
       {
         "sku": "HB-ADS",
         "nome": "Hepatite B - Antígeno de Superfície",
-        "estoque": 4,
+        "estoque": 3,
         "alerta": 10
       },
       {
@@ -163,7 +163,7 @@
       {
         "sku": "HC-AT",
         "nome": "Hepatite C - Anticorpos Totais",
-        "estoque": 3,
+        "estoque": 2,
         "alerta": 5
       },
       {
@@ -175,7 +175,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 3,
+        "estoque": 2,
         "alerta": 5
       },
       {
@@ -193,7 +193,7 @@
       {
         "sku": "HSV2",
         "nome": "HSV2 (IgG/IgM)",
-        "estoque": 4,
+        "estoque": 3,
         "alerta": 5
       },
       {
@@ -211,7 +211,7 @@
       {
         "sku": "L-A",
         "nome": "Legionella - Antígeno",
-        "estoque": 5,
+        "estoque": 3,
         "alerta": 10
       },
       {
@@ -229,25 +229,25 @@
       {
         "sku": "LYME",
         "nome": "Lyme (IgG/IgM)",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 5
       },
       {
         "sku": "M-ADPF",
         "nome": "Malária - Antígeno de P falciparum",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {
         "sku": "M-ADPV",
         "nome": "Malária - Antígeno de P vivax",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {
         "sku": "M-AG",
         "nome": "Malária - Antígeno Geral",
-        "estoque": 5,
+        "estoque": 4,
         "alerta": 10
       },
       {
@@ -307,13 +307,13 @@
       {
         "sku": "PRSC-A",
         "nome": "Painel Respiratório Simples (COVID19/InfluenzaA/InfluenzaB/VSR) - Antígenos",
-        "estoque": 5,
+        "estoque": 2,
         "alerta": 10
       },
       {
         "sku": "PCRDS",
         "nome": "Proteína C Reativa – Dosagem sérica",
-        "estoque": 3,
+        "estoque": 2,
         "alerta": 5
       },
       {
@@ -331,25 +331,25 @@
       {
         "sku": "SC-A",
         "nome": "SARS-CoV2 (Covid) - Antígeno",
-        "estoque": 4,
+        "estoque": 2,
         "alerta": 10
       },
       {
         "sku": "S-AT",
         "nome": "Sífilis - Anticorpos Totais",
-        "estoque": 4,
+        "estoque": 3,
         "alerta": 5
       },
       {
         "sku": "PNEUMO",
         "nome": "Streptococcus pneumoniae - Antígeno",
-        "estoque": 3,
+        "estoque": 2,
         "alerta": 10
       },
       {
         "sku": "PYOGENES",
         "nome": "Streptococcus pyogenes - Antígeno",
-        "estoque": 4,
+        "estoque": 2,
         "alerta": 10
       },
       {

@@ -43,7 +43,7 @@
       {
         "sku": "CI",
         "nome": "CMV (IgG/IgM)",
-        "estoque": 2,
+        "estoque": 5,
         "alerta": 5
       },
       {
@@ -175,7 +175,7 @@
       {
         "sku": "H-3G",
         "nome": "HIV - 3a geração",
-        "estoque": 2,
+        "estoque": 5,
         "alerta": 5
       },
       {

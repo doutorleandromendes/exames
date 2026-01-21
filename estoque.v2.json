@@ -25,7 +25,7 @@
       {
         "sku": "CHIK",
         "nome": "Chikungunya - Anticorpos IgM",
-        "estoque": 3,
+        "estoque": 5,
         "alerta": 5
       },
       {
@@ -151,7 +151,7 @@
       {
         "sku": "HB-ADS",
         "nome": "Hepatite B - Antígeno de Superfície",
-        "estoque": 3,
+        "estoque": 5,
         "alerta": 10
       },
       {

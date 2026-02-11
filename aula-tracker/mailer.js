@@ -23,6 +23,6 @@ Acesse: https://infectoaulas2.onrender.com/login
     html: `<p>Olá <b>${name}</b>,</p>
            <p>Seu cadastro no InfectoAulas foi realizado.</p>
            <p><b>Login:</b> ${login}<br><b>Senha:</b> ${password}</p>
-           <p><a href="https://infectoaulas.onrender.com">Acessar o portal</a></p>`
+           <p><a href="https://infectoaulas2.onrender.com">Acessar o portal</a></p>`
   });
 }

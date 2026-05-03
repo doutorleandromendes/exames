@@ -830,7 +830,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
                 <input type="checkbox" id="examManualToggle">
                 Digitar manualmente
               </label>
-              <input id="examManualInput" name="exam_name" required
+              <input id="examManualInput" name="exam_name"
                 placeholder="Ex.: Sífilis — VDRL"
                 style="display:none;margin-top:6px">
               <input id="examSelectHidden" name="exam_name" type="hidden">

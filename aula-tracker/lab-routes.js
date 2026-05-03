@@ -785,10 +785,12 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         <tr>
           <td><strong>${safe(r.exam_name)}</strong></td>
           <td style="color:#a7adbb">${safe(r.sample_type)}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
             ${safe((r.result_value || '').split('\n')[0])}
           </td>
-          <td>
+          <td style="white-space:nowrap">
+            <a href="/lab/admin/resultados/${r.id}/edit"
+               style="color:#8fb6ff;font-size:12px;margin-right:10px">editar</a>
             <form method="POST" action="/lab/admin/resultados/${r.id}/delete" style="display:inline"
                   onsubmit="return confirm('Remover o exame &quot;${safe(r.exam_name)}&quot;?')">
               <button style="background:none;border:0;color:#8fb6ff;cursor:pointer;padding:0;font-size:12px">remover</button>
@@ -823,7 +825,15 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
               <h1>${safe(collection.full_name)}</h1>
               <p class="mut">Coleta de ${toBR(collection.collected_at)} · Nasc. ${toBR(collection.birth_date)}</p>
             </div>
-            <a href="/lab/admin/pacientes/${collection.patient_id}">← Paciente</a>
+            <div style="display:flex;gap:12px;align-items:center">
+              <form method="POST" action="/lab/admin/coletas/${id}/delete"
+                    onsubmit="return confirm('Deletar esta coleta e todos os exames? Esta ação não pode ser desfeita.')">
+                <button style="background:#b03030;color:#fff;border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer">
+                  Deletar coleta
+                </button>
+              </form>
+              <a href="/lab/admin/pacientes/${collection.patient_id}">← Paciente</a>
+            </div>
           </div>
         </div>
 
@@ -954,6 +964,129 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
     } catch (err) {
       console.error('LAB DELETE RESULT ERROR', err);
       res.status(500).send('Falha ao remover exame');
+    }
+  });
+
+  // GET /lab/admin/resultados/:id/edit — formulário de edição de exame
+  app.get('/lab/admin/resultados/:id/edit', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rows: [r] } = await pool.query(
+        `SELECT lr.*, lc.id AS collection_id, lc.collected_at, lp.full_name
+         FROM lab_results lr
+         JOIN lab_collections lc ON lc.id = lr.collection_id
+         JOIN lab_patients lp    ON lp.id = lc.patient_id
+         WHERE lr.id = $1`, [id]
+      );
+      if (!r) return res.status(404).send(renderShell('Erro', `<div class="card"><h1>Exame não encontrado</h1></div>`));
+
+      const sampleOptions = ['Soro','Sangue Total','Plasma','Urina','Secreção','Swab','Linfa','Fezes','Líquor','Líquido Sinovial','Outro']
+        .map(s => `<option ${s === r.sample_type ? 'selected' : ''}>${s}</option>`).join('');
+
+      const html = `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <div>
+              <h1>Editar exame</h1>
+              <p class="mut">${safe(r.full_name)} · Coleta de ${toBR(r.collected_at)}</p>
+            </div>
+            <a href="/lab/admin/coletas/${r.collection_id}">← Voltar à coleta</a>
+          </div>
+          <form method="POST" action="/lab/admin/resultados/${r.id}/edit">
+            <label>Nome do exame</label>
+            <input name="exam_name" required value="${safe(r.exam_name)}">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label>Amostra</label>
+                <select name="sample_type"
+                  style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px">
+                  ${sampleOptions}
+                </select>
+              </div>
+              <div>
+                <label>Valor de referência</label>
+                <input name="reference_value" value="${safe(r.reference_value || '')}">
+              </div>
+            </div>
+
+            <label>Método</label>
+            <input name="method" required value="${safe(r.method)}">
+
+            <label>Resultado</label>
+            <textarea name="result_value" rows="5" required
+              style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px;resize:vertical;font-family:inherit"
+            >${safe(r.result_value)}</textarea>
+
+            <label>Observação (opcional)</label>
+            <input name="observation" value="${safe(r.observation || '')}">
+
+            <div style="display:flex;gap:10px;margin-top:16px">
+              <button style="padding:11px 24px;background:#4f8cff;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">
+                Salvar alterações
+              </button>
+              <a href="/lab/admin/coletas/${r.collection_id}"
+                 style="padding:11px 24px;background:#20242b;color:#e7e9ee;border-radius:8px;font-size:14px;text-decoration:none;display:inline-block">
+                Cancelar
+              </a>
+            </div>
+          </form>
+        </div>
+      `;
+      res.send(renderShell('Lab · Editar exame', html));
+    } catch (err) {
+      console.error('LAB EDIT RESULT GET ERROR', err);
+      res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(err.message)}</p></div>`));
+    }
+  });
+
+  // POST /lab/admin/resultados/:id/edit — salva edição
+  app.post('/lab/admin/resultados/:id/edit', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const exam_name       = String(req.body?.exam_name       || '').trim();
+      const sample_type     = String(req.body?.sample_type     || 'Soro').trim();
+      const method          = String(req.body?.method          || '').trim();
+      const result_value    = String(req.body?.result_value    || '').trim();
+      const reference_value = String(req.body?.reference_value || '').trim() || null;
+      const observation     = String(req.body?.observation     || '').trim() || null;
+
+      if (!exam_name || !method || !result_value) {
+        return res.status(400).send('Campos obrigatórios em falta');
+      }
+
+      await pool.query(
+        `UPDATE lab_results
+         SET exam_name=$1, sample_type=$2, method=$3, result_value=$4,
+             reference_value=$5, observation=$6
+         WHERE id=$7`,
+        [exam_name, sample_type, method, result_value, reference_value, observation, id]
+      );
+
+      const { rows: [r] } = await pool.query(
+        'SELECT collection_id FROM lab_results WHERE id=$1', [id]
+      );
+      res.redirect(`/lab/admin/coletas/${r.collection_id}`);
+    } catch (err) {
+      console.error('LAB EDIT RESULT POST ERROR', err);
+      res.status(500).send('Falha ao salvar alterações');
+    }
+  });
+
+  // POST /lab/admin/coletas/:id/delete — deleta coleta inteira
+  app.post('/lab/admin/coletas/:id/delete', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rows: [c] } = await pool.query(
+        'SELECT patient_id FROM lab_collections WHERE id=$1', [id]
+      );
+      if (!c) return res.status(404).send('Coleta não encontrada');
+      // ON DELETE CASCADE remove os lab_results automaticamente
+      await pool.query('DELETE FROM lab_collections WHERE id=$1', [id]);
+      res.redirect(`/lab/admin/pacientes/${c.patient_id}`);
+    } catch (err) {
+      console.error('LAB DELETE COLLECTION ERROR', err);
+      res.status(500).send('Falha ao deletar coleta');
     }
   });
 

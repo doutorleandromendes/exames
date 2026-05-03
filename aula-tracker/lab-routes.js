@@ -819,7 +819,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <!-- Formulário de novo exame -->
           <div class="card">
             <h2 style="margin-bottom:14px">Adicionar exame</h2>
-            <form method="POST" action="/lab/admin/coletas/${id}/resultados">
+            <form method="POST" action="/lab/admin/coletas/${id}/resultados" id="exam-form">
 
               <label>Nome do exame</label>
               <select id="examSelect"
@@ -853,10 +853,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
               <input name="method" required placeholder="Ex.: Imunocromatografia de Fluxo Lateral">
 
               <label>Resultado</label>
-              <textarea name="result_value" rows="4" required
-                placeholder="Ex.: NÃO REAGENTE&#10;&#10;Para culturas, use linhas separadas:&#10;SENSÍVEL A: Meropenem...&#10;RESISTENTE A: Ciprofloxacina..."
-                style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px;resize:vertical;font-family:inherit"></textarea>
-
+              <div id="result-container"></div>
+              
               <label>Observação (opcional)</label>
               <input name="observation" placeholder="Ex.: Teste realizado com baixo volume de soro">
 
@@ -880,43 +878,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             </div>
             ${pdfActionsHtml}
           </div>
-          <script>
-        (function(){
-          var sel   = document.getElementById('examSelect');
-          var hidden = document.getElementById('examSelectHidden');
-          var manual = document.getElementById('examManualInput');
-          var toggle = document.getElementById('examManualToggle');
-
-          fetch('/lab/admin/api/exames')
-            .then(function(r){ return r.json(); })
-            .then(function(exames){
-              sel.innerHTML = '<option value="">— selecione o exame —</option>';
-              exames.forEach(function(nome){
-                var opt = document.createElement('option');
-                opt.value = nome; opt.textContent = nome;
-                sel.appendChild(opt);
-              });
-            })
-            .catch(function(){
-              sel.innerHTML = '<option value="">Falha ao carregar — use digitação manual</option>';
-              toggle.checked = true;
-              toggle.dispatchEvent(new Event('change'));
-            });
-
-          sel.addEventListener('change', function(){
-            hidden.value = this.value;
-          });
-
-          toggle.addEventListener('change', function(){
-            var isManual = this.checked;
-            sel.style.display    = isManual ? 'none' : '';
-            hidden.disabled      = isManual;
-            manual.style.display = isManual ? '' : 'none';
-            manual.required      = isManual;
-            if(!isManual) hidden.value = sel.value;
-          });
-        })();
-      </script>
+         <script src="/lab-admin-coleta.js"></script>
         </div>
       `;
       res.send(renderShell(`Lab · Coleta ${toBR(collection.collected_at)}`, html));

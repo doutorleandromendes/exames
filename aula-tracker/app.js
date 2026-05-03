@@ -12,6 +12,8 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { Pool } from 'pg';
 import { sendWelcomeEmail } from './mailer.js';
+import { runLabMigrations } from './lab-db.js';       // ← ADICIONAR
+import { registerLabRoutes } from './lab-routes.js';  // ← ADICIONAR
 
 // ---- SSL config helper (minimal, surgical) ----
 const __pgSslMode = (process.env.PGSSLMODE || '').toLowerCase();
@@ -279,6 +281,7 @@ await migratorPool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  
   await migratorPool.query(`CREATE UNIQUE INDEX IF NOT EXISTS videos_course_r2_key_unique ON videos(course_id, r2_key)`);
 }
 migrate().catch(e=>console.error('migration error', e));
+runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
 
 
 // ====== Clonar curso (formulário com lista de aulas + ferramentas por linha) ======
@@ -4405,6 +4408,7 @@ app.post('/track', async (req,res)=>{
 // ====== start ======
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED REJECTION', reason));
 process.on('uncaughtException',  (err)    => console.error('UNCAUGHT EXCEPTION', err));
+registerLabRoutes(app, pool, adminRequired, renderShell); // ← ADICIONAR
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

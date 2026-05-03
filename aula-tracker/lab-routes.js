@@ -1105,7 +1105,10 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
       const collectionsHtml = collections.map(c => {
         const results  = c.results || [];
-        const d        = new Date(String(c.collected_at) + 'T12:00:00');
+        const raw = c.collected_at instanceof Date
+          ? c.collected_at.toISOString().split('T')[0]
+          : String(c.collected_at).split('T')[0];
+        const d = new Date(raw + 'T12:00:00');
         const dateLabel = `${d.getDate()} de ${monthNames[d.getMonth()]} de ${d.getFullYear()}`;
 
         const resRows = results.map(r => `

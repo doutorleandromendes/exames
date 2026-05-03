@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Carrega o SVG do logo uma vez ao iniciar o servidor
 let LOGO_SVG = '';
 try {
-  LOGO_SVG = readFileSync(join(__dirname, 'public', 'logo-lm.svg'), 'utf-8');
+  LOGO_SVG = readFileSync(join(__dirname, 'logo-lm.svg'), 'utf-8');
 } catch {
   console.warn('[lab-pdf] public/logo-lm.svg não encontrado — usando círculo vazio');
 }

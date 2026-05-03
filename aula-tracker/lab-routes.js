@@ -891,14 +891,16 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
   // POST /lab/admin/coletas/:id/resultados — adiciona exame à coleta
   app.post('/lab/admin/coletas/:id/resultados', adminRequired, async (req, res) => {
     try {
-      const collection_id = parseInt(req.params.id, 10);
-      const exam_name       = (req.body?.exam_name       || '').trim();
-      const sample_type     = (req.body?.sample_type     || 'Soro').trim();
-      const method          = (req.body?.method          || '').trim();
-      const result_value    = (req.body?.result_value    || '').trim();
-      const reference_value = (req.body?.reference_value || '').trim() || null;
-      const observation     = (req.body?.observation     || '').trim() || null;
-
+     // exam_name pode chegar como array quando há dois inputs com o mesmo name
+      const examRaw         = req.body?.exam_name;
+      const exam_name       = (Array.isArray(examRaw)
+        ? examRaw.filter(Boolean).pop()
+        : examRaw || '').trim();
+      const sample_type     = String(req.body?.sample_type     || 'Soro').trim();
+      const method          = String(req.body?.method          || '').trim();
+      const result_value    = String(req.body?.result_value    || '').trim();
+      const reference_value = String(req.body?.reference_value || '').trim() || null;
+      const observation     = String(req.body?.observation     || '').trim() || null;
       if (!exam_name || !method || !result_value) {
         return res.status(400).send('Nome do exame, método e resultado são obrigatórios');
       }

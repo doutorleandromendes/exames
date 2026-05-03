@@ -202,23 +202,28 @@ export function buildPdfHtml({ patient, collection, results }) {
       background: #f5f5f5;
       border: 0.5px solid #e2e2e2;
       border-radius: 3px;
-      padding: 8px 12px;
-      margin: 6px 0 3px;
+      padding: 5px 10px 6px;
+      margin: 5px 0 3px;
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
     }
     .res-label {
-      font-size: 7.5px;
+      font-size: 7px;
       text-transform: uppercase;
       letter-spacing: .12em;
-      color: #999;
-      margin-bottom: 4px;
+      color: #aaa;
+      margin-bottom: 2px;
+      display: block;
     }
     .res-text {
-      font-size: 11.5px;
+      font-size: 11px;
       font-weight: 700;
-      line-height: 1.55;
+      line-height: 1.4;
       white-space: pre-wrap;
       word-break: break-word;
       text-align: left;
+      display: block;
     }
     .res-obs {
       font-style: italic;

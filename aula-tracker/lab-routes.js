@@ -303,6 +303,45 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       res.status(500).json([]);
     }
   });
+
+  // GET /lab/admin/api/exames — proxy do CSV de exames do GitHub → JSON
+  app.get('/lab/admin/api/exames', adminRequired, async (req, res) => {
+    try {
+      const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
+      const headers = {
+        'Accept': 'application/vnd.github.raw',
+        'X-GitHub-Api-Version': '2022-11-28',
+      };
+      if (process.env.GITHUB_TOKEN) {
+        headers['Authorization'] = 'Bearer ' + process.env.GITHUB_TOKEN;
+      }
+
+      const resp = await fetch(apiUrl, { headers, cache: 'no-store' });
+      if (!resp.ok) throw new Error('GitHub HTTP ' + resp.status);
+      const csv = await resp.text();
+
+      // Tenta parse com ; primeiro, depois ,
+      function parseExames(csv, sep) {
+        const lines = csv.split(/\r?\n/).filter(Boolean);
+        if (lines.length < 2) return [];
+        const exames = [];
+        for (let i = 1; i < lines.length; i++) {
+          const nome = lines[i].split(sep)[0].replace(/^"|"$/g, '').trim();
+          if (nome) exames.push(nome);
+        }
+        return [...new Set(exames)];
+      }
+
+      let exames = parseExames(csv, ';');
+      if (!exames.length) exames = parseExames(csv, ',');
+      exames.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
+      res.json(exames);
+    } catch (err) {
+      console.error('LAB EXAMES PROXY ERROR', err);
+      res.status(500).json([]);
+    }
+  });
   // ============================================================
   // ADMIN ROUTES  (/lab/admin/*)
   // Usam renderShell (tema escuro, igual ao resto do admin)
@@ -774,7 +813,18 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             <form method="POST" action="/lab/admin/coletas/${id}/resultados">
 
               <label>Nome do exame</label>
-              <input name="exam_name" required placeholder="Ex.: Sífilis — VDRL">
+              <select id="examSelect"
+                style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px">
+                <option value="">Carregando…</option>
+              </select>
+              <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;text-transform:none;letter-spacing:0">
+                <input type="checkbox" id="examManualToggle">
+                Digitar manualmente
+              </label>
+              <input id="examManualInput" name="exam_name" required
+                placeholder="Ex.: Sífilis — VDRL"
+                style="display:none;margin-top:6px">
+              <input id="examSelectHidden" name="exam_name" type="hidden">
 
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                 <div>
@@ -821,6 +871,43 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             </div>
             ${pdfActionsHtml}
           </div>
+          <script>
+        (function(){
+          var sel   = document.getElementById('examSelect');
+          var hidden = document.getElementById('examSelectHidden');
+          var manual = document.getElementById('examManualInput');
+          var toggle = document.getElementById('examManualToggle');
+
+          fetch('/lab/admin/api/exames')
+            .then(function(r){ return r.json(); })
+            .then(function(exames){
+              sel.innerHTML = '<option value="">— selecione o exame —</option>';
+              exames.forEach(function(nome){
+                var opt = document.createElement('option');
+                opt.value = nome; opt.textContent = nome;
+                sel.appendChild(opt);
+              });
+            })
+            .catch(function(){
+              sel.innerHTML = '<option value="">Falha ao carregar — use digitação manual</option>';
+              toggle.checked = true;
+              toggle.dispatchEvent(new Event('change'));
+            });
+
+          sel.addEventListener('change', function(){
+            hidden.value = this.value;
+          });
+
+          toggle.addEventListener('change', function(){
+            var isManual = this.checked;
+            sel.style.display    = isManual ? 'none' : '';
+            hidden.disabled      = isManual;
+            manual.style.display = isManual ? '' : 'none';
+            manual.required      = isManual;
+            if(!isManual) hidden.value = sel.value;
+          });
+        })();
+      </script>
         </div>
       `;
       res.send(renderShell(`Lab · Coleta ${toBR(collection.collected_at)}`, html));

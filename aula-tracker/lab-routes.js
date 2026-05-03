@@ -233,7 +233,76 @@ async function getCollectionData(pool, collectionId, patientIdCheck = null, resu
 // ====== Registro de rotas ======
 
 export function registerLabRoutes(app, pool, adminRequired, renderShell) {
+// GET /lab/admin/api/pacientes-sheet — proxy do CSV do Google Sheets → JSON
+  app.get('/lab/admin/api/pacientes-sheet', adminRequired, async (req, res) => {
+    try {
+      const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
+      const resp = await fetch(SHEET_URL + '&_ts=' + Date.now());
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const csv = await resp.text();
 
+      // Parser CSV robusto (lida com campos entre aspas)
+      function parseCSVLine(line) {
+        const cols = [];
+        let cur = '', inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+            else inQ = !inQ;
+          } else if (ch === ',' && !inQ) {
+            cols.push(cur.trim()); cur = '';
+          } else {
+            cur += ch;
+          }
+        }
+        cols.push(cur.trim());
+        return cols;
+      }
+
+      // Converte qualquer formato de data para YYYY-MM-DD
+      function toISO(s) {
+        if (!s) return '';
+        s = String(s).trim();
+        // DD/MM/AAAA
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+          const [d, m, y] = s.split('/');
+          return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
+        // YYYY-MM-DD
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        // MM/DD/YYYY (formato US que o Sheets às vezes exporta)
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+          const [m, d, y] = s.split('/');
+          return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
+        // Tenta Date() como fallback
+        const dt = new Date(s);
+        if (!isNaN(dt)) {
+          const y = dt.getFullYear();
+          const m = String(dt.getMonth()+1).padStart(2,'0');
+          const d = String(dt.getDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
+        }
+        return '';
+      }
+
+      const lines = csv.split(/\r?\n/).filter(Boolean);
+      const pacientes = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCSVLine(lines[i]);
+        const nome = `${(cols[0]||'').trim()} ${(cols[1]||'').trim()}`.trim();
+        const dn   = toISO((cols[2]||'').trim());
+        if (nome) pacientes.push({ nome, dn });
+      }
+      pacientes.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
+
+      res.json(pacientes);
+    } catch (err) {
+      console.error('LAB SHEET PROXY ERROR', err);
+      res.status(500).json([]);
+    }
+  });
   // ============================================================
   // ADMIN ROUTES  (/lab/admin/*)
   // Usam renderShell (tema escuro, igual ao resto do admin)
@@ -378,30 +447,9 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
     // Script injetado como string normal para evitar conflito com template literals do Node
     const clientScript = [
       '(function(){',
-      '  var SHEET = "' + SHEET_URL + '";',
-      '  function toBR(s){',
-      '    if(!s) return "";',
-      '    s = String(s).trim();',
-      '    if(/^\\d{1,2}\\/\\d{1,2}\\/\\d{4}$/.test(s)){',
-      '      var p=s.split("/"); return p[2]+"-"+p[1].padStart(2,"0")+"-"+p[0].padStart(2,"0");',
-      '    }',
-      '    if(/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;',
-      '    var d=new Date(s);',
-      '    if(!isNaN(d)) return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");',
-      '    return "";',
-      '  }',
-      '  fetch(SHEET+"&_ts="+Date.now())',
-      '    .then(function(r){ return r.text(); })',
-      '    .then(function(csv){',
-      '      var lines = csv.split(/\\r?\\n/).filter(Boolean);',
-      '      var pacs = [];',
-      '      for(var i=1;i<lines.length;i++){',
-      '        var cols = lines[i].split(",");',
-      '        var nome = ((cols[0]||"").trim()+" "+(cols[1]||"").trim()).trim();',
-      '        var dn   = toBR((cols[2]||"").trim());',
-      '        if(nome) pacs.push({nome:nome, dn:dn});',
-      '      }',
-      '      pacs.sort(function(a,b){ return a.nome.localeCompare(b.nome,"pt-BR",{sensitivity:"base"}); });',
+      '  fetch("/lab/admin/api/pacientes-sheet")',
+      '    .then(function(r){ return r.json(); })',
+      '    .then(function(pacs){',
       '      var sel = document.getElementById("pacSelect");',
       '      pacs.forEach(function(p){',
       '        var opt = document.createElement("option");',

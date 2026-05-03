@@ -304,29 +304,31 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
     }
   });
 
-  // GET /lab/admin/api/exames — proxy do CSV de exames do GitHub → JSON
+  // GET /lab/admin/api/exames
   app.get('/lab/admin/api/exames', adminRequired, async (req, res) => {
     try {
       const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
-      const headers = {
-        'Accept': 'application/vnd.github.raw',
-        'X-GitHub-Api-Version': '2022-11-28',
-      };
-      if (process.env.GITHUB_TOKEN) {
-        headers['Authorization'] = 'Bearer ' + process.env.GITHUB_TOKEN;
-      }
-
-      const resp = await fetch(apiUrl, { headers, cache: 'no-store' });
+      const resp = await fetch(apiUrl + '&_ts=' + Date.now(), {
+        headers: {
+          'Accept': 'application/vnd.github.raw',
+          'X-GitHub-Api-Version': '2022-11-28',
+          // token opcional — só enviado se estiver no ambiente
+          ...(process.env.GITHUB_TOKEN
+            ? { 'Authorization': 'Bearer ' + process.env.GITHUB_TOKEN }
+            : {}),
+        },
+        cache: 'no-store',
+      });
       if (!resp.ok) throw new Error('GitHub HTTP ' + resp.status);
       const csv = await resp.text();
 
-      // Tenta parse com ; primeiro, depois ,
-      function parseExames(csv, sep) {
-        const lines = csv.split(/\r?\n/).filter(Boolean);
+      // Tenta ; primeiro (padrão do arquivo), depois ,
+      function parseExames(text, sep) {
+        const lines = text.split(/\r?\n/).filter(Boolean);
         if (lines.length < 2) return [];
         const exames = [];
         for (let i = 1; i < lines.length; i++) {
-          const nome = lines[i].split(sep)[0].replace(/^"|"$/g, '').trim();
+          const nome = (lines[i].split(sep)[0] || '').replace(/^"|"$/g, '').trim();
           if (nome) exames.push(nome);
         }
         return [...new Set(exames)];
@@ -334,11 +336,12 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
       let exames = parseExames(csv, ';');
       if (!exames.length) exames = parseExames(csv, ',');
-      exames.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+      if (!exames.length) throw new Error('Nenhum exame encontrado');
 
+      exames.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
       res.json(exames);
     } catch (err) {
-      console.error('LAB EXAMES PROXY ERROR', err);
+      console.error('LAB EXAMES PROXY ERROR', err.message);
       res.status(500).json([]);
     }
   });

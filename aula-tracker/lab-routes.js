@@ -878,7 +878,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             </div>
             ${pdfActionsHtml}
           </div>
-         <script src="/lab-admin-coleta.js"></script>
+         <script src="/static/lab-admin-coleta.js"></script>
         </div>
       `;
       res.send(renderShell(`Lab · Coleta ${toBR(collection.collected_at)}`, html));

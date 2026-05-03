@@ -14,6 +14,11 @@ import { Pool } from 'pg';
 import { sendWelcomeEmail } from './mailer.js';
 import { runLabMigrations } from './lab-db.js';       // ← ADICIONAR
 import { registerLabRoutes } from './lab-routes.js';  // ← ADICIONAR
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 
 // ---- SSL config helper (minimal, surgical) ----
 const __pgSslMode = (process.env.PGSSLMODE || '').toLowerCase();
@@ -28,7 +33,7 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use(cookieParser());
-app.use(express.static('.'));
+app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 3000;
 

@@ -308,21 +308,26 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
   app.get('/lab/admin/api/exames', adminRequired, async (req, res) => {
     try {
       const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
-      const resp = await fetch(apiUrl + '&_ts=' + Date.now(), {
-        headers: {
-          'Accept': 'application/vnd.github.raw',
-          'X-GitHub-Api-Version': '2022-11-28',
-          // token opcional — só enviado se estiver no ambiente
-          ...(process.env.GITHUB_TOKEN
-            ? { 'Authorization': 'Bearer ' + process.env.GITHUB_TOKEN }
-            : {}),
-        },
-        cache: 'no-store',
-      });
-      if (!resp.ok) throw new Error('GitHub HTTP ' + resp.status);
-      const csv = await resp.text();
 
-      // Tenta ; primeiro (padrão do arquivo), depois ,
+      const headers = {
+        'Accept':              'application/vnd.github.raw',
+        'X-GitHub-Api-Version':'2022-11-28',
+        'User-Agent':          'lab-portal-lm',
+      };
+      if (process.env.GITHUB_TOKEN) {
+        headers['Authorization'] = 'Bearer ' + process.env.GITHUB_TOKEN;
+      }
+
+      const resp = await fetch(apiUrl, { headers });
+
+      // Loga status para debug nos logs do Render
+      const bodyText = await resp.text();
+      console.log('[lab/exames] status:', resp.status);
+      console.log('[lab/exames] primeiros 300 chars:', bodyText.slice(0, 300));
+
+      if (!resp.ok) throw new Error('GitHub HTTP ' + resp.status + ' — ' + bodyText.slice(0, 200));
+
+      // Tenta ; primeiro, depois ,
       function parseExames(text, sep) {
         const lines = text.split(/\r?\n/).filter(Boolean);
         if (lines.length < 2) return [];
@@ -334,14 +339,17 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         return [...new Set(exames)];
       }
 
-      let exames = parseExames(csv, ';');
-      if (!exames.length) exames = parseExames(csv, ',');
-      if (!exames.length) throw new Error('Nenhum exame encontrado');
+      let exames = parseExames(bodyText, ';');
+      if (!exames.length) exames = parseExames(bodyText, ',');
+
+      console.log('[lab/exames] total parseados:', exames.length);
+
+      if (!exames.length) throw new Error('Nenhum exame encontrado no CSV');
 
       exames.sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
       res.json(exames);
     } catch (err) {
-      console.error('LAB EXAMES PROXY ERROR', err.message);
+      console.error('LAB EXAMES PROXY ERROR:', err.message);
       res.status(500).json([]);
     }
   });

@@ -4,9 +4,10 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
-    "keepalive": "node keepalive.js"
-  },
+  "start": "node app.js",
+  "keepalive": "node keepalive.js",
+  "postinstall": "npx puppeteer browsers install chrome"
+},,
   "dependencies": {
     "express": "^4.19.0",
     "body-parser": "^1.20.2",

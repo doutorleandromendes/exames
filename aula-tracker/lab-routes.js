@@ -233,6 +233,18 @@ async function getCollectionData(pool, collectionId, patientIdCheck = null, resu
 // ====== Registro de rotas ======
 
 export function registerLabRoutes(app, pool, adminRequired, renderShell) {
+
+  // Rota de diagnóstico temporária — remover após resolver
+  app.get('/lab/admin/debug-chrome', adminRequired, async (req, res) => {
+    const { execSync } = await import('child_process');
+    const lines = [];
+    try { lines.push('which chromium: ' + execSync('which chromium').toString().trim()); } catch { lines.push('which chromium: não encontrado'); }
+    try { lines.push('which chromium-browser: ' + execSync('which chromium-browser').toString().trim()); } catch { lines.push('which chromium-browser: não encontrado'); }
+    try { lines.push('which google-chrome: ' + execSync('which google-chrome').toString().trim()); } catch { lines.push('which google-chrome: não encontrado'); }
+    try { lines.push('find puppeteer cache: ' + execSync('find /opt/render/.cache/puppeteer -name "chrome" -type f 2>/dev/null | head -5').toString().trim()); } catch { lines.push('find puppeteer cache: erro'); }
+    try { lines.push('puppeteer.executablePath(): ' + (await import('puppeteer')).default.executablePath()); } catch (e) { lines.push('puppeteer.executablePath(): ' + e.message); }
+    res.type('text/plain').send(lines.join('\n'));
+  });
 // GET /lab/admin/api/pacientes-sheet — proxy do CSV do Google Sheets → JSON
   app.get('/lab/admin/api/pacientes-sheet', adminRequired, async (req, res) => {
     try {

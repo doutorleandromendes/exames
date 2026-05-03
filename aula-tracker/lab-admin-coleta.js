@@ -206,31 +206,7 @@
     });
   }
 
-  // ── Formatação numérica no submit ──────────────────────────────────────
-
-  if (theForm) {
-    theForm.addEventListener('submit', function () {
-      const examName = examHidden?.value || examManualInput?.value || '';
-      if (getExamType(examName) !== 'dosagem') return;
-
-      const manualToggle = document.getElementById('resultManualToggle');
-      if (manualToggle?.checked) return; // resultado manual — não formata
-
-      const cfg    = getDosagemConfig(examName);
-      const hidden = document.getElementById('result_hidden');
-      if (!cfg || !hidden) return;
-
-      const raw = hidden.value.trim().replace(',', '.');
-      const n   = parseFloat(raw);
-      if (!isNaN(n)) {
-        const decimals = raw.includes('.') ? 2 : 0;
-        hidden.value = n.toFixed(decimals).replace('.', ',') + cfg.unit;
-      } else if (hidden.value && !hidden.value.includes(cfg.unit.trim())) {
-        hidden.value += cfg.unit;
-      }
-    });
-  }
-
+  
   // ── Carrega lista de exames ────────────────────────────────────────────
 
   fetch('/lab/admin/api/exames')
@@ -253,6 +229,8 @@
 
   // ── Eventos de seleção/digitação do nome do exame ─────────────────────
 
+  // ── Eventos de seleção/digitação do nome do exame ─────────────────────
+
   examSelect?.addEventListener('change', function () {
     examHidden.value = this.value;
     if (this.value) applyDefaults(this.value);
@@ -263,13 +241,64 @@
     examSelect.style.display      = isManual ? 'none' : '';
     examHidden.disabled           = isManual;
     examManualInput.style.display = isManual ? '' : 'none';
-    examManualInput.required      = isManual;
+    // nunca usar required em campos que podem estar ocultos
+    examManualInput.required      = false;
     if (!isManual) examHidden.value = examSelect.value;
   });
 
   examManualInput?.addEventListener('input', function () {
     applyDefaults(this.value);
   });
+
+  // ── Validação manual no submit (substitui required nativo) ────────────
+  theForm?.addEventListener('submit', function (e) {
+    // Valida nome do exame
+    const isManual = examManualToggle?.checked;
+    const examName = isManual
+      ? (examManualInput?.value || '').trim()
+      : (examHidden?.value || '').trim();
+
+    if (!examName) {
+      e.preventDefault();
+      alert('Selecione ou digite o nome do exame.');
+      return;
+    }
+
+    // Garante que o nome correto vai no hidden antes de submeter
+    if (isManual) {
+      examHidden.value    = examName;
+      examHidden.disabled = false;
+    }
+
+    // Valida resultado
+    const resultHidden = document.getElementById('result_hidden');
+    if (!resultHidden || !resultHidden.value.trim()) {
+      e.preventDefault();
+      alert('Preencha o resultado do exame.');
+      return;
+    }
+
+    // Formatação numérica para dosagem (mantida aqui também)
+    if (getExamType(examName) === 'dosagem') {
+      const manualToggle = document.getElementById('resultManualToggle');
+      if (!manualToggle?.checked) {
+        const cfg = getDosagemConfig(examName);
+        if (cfg && resultHidden.value) {
+          const raw = resultHidden.value.trim().replace(',', '.');
+          const n   = parseFloat(raw);
+          if (!isNaN(n)) {
+            const decimals = raw.includes('.') ? 2 : 0;
+            resultHidden.value = n.toFixed(decimals).replace('.', ',') + cfg.unit;
+          } else if (!resultHidden.value.includes(cfg.unit.trim())) {
+            resultHidden.value += cfg.unit;
+          }
+        }
+      }
+    }
+  });
+
+  // Remove o listener de submit duplicado que estava no final do arquivo
+  // (o que estava dentro de `if (theForm)` pode ser removido)
 
   // ── Inicializa com campo select vazio ──────────────────────────────────
   buildResultField('select');

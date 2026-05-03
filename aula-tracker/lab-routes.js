@@ -372,25 +372,86 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
   // GET /lab/admin/pacientes/novo — formulário de novo paciente
   app.get('/lab/admin/pacientes/novo', adminRequired, (req, res) => {
+    // URL da planilha de pacientes (mesma do gerador de laudos HTML)
+    const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRAamiMm4NPvlRTIi5sxzkCWEJhQ6GOWPhMcDaueuzmBgZmEjJjIy9eYpW-iruMdkD23pOPAun3x9Ci/pub?output=csv';
+
+    // Script injetado como string normal para evitar conflito com template literals do Node
+    const clientScript = [
+      '(function(){',
+      '  var SHEET = "' + SHEET_URL + '";',
+      '  function toBR(s){',
+      '    if(!s) return "";',
+      '    s = String(s).trim();',
+      '    if(/^\\d{1,2}\\/\\d{1,2}\\/\\d{4}$/.test(s)){',
+      '      var p=s.split("/"); return p[2]+"-"+p[1].padStart(2,"0")+"-"+p[0].padStart(2,"0");',
+      '    }',
+      '    if(/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return s;',
+      '    var d=new Date(s);',
+      '    if(!isNaN(d)) return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");',
+      '    return "";',
+      '  }',
+      '  fetch(SHEET+"&_ts="+Date.now())',
+      '    .then(function(r){ return r.text(); })',
+      '    .then(function(csv){',
+      '      var lines = csv.split(/\\r?\\n/).filter(Boolean);',
+      '      var pacs = [];',
+      '      for(var i=1;i<lines.length;i++){',
+      '        var cols = lines[i].split(",");',
+      '        var nome = ((cols[0]||"").trim()+" "+(cols[1]||"").trim()).trim();',
+      '        var dn   = toBR((cols[2]||"").trim());',
+      '        if(nome) pacs.push({nome:nome, dn:dn});',
+      '      }',
+      '      pacs.sort(function(a,b){ return a.nome.localeCompare(b.nome,"pt-BR",{sensitivity:"base"}); });',
+      '      var sel = document.getElementById("pacSelect");',
+      '      pacs.forEach(function(p){',
+      '        var opt = document.createElement("option");',
+      '        opt.value = p.nome+"|"+p.dn;',
+      '        opt.textContent = p.nome;',
+      '        sel.appendChild(opt);',
+      '      });',
+      '      document.getElementById("statusPac").textContent = pacs.length+" pacientes carregados da planilha";',
+      '    })',
+      '    .catch(function(){',
+      '      document.getElementById("statusPac").textContent = "Não foi possível carregar a planilha — preencha manualmente";',
+      '    });',
+      '  document.getElementById("pacSelect").addEventListener("change", function(){',
+      '    if(!this.value) return;',
+      '    var parts = this.value.split("|");',
+      '    document.getElementById("fNome").value = parts[0]||"";',
+      '    document.getElementById("fDN").value   = parts[1]||"";',
+      '  });',
+      '})();',
+    ].join('\n');
+
     const html = `
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h1>Novo paciente</h1>
           <a href="/lab/admin/pacientes">← Voltar</a>
         </div>
-        <form method="POST" action="/lab/admin/pacientes" class="mt2">
+
+        <div id="statusPac" class="mut" style="margin-bottom:10px">Carregando pacientes…</div>
+
+        <label>Selecionar da planilha</label>
+        <select id="pacSelect"
+          style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px;margin-bottom:16px">
+          <option value="">— escolha um paciente ou preencha manualmente —</option>
+        </select>
+
+        <form method="POST" action="/lab/admin/pacientes">
           <label>Nome completo</label>
-          <input name="full_name" required placeholder="Nome completo do paciente">
+          <input id="fNome" name="full_name" required placeholder="Nome completo do paciente">
           <label>Data de nascimento</label>
-          <input name="birth_date" type="date" required>
+          <input id="fDN" name="birth_date" type="date" required>
           <label>Observações internas (opcional)</label>
           <textarea name="notes" rows="2"
             placeholder="Uso interno — não aparece no portal do paciente"
-            style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px;resize:vertical"></textarea>
+            style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px;resize:vertical;margin-top:4px"></textarea>
           <button class="mt">Cadastrar e gerar chave de acesso</button>
         </form>
         <p class="mut mt">A chave de acesso com validade de 90 dias é gerada automaticamente.</p>
       </div>
+      <script>${clientScript}</script>
     `;
     res.send(renderShell('Lab · Novo paciente', html));
   });

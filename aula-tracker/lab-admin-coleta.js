@@ -92,7 +92,7 @@
 
   // ── Monta o campo de resultado conforme tipo ──────────────────────────
 
-  function buildResultField(type) {
+function buildResultField(type) {
     resultContainer.innerHTML = '';
 
     let primary;
@@ -108,17 +108,20 @@
         syncHidden(e.target.value);
       });
 
+      
+
     } else if (type === 'texto') {
-      // Textarea direto — sem toggle manual (já é livre)
+      resultContainer.appendChild(makeToolbar(null)); // toolbar antes do textarea
       primary = document.createElement('textarea');
       primary.rows = 5;
       primary.placeholder =
-        'Digite o resultado\n\nPara antibiograma:\nSENSÍVEL A: Meropenem, Imipenem...\nRESISTENTE A: Ciprofloxacina...';
+        'Digite o resultado\n\nFormato:\n*negrito*   _itálico_\n\nAntibiograma:\nSENSÍVEL A: Meropenem...\nRESISTENTE A: Ciprofloxacina...';
       Object.assign(primary.style, { resize: 'vertical', fontFamily: 'inherit' });
       primary.addEventListener('input', e => syncHidden(e.target.value));
+      // associa toolbar ao textarea
+      resultContainer.querySelector('.fmt-toolbar').dataset.target = 'result_primary';
 
     } else {
-      // Dropdown padrão (imunocromatografia, etc.)
       primary = document.createElement('select');
       SELECT_OPTIONS.forEach(v => {
         const o = document.createElement('option');
@@ -134,20 +137,61 @@
     styleInput(primary);
     resultContainer.appendChild(primary);
 
-    // Input hidden — único campo submetido com name=result_value
     const hidden = document.createElement('input');
     hidden.type  = 'hidden';
     hidden.name  = 'result_value';
     hidden.id    = 'result_hidden';
     resultContainer.appendChild(hidden);
 
-    // Toggle "inserir manualmente" só aparece para dosagem e select
-    // (texto já é livre por definição)
     if (type !== 'texto') {
-      addManualToggle(resultContainer, type);
+      addManualToggle(resultContainer);
     }
   }
+  function makeToolbar(targetId) {
+    const bar = document.createElement('div');
+    bar.className = 'fmt-toolbar';
+    Object.assign(bar.style, {
+      display: 'flex', gap: '6px', marginBottom: '6px',
+    });
 
+    function fmtBtn(label, before, after, title) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = label;
+      btn.title = title;
+      Object.assign(btn.style, {
+        padding: '3px 10px', borderRadius: '5px', border: '1px solid #2a2f39',
+        background: '#20242b', color: '#e7e9ee', cursor: 'pointer',
+        fontSize: '13px', fontWeight: label === 'B' ? '700' : '400',
+        fontStyle: label === 'I' ? 'italic' : 'normal',
+      });
+      btn.addEventListener('click', () => {
+        const tid = bar.dataset.target || (targetId);
+        const ta = document.getElementById(tid);
+        if (!ta) return;
+        const start = ta.selectionStart;
+        const end   = ta.selectionEnd;
+        const sel   = ta.value.substring(start, end) || 'texto';
+        ta.value = ta.value.substring(0, start) + before + sel + after + ta.value.substring(end);
+        ta.focus();
+        ta.selectionStart = start + before.length;
+        ta.selectionEnd   = start + before.length + sel.length;
+        syncHidden(ta.value);
+      });
+      return btn;
+    }
+
+    bar.appendChild(fmtBtn('B', '*', '*', 'Negrito: *texto*'));
+    bar.appendChild(fmtBtn('I', '_', '_', 'Itálico: _texto_'));
+
+    const hint = document.createElement('span');
+    hint.textContent = '← selecione o texto antes de clicar';
+    Object.assign(hint.style, { fontSize: '11px', color: '#666', alignSelf: 'center', marginLeft: '4px' });
+    bar.appendChild(hint);
+
+    if (targetId) bar.dataset.target = targetId;
+    return bar;
+  }
   // ── Toggle de resultado manual ─────────────────────────────────────────
 
   function addManualToggle(container) {
@@ -177,6 +221,11 @@
     ta.style.display = 'none'; // styleInput sobrescreve display, força none novamente
     ta.addEventListener('input', e => syncHidden(e.target.value));
     wrap.appendChild(ta);
+
+   // toolbar de formatação para o textarea manual
+    const fmtBar = makeToolbar('resultManualTA');
+    fmtBar.style.marginTop = '8px';
+    wrap.insertBefore(fmtBar, ta);
 
     container.appendChild(wrap);
 

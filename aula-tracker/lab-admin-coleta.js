@@ -350,6 +350,20 @@ function buildResultField(type) {
   // (o que estava dentro de `if (theForm)` pode ser removido)
 
   // ── Inicializa com campo select vazio ──────────────────────────────────
+  // ── Toggle amostra manual ─────────────────────────────────────────────
+  const sampleSelect       = document.getElementById('sampleSelect');
+  const sampleManualToggle = document.getElementById('sampleManualToggle');
+  const sampleManualInput  = document.getElementById('sampleManualInput');
+
+  sampleManualToggle?.addEventListener('change', function () {
+    const isManual = this.checked;
+    sampleSelect.style.display      = isManual ? 'none' : '';
+    sampleSelect.disabled           = isManual;
+    sampleManualInput.style.display = isManual ? '' : 'none';
+    sampleManualInput.required      = false;
+    sampleManualInput.name          = isManual ? 'sample_type' : 'sample_type_manual';
+    sampleSelect.name               = isManual ? 'sample_type_disabled' : 'sample_type';
+  });
   buildResultField('select');
 
 })();

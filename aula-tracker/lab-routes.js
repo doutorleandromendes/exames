@@ -859,12 +859,19 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                 <div>
-                  <label>Amostra</label>
-                  <select name="sample_type"
-                    style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px">
-                    ${sampleOptions}
-                  </select>
-                </div>
+                <label>Amostra</label>
+                <select id="sampleSelect" name="sample_type"
+                  style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px">
+                  ${sampleOptions}
+                </select>
+                <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
+                  <input type="checkbox" id="sampleManualToggle">
+                  Digitar manualmente
+                </label>
+                <input id="sampleManualInput" name="sample_type"
+                  placeholder="Ex.: Líquor, Líquido pleural, LCR..."
+                  style="display:none;margin-top:6px;width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px">
+              </div>
                 <div>
                   <label>Valor de referência</label>
                   <input name="reference_value" placeholder="Ex.: NÃO REAGENTE">

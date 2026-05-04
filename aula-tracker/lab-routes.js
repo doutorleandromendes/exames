@@ -23,7 +23,14 @@ function toBR(dateStr) {
   if (isNaN(d)) return s;
   return d.toLocaleDateString('pt-BR');
 }
-
+function renderText(value) {
+  return safe(value)
+    .replace(/\*(.+?)\*/g,   '<strong>$1</strong>')
+    .replace(/_(.+?)_/g,     '<em>$1</em>')
+    .replace(/SENSÍVEL A:/gi,   '<span style="color:#1a7a4a;font-weight:700">SENSÍVEL A:</span>')
+    .replace(/RESISTENTE A:/gi, '<span style="color:#b03030;font-weight:700">RESISTENTE A:</span>')
+    .replace(/\n/g, '<br>');
+}
 // Gera chave no formato LM-XXXX-XXXX (sem chars ambíguos 0/O/I/1)
 function generateKey() {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1278,7 +1285,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             <td style="padding:10px 12px;font-size:11px;color:#888">${safe(r.sample_type)}</td>
             <td style="padding:10px 12px">
               <span class="${resultClass(r.result_value)}" style="font-size:13px">
-                ${safe((r.result_value || '').split('\n')[0])}
+                ${renderText((r.result_value || '').split('\n')[0])}
               </span>
             </td>
           </tr>

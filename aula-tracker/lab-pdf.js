@@ -48,6 +48,8 @@ function resultColor(value) {
 // Colore marcadores SENSÍVEL A / RESISTENTE A dentro do texto de resultado
 function formatResultText(value) {
   return safe(value)
+    .replace(/\*(.+?)\*/g,   '<strong>$1</strong>')
+    .replace(/_(.+?)_/g,     '<em>$1</em>')
     .replace(/SENSÍVEL A:/gi,   '<span style="color:#1a7a4a;font-weight:700">SENSÍVEL A:</span>')
     .replace(/RESISTENTE A:/gi, '<span style="color:#b03030;font-weight:700">RESISTENTE A:</span>');
 }

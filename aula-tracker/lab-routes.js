@@ -314,7 +314,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         const rawDN = (cols[2]||'').trim();
         const dn   = toISO(rawDN);
         // Log das primeiras 3 linhas para diagnóstico
-        if (i <= 3) console.log(`[pacientes] linha ${i}: cols[2]="${rawDN}" → dn="${dn}"`);
+        if (i <= 3) console.log(`[pacientes] linha ${i} completa:`, JSON.stringify(cols));
         if (nome) pacientes.push({ nome, dn });
       }
       pacientes.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));

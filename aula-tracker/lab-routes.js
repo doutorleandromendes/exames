@@ -279,10 +279,14 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         return cols;
       }
 
-      // Converte qualquer formato de data para YYYY-MM-DD
       function toISO(s) {
         if (!s) return '';
         s = String(s).trim();
+        // DD-MM-AAAA (formato da planilha: 04-11-1958)
+        if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(s)) {
+          const [d, m, y] = s.split('-');
+          return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+        }
         // DD/MM/AAAA
         if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
           const [d, m, y] = s.split('/');
@@ -290,18 +294,10 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         }
         // YYYY-MM-DD
         if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-        // MM/DD/YYYY (formato US que o Sheets às vezes exporta)
-        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
-          const [m, d, y] = s.split('/');
-          return `${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
-        }
-        // Tenta Date() como fallback
+        // Fallback
         const dt = new Date(s);
         if (!isNaN(dt)) {
-          const y = dt.getFullYear();
-          const m = String(dt.getMonth()+1).padStart(2,'0');
-          const d = String(dt.getDate()).padStart(2,'0');
-          return `${y}-${m}-${d}`;
+          return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
         }
         return '';
       }
@@ -313,8 +309,6 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         const nome = `${(cols[0]||'').trim()} ${(cols[1]||'').trim()}`.trim();
         const rawDN = (cols[2]||'').trim();
         const dn   = toISO(rawDN);
-        // Log das primeiras 3 linhas para diagnóstico
-        if (i <= 3) console.log(`[pacientes] linha ${i} completa:`, JSON.stringify(cols));
         if (nome) pacientes.push({ nome, dn });
       }
       pacientes.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));

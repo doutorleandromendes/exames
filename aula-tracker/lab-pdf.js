@@ -86,9 +86,7 @@ export function buildPdfHtml({ patient, collection, results }) {
         </div>
         <div class="res-block">
           <div class="res-label">Resultado</div>
-          <div class="res-text" style="color:${resultColor(r.result_value)}">
-            ${formatResultText(r.result_value)}
-          </div>
+          <div class="res-text" style="color:${resultColor(r.result_value)}">${formatResultText(r.result_value)}</div>
           ${obs}
         </div>
       </div>

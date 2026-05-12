@@ -6,6 +6,7 @@ import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { fetchR2ImageAsDataURI } from './lab-storage.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +74,21 @@ export function buildPdfHtml({ patient, collection, results }) {
       ? '<div class="ex-divider"></div>'
       : '';
 
+    // Bloco de imagens (se houver)
+    const imagesHtml = (r.images && r.images.length)
+      ? `<div class="img-block">
+           <div class="img-block-label">Imagens</div>
+           <div class="img-grid">
+             ${r.images.map(img => `
+               <div class="img-item">
+                 <img src="${img.dataUri}" alt="${safe(img.caption || '')}">
+                 ${img.caption ? `<div class="img-caption">${safe(img.caption)}</div>` : ''}
+               </div>
+             `).join('')}
+           </div>
+         </div>`
+      : '';
+
     return `
       <div class="exam-block">
         <div class="ex-box">${safe(r.exam_name)}</div>
@@ -89,6 +105,7 @@ export function buildPdfHtml({ patient, collection, results }) {
           <div class="res-text" style="color:${resultColor(r.result_value)}">${formatResultText(r.result_value)}</div>
           ${obs}
         </div>
+        ${imagesHtml}
       </div>
       ${divider}
     `;
@@ -235,7 +252,46 @@ export function buildPdfHtml({ patient, collection, results }) {
       padding-top: 5px;
       font-weight: 400;
     }
-
+    /* Bloco de imagens */
+    .img-block {
+      margin: 6px 0 3px;
+      background: #f5f5f5;
+      border: 0.5px solid #e2e2e2;
+      border-radius: 3px;
+      padding: 6px 10px 8px;
+    }
+    .img-block-label {
+      font-size: 7px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: #aaa;
+      margin-bottom: 6px;
+      display: block;
+    }
+    .img-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .img-item {
+      flex: 0 0 calc(50% - 3px);
+      max-width: calc(50% - 3px);
+    }
+    .img-item img {
+      width: 100%;
+      height: auto;
+      max-height: 80mm;
+      object-fit: contain;
+      border-radius: 2px;
+      display: block;
+    }
+    .img-caption {
+      font-size: 7.5px;
+      color: #777;
+      text-align: center;
+      margin-top: 3px;
+      font-style: italic;
+    }
     /* Assinatura e rodapé */
     .pdf-sign {
       font-size: 8.5px;

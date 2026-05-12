@@ -981,64 +981,72 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             </div>
             ${pdfActionsHtml}
           </div>
-          <script>
-      // ── Imagens por resultado ──────────────────────────────────────────
+   <script>
       function toggleImgs(resultId) {
-        const row = document.getElementById('imgs-' + resultId);
+        var row = document.getElementById('imgs-' + resultId);
         if (!row) return;
-        const visible = row.style.display !== 'none';
+        var visible = row.style.display !== 'none';
         row.style.display = visible ? 'none' : '';
         if (!visible) loadImgList(resultId);
       }
 
       async function loadImgList(resultId) {
-        const container = document.getElementById('imgs-list-' + resultId);
+        var container = document.getElementById('imgs-list-' + resultId);
         if (!container) return;
         try {
-          const resp = await fetch('/lab/admin/resultados/' + resultId + '/images-list');
-          const imgs = await resp.json();
-          container.innerHTML = imgs.length
-            ? imgs.map(img => `
-                <div style="position:relative">
-                  <img src="${img.thumb_url}" alt="${img.caption || ''}"
-                    style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:0.5px solid #2a2f39">
-                  ${img.caption ? `<div style="font-size:10px;color:#a7adbb;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${img.caption}</div>` : ''}
-                  <form method="POST" action="/lab/admin/images/${img.id}/delete" style="display:inline"
-                        onsubmit="return confirm('Remover esta imagem?')">
-                    <button style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#b03030;color:#fff;border:0;cursor:pointer;font-size:11px;line-height:1;padding:0">×</button>
-                  </form>
-                </div>`).join('')
-            : '<span style="font-size:12px;color:#666">Nenhuma imagem ainda.</span>';
-        } catch { container.innerHTML = '<span style="font-size:12px;color:#b03030">Erro ao carregar imagens.</span>'; }
+          var resp = await fetch('/lab/admin/resultados/' + resultId + '/images-list');
+          var imgs = await resp.json();
+          if (!imgs.length) {
+            container.innerHTML = '<span style="font-size:12px;color:#666">Nenhuma imagem ainda.</span>';
+            return;
+          }
+          container.innerHTML = imgs.map(function(img) {
+            var html = '<div style="position:relative">';
+            html += '<img src="' + img.thumb_url + '" alt="' + (img.caption || '') + '" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:0.5px solid #2a2f39">';
+            if (img.caption) {
+              html += '<div style="font-size:10px;color:#a7adbb;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + img.caption + '</div>';
+            }
+            html += '<form method="POST" action="/lab/admin/images/' + img.id + '/delete" style="display:inline" onsubmit="return confirm(\'Remover esta imagem?\')">';
+            html += '<button style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#b03030;color:#fff;border:0;cursor:pointer;font-size:11px;line-height:1;padding:0">\u00d7</button>';
+            html += '</form></div>';
+            return html;
+          }).join('');
+        } catch(e) {
+          container.innerHTML = '<span style="font-size:12px;color:#b03030">Erro ao carregar imagens.</span>';
+        }
       }
 
       async function uploadImgs(resultId) {
-        const fileInput   = document.getElementById('img-file-' + resultId);
-        const captionInput= document.getElementById('img-caption-' + resultId);
-        const status      = document.getElementById('img-status-' + resultId);
-        const files       = fileInput?.files;
+        var fileInput    = document.getElementById('img-file-' + resultId);
+        var captionInput = document.getElementById('img-caption-' + resultId);
+        var status       = document.getElementById('img-status-' + resultId);
+        var files        = fileInput && fileInput.files;
         if (!files || !files.length) { alert('Selecione pelo menos uma imagem.'); return; }
 
-        status.textContent = 'Enviando…';
-        let ok = 0, fail = 0;
+        status.textContent = 'Enviando\u2026';
+        var ok = 0, fail = 0;
 
-        for (const file of files) {
-          if (file.size > 8 * 1024 * 1024) { alert(file.name + ' é maior que 8MB.'); fail++; continue; }
+        for (var i = 0; i < files.length; i++) {
+          var file = files[i];
+          if (file.size > 8 * 1024 * 1024) { alert(file.name + ' \u00e9 maior que 8MB.'); fail++; continue; }
           try {
-            const base64 = await new Promise((res, rej) => {
-              const r = new FileReader();
-              r.onload  = e => res(e.target.result.split(',')[1]);
-              r.onerror = rej;
-              r.readAsDataURL(file);
+            var base64 = await new Promise(function(resolve, reject) {
+              var reader = new FileReader();
+              reader.onload  = function(e) { resolve(e.target.result.split(',')[1]); };
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
             });
-            const resp = await fetch('/lab/admin/resultados/' + resultId + '/images', {
+            var uploadResp = await fetch('/lab/admin/resultados/' + resultId + '/images', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ data: base64, contentType: file.type, caption: captionInput.value }),
             });
-            if (!resp.ok) throw new Error((await resp.json()).error || 'Erro');
+            if (!uploadResp.ok) {
+              var errJson = await uploadResp.json();
+              throw new Error(errJson.error || 'Erro');
+            }
             ok++;
-          } catch (e) { console.error(e); fail++; }
+          } catch(e) { console.error(e); fail++; }
         }
 
         status.textContent = ok + ' enviada(s)' + (fail ? ', ' + fail + ' falha(s)' : '');
@@ -1047,6 +1055,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         loadImgList(resultId);
       }
       </script>
+      
          <script src="/lab-admin-coleta.js"></script>
         </div>
       `;

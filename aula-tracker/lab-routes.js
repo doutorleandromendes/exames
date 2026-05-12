@@ -6,6 +6,7 @@
 //   registerLabRoutes(app, pool, adminRequired, renderShell);
 
 import { buildPdfHtml, generateLabPdf } from './lab-pdf.js';
+import { uploadToR2, deleteFromR2 } from './lab-storage.js';
 
 // ====== Helpers locais ======
 
@@ -222,13 +223,50 @@ async function getCollectionData(pool, collectionId, patientIdCheck = null, resu
 
   let resultsQ, resultsParams;
   if (resultIds && resultIds.length) {
-    resultsQ      = `SELECT * FROM lab_results WHERE collection_id=$1 AND id = ANY($2::int[]) ORDER BY sort_index NULLS LAST, id ASC`;
+    resultsQ = `SELECT lr.*,
+      (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
+      FROM lab_results lr
+      WHERE lr.collection_id=$1 AND lr.id = ANY($2::int[])
+      ORDER BY lr.sort_index NULLS LAST, lr.id ASC`;
     resultsParams = [collectionId, resultIds];
   } else {
-    resultsQ      = `SELECT * FROM lab_results WHERE collection_id=$1 ORDER BY sort_index NULLS LAST, id ASC`;
+    resultsQ = `SELECT lr.*,
+      (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
+      FROM lab_results lr
+      WHERE lr.collection_id=$1
+      ORDER BY lr.sort_index NULLS LAST, lr.id ASC`;
     resultsParams = [collectionId];
   }
   const { rows: results } = await pool.query(resultsQ, resultsParams);
+
+  const resultIds2 = results.map(r => r.id);
+  let imagesByResult = {};
+  if (resultIds2.length) {
+    const { rows: imgs } = await pool.query(
+      `SELECT * FROM lab_result_images WHERE result_id = ANY($1::int[])
+       ORDER BY result_id, sort_index NULLS LAST, id`,
+      [resultIds2]
+    );
+    for (const img of imgs) {
+      if (!imagesByResult[img.result_id]) imagesByResult[img.result_id] = [];
+      imagesByResult[img.result_id].push(img);
+    }
+  }
+
+  const { fetchR2ImageAsDataURI } = await import('./lab-storage.js');
+  for (const r of results) {
+    const imgs = imagesByResult[r.id] || [];
+    r.images = await Promise.all(imgs.map(async img => {
+      try {
+        const dataUri = await fetchR2ImageAsDataURI(img.r2_key);
+        return { ...img, dataUri };
+      } catch (e) {
+        console.warn('[lab] imagem não carregada:', img.r2_key, e.message);
+        return null;
+      }
+    }));
+    r.images = r.images.filter(Boolean);
+  }
 
   return {
     patient:    { full_name: collection.full_name, birth_date: collection.birth_date },
@@ -781,11 +819,16 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       if (!collection) return res.status(404).send(renderShell('Erro', `<div class="card"><h1>Coleta não encontrada</h1></div>`));
 
       const { rows: results } = await pool.query(
-        'SELECT * FROM lab_results WHERE collection_id=$1 ORDER BY sort_index NULLS LAST, id ASC',
+        `SELECT lr.*,
+          (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
+         FROM lab_results lr
+         WHERE lr.collection_id=$1 ORDER BY lr.sort_index NULLS LAST, lr.id ASC`,
         [id]
       );
-
-      const resultRows = results.map(r => `
+      
+      const resultRows = results.map(r => {
+        const imgCount = r._img_count || 0;
+        return `
         <tr>
           <td><strong>${safe(r.exam_name)}</strong></td>
           <td style="color:#a7adbb">${safe(r.sample_type)}</td>
@@ -794,14 +837,34 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           </td>
           <td style="white-space:nowrap">
             <a href="/lab/admin/resultados/${r.id}/edit"
-               style="color:#8fb6ff;font-size:12px;margin-right:10px">editar</a>
+               style="color:#8fb6ff;font-size:12px;margin-right:8px">editar</a>
+            <a href="#imgs-${r.id}"
+               onclick="toggleImgs(${r.id})"
+               style="color:#8fb6ff;font-size:12px;margin-right:8px"
+               id="imgs-toggle-${r.id}">📷 imagens</a>
             <form method="POST" action="/lab/admin/resultados/${r.id}/delete" style="display:inline"
                   onsubmit="return confirm('Remover o exame &quot;${safe(r.exam_name)}&quot;?')">
               <button style="background:none;border:0;color:#8fb6ff;cursor:pointer;padding:0;font-size:12px">remover</button>
             </form>
           </td>
         </tr>
-      `).join('');
+        <tr id="imgs-${r.id}" style="display:none">
+          <td colspan="4" style="padding:0 0 8px 14px">
+            <div id="imgs-list-${r.id}" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="file" id="img-file-${r.id}" accept="image/*" multiple
+                style="font-size:12px;color:#a7adbb">
+              <input type="text" id="img-caption-${r.id}" placeholder="Legenda (opcional)"
+                style="padding:5px 8px;border-radius:6px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:12px;width:180px">
+              <button type="button" onclick="uploadImgs(${r.id})"
+                style="padding:5px 14px;background:#4f8cff;color:#fff;border:0;border-radius:6px;font-size:12px;cursor:pointer">
+                Upload
+              </button>
+              <span id="img-status-${r.id}" style="font-size:11px;color:#a7adbb"></span>
+            </div>
+          </td>
+        </tr>
+      `}).join('');
 
       const sampleOptions = ['Soro','Sangue Total','Plasma','Urina','Secreção','Swab','Linfa','Fezes','Líquor','Líquido Sinovial','Outro']
         .map(s => `<option>${s}</option>`).join('');
@@ -872,7 +935,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
                   <input type="checkbox" id="sampleManualToggle">
                   Digitar manualmente
                 </label>
-                <input id="sampleManualInput" name="sample_type"
+                <input id="sampleManualInput" name="sample_type_manual"
                   placeholder="Ex.: Líquor, Líquido pleural, LCR..."
                   style="display:none;margin-top:6px;width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px">
               </div>
@@ -890,6 +953,13 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
               
               <label>Observação (opcional)</label>
               <input name="observation" placeholder="Ex.: Teste realizado com baixo volume de soro">
+
+              <label>Imagens (opcional)</label>
+              <input type="file" id="img-inline-input" accept="image/*" multiple
+                style="font-size:13px;color:#a7adbb;width:100%">
+              <input type="text" id="img-inline-caption"
+                placeholder="Legenda para todas as imagens (opcional)"
+                style="margin-top:6px;width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:13px">
 
               <button class="mt" style="width:100%;padding:11px;font-size:14px">+ Adicionar exame</button>
             </form>
@@ -911,6 +981,72 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             </div>
             ${pdfActionsHtml}
           </div>
+          <script>
+      // ── Imagens por resultado ──────────────────────────────────────────
+      function toggleImgs(resultId) {
+        const row = document.getElementById('imgs-' + resultId);
+        if (!row) return;
+        const visible = row.style.display !== 'none';
+        row.style.display = visible ? 'none' : '';
+        if (!visible) loadImgList(resultId);
+      }
+
+      async function loadImgList(resultId) {
+        const container = document.getElementById('imgs-list-' + resultId);
+        if (!container) return;
+        try {
+          const resp = await fetch('/lab/admin/resultados/' + resultId + '/images-list');
+          const imgs = await resp.json();
+          container.innerHTML = imgs.length
+            ? imgs.map(img => `
+                <div style="position:relative">
+                  <img src="${img.thumb_url}" alt="${img.caption || ''}"
+                    style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:0.5px solid #2a2f39">
+                  ${img.caption ? `<div style="font-size:10px;color:#a7adbb;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${img.caption}</div>` : ''}
+                  <form method="POST" action="/lab/admin/images/${img.id}/delete" style="display:inline"
+                        onsubmit="return confirm('Remover esta imagem?')">
+                    <button style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#b03030;color:#fff;border:0;cursor:pointer;font-size:11px;line-height:1;padding:0">×</button>
+                  </form>
+                </div>`).join('')
+            : '<span style="font-size:12px;color:#666">Nenhuma imagem ainda.</span>';
+        } catch { container.innerHTML = '<span style="font-size:12px;color:#b03030">Erro ao carregar imagens.</span>'; }
+      }
+
+      async function uploadImgs(resultId) {
+        const fileInput   = document.getElementById('img-file-' + resultId);
+        const captionInput= document.getElementById('img-caption-' + resultId);
+        const status      = document.getElementById('img-status-' + resultId);
+        const files       = fileInput?.files;
+        if (!files || !files.length) { alert('Selecione pelo menos uma imagem.'); return; }
+
+        status.textContent = 'Enviando…';
+        let ok = 0, fail = 0;
+
+        for (const file of files) {
+          if (file.size > 8 * 1024 * 1024) { alert(file.name + ' é maior que 8MB.'); fail++; continue; }
+          try {
+            const base64 = await new Promise((res, rej) => {
+              const r = new FileReader();
+              r.onload  = e => res(e.target.result.split(',')[1]);
+              r.onerror = rej;
+              r.readAsDataURL(file);
+            });
+            const resp = await fetch('/lab/admin/resultados/' + resultId + '/images', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: base64, contentType: file.type, caption: captionInput.value }),
+            });
+            if (!resp.ok) throw new Error((await resp.json()).error || 'Erro');
+            ok++;
+          } catch (e) { console.error(e); fail++; }
+        }
+
+        status.textContent = ok + ' enviada(s)' + (fail ? ', ' + fail + ' falha(s)' : '');
+        fileInput.value = '';
+        captionInput.value = '';
+        loadImgList(resultId);
+      }
+      </script>
          <script src="/lab-admin-coleta.js"></script>
         </div>
       `;
@@ -925,39 +1061,45 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
   app.post('/lab/admin/coletas/:id/resultados', adminRequired, async (req, res) => {
     try {
       const collection_id = parseInt(req.params.id, 10);
-
-      // exam_name pode chegar como array quando há dois inputs com o mesmo name
       const examRaw         = req.body?.exam_name;
       const exam_name       = (Array.isArray(examRaw)
         ? examRaw.filter(Boolean).pop()
         : examRaw || '').trim();
-      const sample_type     = String(req.body?.sample_type     || 'Soro').trim();
+      const sampleRaw       = req.body?.sample_type;
+      const sample_type     = (Array.isArray(sampleRaw)
+        ? sampleRaw.filter(Boolean).pop()
+        : sampleRaw || 'Soro').trim();
       const method          = String(req.body?.method          || '').trim();
       const result_value    = String(req.body?.result_value    || '').trim();
       const reference_value = String(req.body?.reference_value || '').trim() || null;
       const observation     = String(req.body?.observation     || '').trim() || null;
 
       if (!exam_name || !method || !result_value) {
-        return res.status(400).send('Nome do exame, método e resultado são obrigatórios');
+        return res.status(400).json({ error: 'Nome do exame, método e resultado são obrigatórios' });
       }
 
-      // sort_index = max atual + 10
       const { rows: [{ max_sort }] } = await pool.query(
         'SELECT COALESCE(MAX(sort_index), 0) AS max_sort FROM lab_results WHERE collection_id=$1',
         [collection_id]
       );
-
-      await pool.query(
+      const { rows: [newResult] } = await pool.query(
         `INSERT INTO lab_results
            (collection_id, exam_name, sample_type, method, result_value, reference_value, observation, sort_index)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
         [collection_id, exam_name, sample_type, method, result_value,
          reference_value, observation, parseInt(max_sort, 10) + 10]
       );
 
+      // Suporta tanto AJAX (retorna JSON) quanto submit nativo (redireciona)
+      const isAjax = req.headers['x-requested-with'] === 'XMLHttpRequest';
+      if (isAjax) {
+        return res.json({ ok: true, result_id: newResult.id, collection_id });
+      }
       res.redirect(`/lab/admin/coletas/${collection_id}`);
     } catch (err) {
       console.error('LAB ADD RESULT ERROR', err);
+      const isAjax = req.headers['x-requested-with'] === 'XMLHttpRequest';
+      if (isAjax) return res.status(500).json({ error: err.message });
       res.status(500).send('Falha ao adicionar exame');
     }
   });
@@ -975,6 +1117,85 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
     } catch (err) {
       console.error('LAB DELETE RESULT ERROR', err);
       res.status(500).send('Falha ao remover exame');
+    }
+  });
+
+  // POST /lab/admin/resultados/:id/images — upload de imagem (base64 JSON)
+  app.post('/lab/admin/resultados/:id/images', adminRequired, async (req, res) => {
+    try {
+      const result_id = parseInt(req.params.id, 10);
+      const { data, contentType, caption } = req.body || {};
+
+      if (!data || !contentType) return res.status(400).json({ error: 'Dados obrigatórios' });
+      if (!contentType.startsWith('image/')) return res.status(400).json({ error: 'Tipo inválido' });
+
+      // Limita a 8MB (base64 ~33% maior que binário)
+      if (data.length > 11_000_000) return res.status(400).json({ error: 'Imagem muito grande (máx 8MB)' });
+
+      const buffer  = Buffer.from(data, 'base64');
+      const ext     = contentType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+      const r2Key   = `lab-images/${result_id}/${Date.now()}.${ext}`;
+
+      await uploadToR2(r2Key, buffer, contentType);
+
+      const { rows: [{ max_sort }] } = await pool.query(
+        'SELECT COALESCE(MAX(sort_index), 0) AS max_sort FROM lab_result_images WHERE result_id=$1',
+        [result_id]
+      );
+      const { rows: [img] } = await pool.query(
+        `INSERT INTO lab_result_images (result_id, r2_key, caption, sort_index)
+         VALUES ($1,$2,$3,$4) RETURNING id`,
+        [result_id, r2Key, (caption || '').trim() || null, parseInt(max_sort, 10) + 10]
+      );
+
+      res.json({ ok: true, image_id: img.id, r2_key: r2Key });
+    } catch (err) {
+      console.error('LAB IMAGE UPLOAD ERROR', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+// GET /lab/admin/resultados/:id/images-list — JSON com lista de imagens
+  app.get('/lab/admin/resultados/:id/images-list', adminRequired, async (req, res) => {
+    try {
+      const result_id = parseInt(req.params.id, 10);
+      const { rows } = await pool.query(
+        'SELECT id, r2_key, caption FROM lab_result_images WHERE result_id=$1 ORDER BY sort_index NULLS LAST, id',
+        [result_id]
+      );
+      // Gera URLs assinadas para thumbnails (60s de validade, só para preview admin)
+      const { fetchR2ImageAsDataURI } = await import('./lab-storage.js');
+      const imgs = await Promise.all(rows.map(async img => ({
+        id:       img.id,
+        caption:  img.caption,
+        thumb_url: await fetchR2ImageAsDataURI(img.r2_key).then(uri => uri).catch(() => ''),
+      })));
+      res.json(imgs);
+    } catch (err) {
+      console.error('LAB IMAGES LIST ERROR', err);
+      res.status(500).json([]);
+    }
+  });
+  // POST /lab/admin/images/:id/delete — remove imagem do DB e R2
+  app.post('/lab/admin/images/:id/delete', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rows: [img] } = await pool.query(
+        'SELECT result_id, r2_key FROM lab_result_images WHERE id=$1', [id]
+      );
+      if (!img) return res.status(404).send('Imagem não encontrada');
+
+      await pool.query('DELETE FROM lab_result_images WHERE id=$1', [id]);
+      await deleteFromR2(img.r2_key);
+
+      // Redireciona de volta para a coleta (via referrer ou busca collection_id)
+      const { rows: [r] } = await pool.query(
+        'SELECT collection_id FROM lab_results WHERE id=$1', [img.result_id]
+      );
+      const target = r ? `/lab/admin/coletas/${r.collection_id}` : '/lab/admin';
+      res.redirect(target);
+    } catch (err) {
+      console.error('LAB IMAGE DELETE ERROR', err);
+      res.status(500).send('Falha ao remover imagem');
     }
   });
 

@@ -300,34 +300,25 @@ function buildResultField(type) {
   });
 
   // ── Validação manual no submit (substitui required nativo) ────────────
-  theForm?.addEventListener('submit', function (e) {
-    // Valida nome do exame
-    const isManual = examManualToggle?.checked;
-    const examName = isManual
+  // ── Submit via AJAX para suportar upload de imagens ─────────────────────────
+  theForm?.addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    // Validação do nome do exame
+    const isManualExam = examManualToggle?.checked;
+    const examName = isManualExam
       ? (examManualInput?.value || '').trim()
       : (examHidden?.value || '').trim();
+    if (!examName) { alert('Selecione ou digite o nome do exame.'); return; }
+    if (isManualExam) { examHidden.value = examName; examHidden.disabled = false; }
 
-    if (!examName) {
-      e.preventDefault();
-      alert('Selecione ou digite o nome do exame.');
-      return;
-    }
-
-    // Garante que o nome correto vai no hidden antes de submeter
-    if (isManual) {
-      examHidden.value    = examName;
-      examHidden.disabled = false;
-    }
-
-    // Valida resultado
+    // Validação do resultado
     const resultHidden = document.getElementById('result_hidden');
     if (!resultHidden || !resultHidden.value.trim()) {
-      e.preventDefault();
-      alert('Preencha o resultado do exame.');
-      return;
+      alert('Preencha o resultado do exame.'); return;
     }
 
-    // Formatação numérica para dosagem (mantida aqui também)
+    // Formatação numérica para dosagem
     if (getExamType(examName) === 'dosagem') {
       const manualToggle = document.getElementById('resultManualToggle');
       if (!manualToggle?.checked) {
@@ -344,8 +335,50 @@ function buildResultField(type) {
         }
       }
     }
-  });
 
+    // Envia dados do exame via fetch
+    const formData = new FormData(this);
+    let result_id = null;
+    try {
+      const resp = await fetch(this.action, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        body: formData,
+      });
+      const json = await resp.json();
+      if (!resp.ok) { alert(json.error || 'Erro ao adicionar exame.'); return; }
+      result_id = json.result_id;
+    } catch (err) {
+      alert('Erro de conexão ao adicionar exame.'); return;
+    }
+
+    // Upload de imagens selecionadas (se houver)
+    const imgInput = document.getElementById('img-inline-input');
+    const imgCaption = document.getElementById('img-inline-caption');
+    const files = imgInput?.files;
+
+    if (files && files.length && result_id) {
+      for (const file of files) {
+        if (file.size > 8 * 1024 * 1024) { console.warn('Imagem grande pulada:', file.name); continue; }
+        try {
+          const base64 = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload  = e => res(e.target.result.split(',')[1]);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
+          await fetch('/lab/admin/resultados/' + result_id + '/images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: base64, contentType: file.type, caption: imgCaption?.value || '' }),
+          });
+        } catch (e) { console.error('Upload de imagem falhou:', e); }
+      }
+    }
+
+    // Recarrega a página da coleta
+    window.location.reload();
+  });
   // Remove o listener de submit duplicado que estava no final do arquivo
   // (o que estava dentro de `if (theForm)` pode ser removido)
 

@@ -336,14 +336,36 @@ function buildResultField(type) {
       }
     }
 
-    // Envia dados do exame via fetch
-    const formData = new FormData(this);
+    // Envia dados do exame via fetch (URLSearchParams — compatível com express.urlencoded)
+    const sampleSelectEl = document.getElementById('sampleSelect');
+    const sampleManualEl = document.getElementById('sampleManualInput');
+    const sampleManualTg = document.getElementById('sampleManualToggle');
+    const methodEl       = document.querySelector('[name="method"]');
+    const refEl          = document.querySelector('[name="reference_value"]');
+    const obsEl          = document.querySelector('[name="observation"]');
+
+    const isManualSample = sampleManualTg?.checked;
+    const sampleType     = isManualSample
+      ? (sampleManualEl?.value || 'Soro').trim()
+      : (sampleSelectEl?.value || 'Soro');
+
+    const params = new URLSearchParams();
+    params.set('exam_name',       examName);
+    params.set('sample_type',     sampleType);
+    params.set('method',          (methodEl?.value  || '').trim());
+    params.set('result_value',    resultHidden.value.trim());
+    params.set('reference_value', (refEl?.value     || '').trim());
+    params.set('observation',     (obsEl?.value     || '').trim());
+
     let result_id = null;
     try {
       const resp = await fetch(this.action, {
         method: 'POST',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-        body: formData,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Content-Type':     'application/x-www-form-urlencoded',
+        },
+        body: params,
       });
       const json = await resp.json();
       if (!resp.ok) { alert(json.error || 'Erro ao adicionar exame.'); return; }

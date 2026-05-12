@@ -65,5 +65,21 @@ export async function runLabMigrations(pool) {
       ON lab_results(collection_id, sort_index NULLS LAST, id)
   `);
 
+  // Imagens vinculadas a resultados individuais
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lab_result_images (
+      id         SERIAL PRIMARY KEY,
+      result_id  INTEGER NOT NULL REFERENCES lab_results(id) ON DELETE CASCADE,
+      r2_key     TEXT NOT NULL,
+      caption    TEXT,
+      sort_index INTEGER,
+      created_at TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS lab_result_images_result_idx
+      ON lab_result_images(result_id, sort_index NULLS LAST, id)
+  `);
+
   console.log('[lab-db] migrations OK');
 }

@@ -981,13 +981,19 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             </div>
             ${pdfActionsHtml}
           </div>
-   <script>
+<script>
       function toggleImgs(resultId) {
         var row = document.getElementById('imgs-' + resultId);
         if (!row) return;
         var visible = row.style.display !== 'none';
         row.style.display = visible ? 'none' : '';
         if (!visible) loadImgList(resultId);
+      }
+
+      function deleteImg(imgId) {
+        if (confirm('Remover esta imagem?')) {
+          document.getElementById('img-del-' + imgId).submit();
+        }
       }
 
       async function loadImgList(resultId) {
@@ -1001,14 +1007,14 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             return;
           }
           container.innerHTML = imgs.map(function(img) {
-            var html = '<div style="position:relative">';
+            var html = '<div style="position:relative;display:inline-block">';
             html += '<img src="' + img.thumb_url + '" alt="' + (img.caption || '') + '" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:0.5px solid #2a2f39">';
             if (img.caption) {
               html += '<div style="font-size:10px;color:#a7adbb;text-align:center;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + img.caption + '</div>';
             }
-            html += '<form method="POST" action="/lab/admin/images/' + img.id + '/delete" style="display:inline" onsubmit="return confirm(\'Remover esta imagem?\')">';
-            html += '<button style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#b03030;color:#fff;border:0;cursor:pointer;font-size:11px;line-height:1;padding:0">\u00d7</button>';
-            html += '</form></div>';
+            html += '<form method="POST" action="/lab/admin/images/' + img.id + '/delete" id="img-del-' + img.id + '" style="display:none"></form>';
+            html += '<button type="button" onclick="deleteImg(' + img.id + ')" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#b03030;color:#fff;border:0;cursor:pointer;font-size:11px;line-height:1;padding:0">\u00d7</button>';
+            html += '</div>';
             return html;
           }).join('');
         } catch(e) {
@@ -1022,10 +1028,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         var status       = document.getElementById('img-status-' + resultId);
         var files        = fileInput && fileInput.files;
         if (!files || !files.length) { alert('Selecione pelo menos uma imagem.'); return; }
-
         status.textContent = 'Enviando\u2026';
         var ok = 0, fail = 0;
-
         for (var i = 0; i < files.length; i++) {
           var file = files[i];
           if (file.size > 8 * 1024 * 1024) { alert(file.name + ' \u00e9 maior que 8MB.'); fail++; continue; }
@@ -1048,7 +1052,6 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             ok++;
           } catch(e) { console.error(e); fail++; }
         }
-
         status.textContent = ok + ' enviada(s)' + (fail ? ', ' + fail + ' falha(s)' : '');
         fileInput.value = '';
         captionInput.value = '';

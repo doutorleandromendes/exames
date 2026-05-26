@@ -74,6 +74,17 @@ export function buildPdfHtml({ patient, collection, results }) {
       ? '<div class="ex-divider"></div>'
       : '';
 
+    // Detecta e extrai valor T/C embutido no result_value
+    const tcMatch   = r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/);
+    const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
+    const tcDisplay = tcMatch ? tcMatch[2].trim() : null;
+
+    const tcHtml = tcDisplay
+      ? `<div class="res-tc">T/C ${safe(tcDisplay)}</div>`
+      : '';
+
+    const resRowClass = tcDisplay ? 'res-row' : '';
+
     // Bloco de imagens (se houver)
     const imagesHtml = (r.images && r.images.length)
       ? `<div class="img-block">
@@ -102,7 +113,10 @@ export function buildPdfHtml({ patient, collection, results }) {
         </div>
         <div class="res-block">
           <div class="res-label">Resultado</div>
-          <div class="res-text" style="color:${resultColor(r.result_value)}">${formatResultText(r.result_value)}</div>
+          <div class="${resRowClass}">
+            <div class="res-text" style="color:${resultColor(mainValue)}">${formatResultText(mainValue)}</div>
+            ${tcHtml}
+          </div>
           ${obs}
         </div>
         ${imagesHtml}
@@ -241,6 +255,25 @@ export function buildPdfHtml({ patient, collection, results }) {
       word-break: break-word;
       text-align: left;
       display: block;
+    }
+    .res-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .res-row .res-text {
+      flex: 1 1 auto;
+    }
+    .res-tc {
+      font-size: 8.5px;
+      font-weight: 600;
+      color: #666;
+      font-style: italic;
+      white-space: nowrap;
+      flex-shrink: 0;
+      align-self: flex-end;
+      padding-bottom: 1px;
     }
     .res-obs {
       font-style: italic;

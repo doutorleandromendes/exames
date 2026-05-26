@@ -145,6 +145,9 @@ function buildResultField(type) {
 
     if (type !== 'texto') {
       addManualToggle(resultContainer);
+      if (type === 'select') {
+        addTCToggle(resultContainer);
+      }
     }
   }
   function makeToolbar(targetId) {
@@ -192,6 +195,84 @@ function buildResultField(type) {
     if (targetId) bar.dataset.target = targetId;
     return bar;
   }
+  // ── Toggle de relação T/C (LFA) ───────────────────────────────────────
+
+  function addTCToggle(container) {
+    const wrap = document.createElement('div');
+    wrap.id = 'tc-toggle-wrap';
+    wrap.style.marginTop = '10px';
+
+    const lbl = document.createElement('label');
+    Object.assign(lbl.style, {
+      display: 'flex', alignItems: 'center', gap: '6px',
+      fontSize: '12px', cursor: 'pointer', color: '#a7adbb',
+    });
+
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.id   = 'tcToggle';
+    lbl.appendChild(chk);
+    lbl.appendChild(document.createTextNode(' Incluir relação T/C no laudo'));
+    wrap.appendChild(lbl);
+
+    // Sub-bloco (oculto até marcar)
+    const sub = document.createElement('div');
+    sub.id = 'tc-sub';
+    Object.assign(sub.style, {
+      display: 'none', marginTop: '8px',
+      padding: '10px', borderRadius: '8px',
+      border: '1px solid #2a2f39', background: '#0d1017',
+    });
+
+    const subLbl = document.createElement('label');
+    Object.assign(subLbl.style, { fontSize: '11px', color: '#8891a4', display: 'block', marginBottom: '5px' });
+    subLbl.textContent = 'Valor T/C medido (0 – 1,000)';
+    sub.appendChild(subLbl);
+
+    const numInput = document.createElement('input');
+    numInput.type        = 'text';
+    numInput.inputMode   = 'decimal';
+    numInput.id          = 'tcInput';
+    numInput.placeholder = 'ex: 0,6999';
+    styleInput(numInput);
+    Object.assign(numInput.style, { fontWeight: '600' });
+    numInput.addEventListener('input', e => {
+      e.target.value = e.target.value.replace(/[^\d.,]/g, '');
+      updateTCPreview(e.target.value);
+    });
+    sub.appendChild(numInput);
+
+    const preview = document.createElement('div');
+    preview.id = 'tc-preview';
+    Object.assign(preview.style, {
+      marginTop: '5px', fontSize: '11px', color: '#6ee7b7',
+      fontStyle: 'italic', minHeight: '16px',
+    });
+    sub.appendChild(preview);
+    wrap.appendChild(sub);
+
+    container.appendChild(wrap);
+
+    function updateTCPreview(raw) {
+      const v = parseFloat((raw || '').replace(',', '.'));
+      if (isNaN(v)) { preview.textContent = ''; return; }
+      const exp = Math.pow(10, v).toFixed(2).replace('.', ',');
+      preview.textContent = `→ será exibido como T/C ${exp}`;
+    }
+
+    chk.addEventListener('change', function () {
+      sub.style.display = this.checked ? '' : 'none';
+      if (this.checked) {
+        if (vrInput) vrInput.value = 'Não Reagente - relação T/C < 1,0';
+        numInput.focus();
+      } else {
+        if (vrInput) vrInput.value = 'NÃO REAGENTE';
+        numInput.value = '';
+        preview.textContent = '';
+      }
+    });
+  }
+
   // ── Toggle de resultado manual ─────────────────────────────────────────
 
   function addManualToggle(container) {
@@ -337,6 +418,17 @@ function buildResultField(type) {
     }
 
     // Envia dados do exame via fetch (URLSearchParams — compatível com express.urlencoded)
+    // Formata e embute valor T/C se ativado (apenas para exames tipo select)
+    const tcToggle = document.getElementById('tcToggle');
+    const tcInput  = document.getElementById('tcInput');
+    if (tcToggle?.checked && tcInput?.value.trim()) {
+      const tcRaw = parseFloat(tcInput.value.trim().replace(',', '.'));
+      if (!isNaN(tcRaw) && tcRaw >= 0 && tcRaw <= 1) {
+        const tcDisplay = Math.pow(10, tcRaw).toFixed(2).replace('.', ',');
+        resultHidden.value = resultHidden.value.trim() + '||TC||' + tcDisplay;
+      }
+    }
+
     const sampleSelectEl = document.getElementById('sampleSelect');
     const sampleManualEl = document.getElementById('sampleManualInput');
     const sampleManualTg = document.getElementById('sampleManualToggle');

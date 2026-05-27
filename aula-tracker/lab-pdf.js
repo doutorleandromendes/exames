@@ -80,10 +80,11 @@ export function buildPdfHtml({ patient, collection, results }) {
     const tcDisplay = tcMatch ? tcMatch[2].trim() : null;
 
     const tcHtml = tcDisplay
-      ? `<div class="res-tc">T/C ${safe(tcDisplay)}</div>`
+      ? `<div class="tc-section">
+           <div class="tc-label">Relação T/C</div>
+           <div class="tc-value">${safe(tcDisplay)}</div>
+         </div>`
       : '';
-
-    const resRowClass = tcDisplay ? 'res-row' : '';
 
     // Bloco de imagens (se houver)
     const imagesHtml = (r.images && r.images.length)
@@ -113,10 +114,8 @@ export function buildPdfHtml({ patient, collection, results }) {
         </div>
         <div class="res-block">
           <div class="res-label">Resultado</div>
-          <div class="${resRowClass}">
-            <div class="res-text" style="color:${resultColor(mainValue)}">${formatResultText(mainValue)}</div>
-            ${tcHtml}
-          </div>
+          <div class="res-text" style="color:${resultColor(mainValue)}">${formatResultText(mainValue)}</div>
+          ${tcHtml}
           ${obs}
         </div>
         ${imagesHtml}
@@ -256,24 +255,25 @@ export function buildPdfHtml({ patient, collection, results }) {
       text-align: left;
       display: block;
     }
-    .res-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 8px;
+    .tc-section {
+      margin-top: 6px;
+      padding-top: 5px;
+      padding-left: 14px;
+      border-top: 0.5px dashed #ddd;
     }
-    .res-row .res-text {
-      flex: 1 1 auto;
+    .tc-label {
+      font-size: 7px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: #aaa;
+      margin-bottom: 2px;
+      display: block;
     }
-    .res-tc {
-      font-size: 8.5px;
+    .tc-value {
+      font-size: 10px;
       font-weight: 600;
-      color: #666;
-      font-style: italic;
-      white-space: nowrap;
-      flex-shrink: 0;
-      align-self: flex-end;
-      padding-bottom: 1px;
+      color: #444;
+      display: block;
     }
     .res-obs {
       font-style: italic;

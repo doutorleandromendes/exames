@@ -222,13 +222,20 @@ function buildResultField(type) {
       display: 'none', marginTop: '8px',
       padding: '10px', borderRadius: '8px',
       border: '1px solid #2a2f39', background: '#0d1017',
+      display: 'none',
     });
 
-    const subLbl = document.createElement('label');
-    Object.assign(subLbl.style, { fontSize: '11px', color: '#8891a4', display: 'block', marginBottom: '5px' });
-    subLbl.textContent = 'Valor T/C medido (0 – 1,000)';
-    sub.appendChild(subLbl);
+    // Linha superior: valor medido + threshold lado a lado
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', gap: '10px', alignItems: 'flex-end' });
 
+    // Campo valor T/C medido
+    const colVal = document.createElement('div');
+    Object.assign(colVal.style, { flex: '1 1 0' });
+    const lblVal = document.createElement('label');
+    Object.assign(lblVal.style, { fontSize: '11px', color: '#8891a4', display: 'block', marginBottom: '5px' });
+    lblVal.textContent = 'T/C medido (0 – 1,000)';
+    colVal.appendChild(lblVal);
     const numInput = document.createElement('input');
     numInput.type        = 'text';
     numInput.inputMode   = 'decimal';
@@ -240,18 +247,47 @@ function buildResultField(type) {
       e.target.value = e.target.value.replace(/[^\d.,]/g, '');
       updateTCPreview(e.target.value);
     });
-    sub.appendChild(numInput);
+    colVal.appendChild(numInput);
+    row.appendChild(colVal);
+
+    // Campo threshold
+    const colThr = document.createElement('div');
+    Object.assign(colThr.style, { flex: '0 0 120px' });
+    const lblThr = document.createElement('label');
+    Object.assign(lblThr.style, { fontSize: '11px', color: '#8891a4', display: 'block', marginBottom: '5px' });
+    lblThr.textContent = 'Threshold (VR)';
+    colThr.appendChild(lblThr);
+    const thrInput = document.createElement('input');
+    thrInput.type        = 'text';
+    thrInput.inputMode   = 'decimal';
+    thrInput.id          = 'tcThreshold';
+    thrInput.value       = '0,1';
+    styleInput(thrInput);
+    Object.assign(thrInput.style, { fontWeight: '600' });
+    thrInput.addEventListener('input', e => {
+      e.target.value = e.target.value.replace(/[^\d.,]/g, '');
+      syncVR(e.target.value);
+    });
+    colThr.appendChild(thrInput);
+    row.appendChild(colThr);
+
+    sub.appendChild(row);
 
     const preview = document.createElement('div');
     preview.id = 'tc-preview';
     Object.assign(preview.style, {
-      marginTop: '5px', fontSize: '11px', color: '#6ee7b7',
+      marginTop: '7px', fontSize: '11px', color: '#6ee7b7',
       fontStyle: 'italic', minHeight: '16px',
     });
     sub.appendChild(preview);
     wrap.appendChild(sub);
-
     container.appendChild(wrap);
+
+    function syncVR(rawThr) {
+      if (!vrInput) return;
+      const t = (rawThr || '').trim() || '?';
+      vrInput.value = `Não Reagente - relação T/C < ${t}`;
+    }
 
     function updateTCPreview(raw) {
       const v = parseFloat((raw || '').replace(',', '.'));
@@ -263,11 +299,12 @@ function buildResultField(type) {
     chk.addEventListener('change', function () {
       sub.style.display = this.checked ? '' : 'none';
       if (this.checked) {
-        if (vrInput) vrInput.value = 'Não Reagente - relação T/C < 1,0';
+        syncVR(thrInput.value);
         numInput.focus();
       } else {
         if (vrInput) vrInput.value = 'NÃO REAGENTE';
         numInput.value = '';
+        thrInput.value = '0,1';
         preview.textContent = '';
       }
     });

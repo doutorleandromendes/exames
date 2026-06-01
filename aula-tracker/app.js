@@ -16,6 +16,8 @@ import { runLabMigrations } from './lab-db.js';       // ← ADICIONAR
 import { registerLabRoutes } from './lab-routes.js';  // ← ADICIONAR
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
+import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -287,6 +289,7 @@ await migratorPool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  
 }
 migrate().catch(e=>console.error('migration error', e));
 runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
+runAtbMigrations(migratorPool).catch(e => console.error('atb migration error', e));   // ← ADICIONAR
 
 
 // ====== Clonar curso (formulário com lista de aulas + ferramentas por linha) ======
@@ -4414,6 +4417,7 @@ app.post('/track', async (req,res)=>{
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED REJECTION', reason));
 process.on('uncaughtException',  (err)    => console.error('UNCAUGHT EXCEPTION', err));
 registerLabRoutes(app, pool, adminRequired, renderShell); // ← ADICIONAR
+registerAtbRoutes(app, pool, adminRequired, renderShell);  // ← ADICIONAR
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

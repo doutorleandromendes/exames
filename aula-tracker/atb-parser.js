@@ -47,8 +47,8 @@ const toArray = (v) => {
 const toMatrix = (v) => {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return [];
   return Object.entries(v)
-    .map(([row, cols]) => ({ row, ...cols }))
-    .filter(r => Object.values(r).some(c => c && c !== row));
+    .map(([rowKey, cols]) => ({ row: rowKey, ...cols }))
+    .filter(r => Object.values(r).some(c => c && c !== r.row));
 };
 
 // ── Parser JotForm (polling / webhook) ───────────────────────────────────

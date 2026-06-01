@@ -298,3 +298,131 @@ export function parseWebhookRaw(rawRequest) {
   }
   return answers;
 }
+// ── Adicionar em atb-routes.js, dentro de registerAtbRoutes ──────────────
+
+// Serve o formulário do prescritor (sem auth — CRM é a "autenticação")
+app.get('/atb/form', (req, res) => {
+  const inst = req.query.inst || 'HUSF';
+  // Lê o HTML e injeta a instituição
+  import('fs').then(fs => {
+    import('path').then(path => {
+      const filePath = path.join(process.cwd(), 'atb-form.html');
+      let html = fs.readFileSync(filePath, 'utf8');
+      html = html.replace(
+        "window.ATB_INSTITUICAO || 'HUSF'",
+        `'${inst.replace(/'/g,'')}'`
+      );
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
+    });
+  });
+});
+
+// API: valida CRM contra atb_medicos
+app.get('/atb/api/validar-crm', async (req, res) => {
+  const { crm, instituicao } = req.query;
+  if (!crm) return res.status(400).json({ erro: 'CRM obrigatório' });
+  try {
+    const { rows } = await pool.query(`
+      SELECT m.nome, m.especialidade
+      FROM atb_medicos m
+      JOIN atb_instituicoes i ON i.id = m.instituicao_id
+      WHERE m.crm = $1
+        AND (i.sigla = $2 OR $2 IS NULL)
+        AND m.ativo = true
+      LIMIT 1
+    `, [crm.trim(), instituicao || null]);
+
+    if (rows[0]) {
+      res.json({ encontrado: true, nome: rows[0].nome, especialidade: rows[0].especialidade });
+    } else {
+      res.json({ encontrado: false });
+    }
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  }
+});
+
+// API: recebe submissão do formulário próprio
+app.post('/atb/api/fichas', async (req, res) => {
+  try {
+    const d = req.body;
+    if (!d.pac_nome || !d.prontuario || !d.crm) {
+      return res.status(400).json({ error: 'Campos obrigatórios em falta' });
+    }
+
+    // Converte o payload do React para o formato do nosso banco
+    const { parseFormPayload } = await import('./atb-parser.js');
+    const parsed = parseFormPayload(d);
+
+    // Normaliza nome via Claude (assíncrono, não bloqueia a resposta)
+    const { rodarTriagemIA } = await import('./atb-sync.js');
+
+    // Busca instituição
+    const inst = d.instituicao || 'HUSF';
+    const { rows: [instRow] } = await pool.query(
+      'SELECT id FROM atb_instituicoes WHERE sigla = $1', [inst]
+    );
+
+    // Gera um ID único para submissões do formulário próprio
+    const submissionId = `form_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+
+    const { rows: [ficha] } = await pool.query(`
+      INSERT INTO atb_fichas (
+        instituicao_id, jotform_submission_id, jotform_created_at,
+        paciente_nome, paciente_nome_raw, paciente_dn, paciente_idade,
+        prontuario, atendimento, setor, leito, equipe_responsavel,
+        data_internacao, data_admissao_uti, tipo_terapia, historia_clinica,
+        cirurgia, foco_infeccao, sepse, gestante, lactante, comorbidades,
+        uso_atb_7d, atb_previos, culturas_colhidas, culturas_previas,
+        dispositivos_invasivos, dialise, acesso_dialise, data_insercao_cateter,
+        sitio_cvc, sitio_cdl, sitio_pai, peso_nascimento, acesso_vascular_neo,
+        insuficiencia_renal, clcr, peso, altura, faz_quimio, cateter_quimio,
+        acesso_quimio, classificacao_fratura, atb_solicitado, posologia,
+        tempo_previsto, oxacilina_associacao, crm, prescritor_nome,
+        sofa, sofa_renal, payload_raw, status
+      ) VALUES (
+        $1,$2,now(),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+        $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
+        $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,
+        $44,$45,$46,$47,$48,$49,$50,$51,'pendente'
+      ) RETURNING id
+    `, [
+      instRow?.id, submissionId,
+      parsed.paciente_nome, parsed.paciente_nome_raw, parsed.paciente_dn,
+      parsed.paciente_idade, parsed.prontuario, parsed.atendimento,
+      parsed.setor, parsed.leito, parsed.equipe_responsavel,
+      parsed.data_internacao, parsed.data_admissao_uti, parsed.tipo_terapia,
+      parsed.historia_clinica, parsed.cirurgia, parsed.foco_infeccao,
+      parsed.sepse, parsed.gestante, parsed.lactante,
+      JSON.stringify(parsed.comorbidades), parsed.uso_atb_7d,
+      JSON.stringify(parsed.atb_previos), JSON.stringify(parsed.culturas_colhidas),
+      JSON.stringify(parsed.culturas_previas), JSON.stringify(parsed.dispositivos_invasivos),
+      parsed.dialise, parsed.acesso_dialise, parsed.data_insercao_cateter,
+      JSON.stringify(parsed.sitio_cvc), JSON.stringify(parsed.sitio_cdl),
+      JSON.stringify(parsed.sitio_pai), parsed.peso_nascimento,
+      JSON.stringify(parsed.acesso_vascular_neo), JSON.stringify(parsed.insuficiencia_renal),
+      parsed.clcr, parsed.peso, parsed.altura, parsed.faz_quimio,
+      parsed.cateter_quimio, parsed.acesso_quimio, parsed.classificacao_fratura,
+      JSON.stringify(parsed.atb_solicitado), JSON.stringify(parsed.posologia),
+      parsed.tempo_previsto, parsed.oxacilina_associacao,
+      parsed.crm, parsed.prescritor_nome, parsed.sofa, parsed.sofa_renal,
+      JSON.stringify(d),
+    ]);
+
+    // Triagem IA assíncrona
+    rodarTriagemIA(parsed).then(async triagem => {
+      if (!triagem) return;
+      await pool.query(`
+        INSERT INTO atb_avaliacoes (ficha_id, triagem_ia, triagem_ia_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (ficha_id) DO UPDATE SET triagem_ia=$2, triagem_ia_at=now()
+      `, [ficha.id, JSON.stringify(triagem)]);
+    }).catch(() => {});
+
+    res.json({ ok: true, id: ficha.id });
+  } catch (e) {
+    console.error('[atb] POST /fichas error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});

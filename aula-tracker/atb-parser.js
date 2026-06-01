@@ -12,10 +12,15 @@ const toBool = (v) => {
   return null;
 };
 
+// toDate — adicionar tratamento do objeto litemode do JotForm
 const toDate = (v) => {
   if (!v) return null;
+  // JotForm liteMode datetime retorna objeto {litemode: "dd-mm-yyyy"}
+  if (typeof v === 'object' && !Array.isArray(v)) {
+    return toDate(v.litemode || v.day && `${v.day}-${v.month}-${v.year}` || null);
+  }
   const s = String(v).trim();
-  if (!s || s === '{}') return null;
+  if (!s || s === '{}' || s === '[object Object]') return null;
   const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
   const dmyt = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);

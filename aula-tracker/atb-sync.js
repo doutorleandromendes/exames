@@ -93,9 +93,19 @@ export async function rodarTriagemIA(ficha) {
     });
 
     const data  = await res.json();
-    const text  = data?.content?.[0]?.text?.trim();
-    const clean = text?.replace(/```json|```/g, '').trim();
-    return JSON.parse(clean);
+
+// Se a API retornou erro, loga e retorna null
+if (data.type === 'error' || !data.content) {
+  console.warn('[atb] triagem IA: resposta inesperada da API:',
+    JSON.stringify(data).slice(0, 200));
+  return null;
+}
+
+const text  = data.content[0]?.text?.trim();
+if (!text) return null;
+
+const clean = text.replace(/```json|```/g, '').trim();
+return JSON.parse(clean);
   } catch (e) {
     console.warn('[atb] triagem IA falhou:', e.message);
     return null;

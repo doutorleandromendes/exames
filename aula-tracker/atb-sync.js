@@ -3,17 +3,21 @@
 
 import { parseAnswers, parseWebhookRaw } from './atb-parser.js';
 
-const JOTFORM_API  = 'https://api.jotform.com';
+const JOTFORM_API   = 'https://api.jotform.com';
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 
 // ── Normalização de nome via Claude ───────────────────────────────────────
 
 async function normalizarNome(nomeRaw) {
-  if (!nomeRaw?.trim()) return nomeRaw;
+  if (!nomeRaw?.trim()) return nomeRaw || null;
   try {
     const res = await fetch(ANTHROPIC_API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type':    'application/json',
+        'x-api-key':       process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 60,
@@ -22,9 +26,9 @@ async function normalizarNome(nomeRaw) {
           content:
             `Corrija este nome de paciente hospitalar: remova sobrenomes duplicados, ` +
             `abreviações incorretas e espaços extras. Retorne APENAS o nome corrigido ` +
-            `em letras maiúsculas, sem pontuação extra.\n\nNome: "${nomeRaw.trim()}"`
-        }]
-      })
+            `em letras maiúsculas, sem pontuação extra.\n\nNome: "${nomeRaw.trim()}"`,
+        }],
+      }),
     });
     const data = await res.json();
     const normalizado = data?.content?.[0]?.text?.trim();
@@ -40,33 +44,33 @@ async function normalizarNome(nomeRaw) {
 export async function rodarTriagemIA(ficha) {
   try {
     const contexto = JSON.stringify({
-      setor: ficha.setor,
-      data_internacao: ficha.data_internacao,
-      data_admissao_uti: ficha.data_admissao_uti,
-      tipo_terapia: ficha.tipo_terapia,
-      historia_clinica: ficha.historia_clinica,
-      foco_infeccao: ficha.foco_infeccao,
-      sepse: ficha.sepse,
+      setor:                  ficha.setor,
+      data_internacao:        ficha.data_internacao,
+      data_admissao_uti:      ficha.data_admissao_uti,
+      tipo_terapia:           ficha.tipo_terapia,
+      historia_clinica:       ficha.historia_clinica,
+      foco_infeccao:          ficha.foco_infeccao,
+      sepse:                  ficha.sepse,
       dispositivos_invasivos: ficha.dispositivos_invasivos,
-      data_insercao_cateter: ficha.data_insercao_cateter,
-      culturas_colhidas: ficha.culturas_colhidas,
-      culturas_previas: ficha.culturas_previas,
-      atb_solicitado: ficha.atb_solicitado,
-      posologia: ficha.posologia,
-      tempo_previsto: ficha.tempo_previsto,
-      sofa: ficha.sofa,
-      insuficiencia_renal: ficha.insuficiencia_renal,
-      clcr: ficha.clcr,
-      peso: ficha.peso,
-      comorbidades: ficha.comorbidades,
+      data_insercao_cateter:  ficha.data_insercao_cateter,
+      culturas_colhidas:      ficha.culturas_colhidas,
+      culturas_previas:       ficha.culturas_previas,
+      atb_solicitado:         ficha.atb_solicitado,
+      posologia:              ficha.posologia,
+      tempo_previsto:         ficha.tempo_previsto,
+      sofa:                   ficha.sofa,
+      insuficiencia_renal:    ficha.insuficiencia_renal,
+      clcr:                   ficha.clcr,
+      peso:                   ficha.peso,
+      comorbidades:           ficha.comorbidades,
     }, null, 2);
 
     const res = await fetch(ANTHROPIC_API, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
+        'Content-Type':    'application/json',
+        'x-api-key':       process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -83,14 +87,13 @@ export async function rodarTriagemIA(ficha) {
             `  "adequacao_atb": "adequado" | "rever_espectro" | "rever_dose" | "rever_indicacao" | "inconclusivo",\n` +
             `  "alertas": ["string", ...] ou [],\n` +
             `  "sugestao_de_escalacao": "string ou null"\n` +
-            `}\n\n` +
-            `Dados da ficha:\n${contexto}`
-        }]
-      })
+            `}\n\nDados da ficha:\n${contexto}`,
+        }],
+      }),
     });
 
-    const data = await res.json();
-    const text = data?.content?.[0]?.text?.trim();
+    const data  = await res.json();
+    const text  = data?.content?.[0]?.text?.trim();
     const clean = text?.replace(/```json|```/g, '').trim();
     return JSON.parse(clean);
   } catch (e) {
@@ -101,10 +104,9 @@ export async function rodarTriagemIA(ficha) {
 
 // ── Inserção/atualização de ficha no banco ────────────────────────────────
 
-async function upsertFicha(pool, submissionId, parsed, instituicaoId, payload_raw, criadaEm) {
+async function upsertFicha(pool, submissionId, parsed, instituicaoId, payloadRaw, criadaEm) {
   const nomeFinal = await normalizarNome(parsed.paciente_nome_raw);
-
-  const p = parsed; // alias curto
+  const p = parsed;
 
   const result = await pool.query(`
     INSERT INTO atb_fichas (
@@ -147,65 +149,92 @@ async function upsertFicha(pool, submissionId, parsed, instituicaoId, payload_ra
       updated_at                  = now()
     RETURNING id, (xmax = 0) AS inserted
   `, [
-    instituicaoId, submissionId, criadaEm,
-    nomeFinal, p.paciente_nome_raw, p.paciente_dn, p.paciente_idade,
-    p.prontuario, p.atendimento,
-    p.setor, p.leito, p.equipe_responsavel, p.data_internacao, p.data_admissao_uti,
-    p.tipo_terapia, p.historia_clinica, p.cirurgia, p.foco_infeccao,
-    p.sepse, p.gestante, p.lactante,
-    JSON.stringify(p.comorbidades || []),
+    instituicaoId,
+    submissionId,
+    criadaEm,
+    nomeFinal,
+    p.paciente_nome_raw,
+    p.paciente_dn,
+    p.paciente_idade,
+    p.prontuario,
+    p.atendimento,
+    p.setor,
+    p.leito,
+    p.equipe_responsavel,
+    p.data_internacao,
+    p.data_admissao_uti,
+    p.tipo_terapia,
+    p.historia_clinica,
+    p.cirurgia,
+    p.foco_infeccao,
+    p.sepse,
+    p.gestante,
+    p.lactante,
+    JSON.stringify(p.comorbidades       || []),
     p.uso_atb_7d,
-    JSON.stringify(p.atb_previos || []),
-    JSON.stringify(p.culturas_colhidas || {}),
-    JSON.stringify(p.culturas_previas || []),
+    JSON.stringify(p.atb_previos        || []),
+    JSON.stringify(p.culturas_colhidas  || {}),
+    JSON.stringify(p.culturas_previas   || []),
     JSON.stringify(p.dispositivos_invasivos || []),
-    p.dialise, p.acesso_dialise, p.data_insercao_cateter,
-    JSON.stringify(p.sitio_cvc || []),
-    JSON.stringify(p.sitio_cdl || []),
-    JSON.stringify(p.sitio_pai || []),
+    p.dialise,
+    p.acesso_dialise,
+    p.data_insercao_cateter,
+    JSON.stringify(p.sitio_cvc          || []),
+    JSON.stringify(p.sitio_cdl          || []),
+    JSON.stringify(p.sitio_pai          || []),
     p.peso_nascimento,
     JSON.stringify(p.acesso_vascular_neo || []),
     JSON.stringify(p.insuficiencia_renal || []),
-    p.clcr, p.peso, p.altura,
-    p.faz_quimio, p.cateter_quimio, p.acesso_quimio, p.classificacao_fratura,
-    JSON.stringify(p.atb_solicitado || []),
-    JSON.stringify(p.posologia || []),
-    p.tempo_previsto, p.oxacilina_associacao,
-    p.crm, p.prescritor_nome, p.sofa, p.sofa_renal,
-    JSON.stringify(p.recomendacao_scih || []),
-    p.recomendacoes_especificacao, p.recomendacoes_adicionais,
-    p.ha_esquema_sugerido, p.avaliador, p.complemento_scih,
-    JSON.stringify(p.parecer_evolutivo || []),
-    p.obito || false, p.data_obito,
-    p.link_exames, p.link_labs,
-    JSON.stringify(payload_raw),
+    p.clcr,
+    p.peso,
+    p.altura,
+    p.faz_quimio,
+    p.cateter_quimio,
+    p.acesso_quimio,
+    p.classificacao_fratura,
+    JSON.stringify(p.atb_solicitado     || []),
+    JSON.stringify(p.posologia          || []),
+    p.tempo_previsto,
+    p.oxacilina_associacao,
+    p.crm,
+    p.prescritor_nome,
+    p.sofa,
+    p.sofa_renal,
+    JSON.stringify(p.recomendacao_scih  || []),
+    p.recomendacoes_especificacao,
+    p.recomendacoes_adicionais,
+    p.ha_esquema_sugerido,
+    p.avaliador,
+    p.complemento_scih,
+    JSON.stringify(p.parecer_evolutivo  || []),
+    p.obito || false,
+    p.data_obito,
+    p.link_exames,
+    p.link_labs,
+    JSON.stringify(payloadRaw),
   ]);
 
-  // Retorna { id, inserted } ou null se nenhuma linha foi retornada
   return result.rows[0] || null;
 }
-
 
 // ── Webhook handler ───────────────────────────────────────────────────────
 
 export function handleWebhook(pool) {
   return async (req, res) => {
-    res.status(200).end(); // JotForm exige resposta imediata
+    res.status(200).end();
 
     try {
-      const body = req.body || {};
+      const body        = req.body || {};
       const submissionId = body.submissionID || body.submission_id;
       const formId       = body.formID       || body.form_id;
       if (!submissionId || !formId) return;
 
-      // Identifica instituição pelo form ID
       const { rows: [inst] } = await pool.query(
         'SELECT id FROM atb_instituicoes WHERE jotform_form_id = $1', [String(formId)]
       );
       const instituicaoId = inst?.id || null;
 
-      // Parseia o rawRequest
-      const raw = body.rawRequest || body;
+      const raw     = body.rawRequest || body;
       const answers = parseWebhookRaw(raw);
       if (!answers) return;
 
@@ -213,17 +242,16 @@ export function handleWebhook(pool) {
       const criadaEm = body.created_at ? new Date(body.created_at) : new Date();
       const fichaRow = await upsertFicha(pool, submissionId, parsed, instituicaoId, raw, criadaEm);
 
-      // Triagem IA assíncrona (não bloqueia o webhook)
       if (fichaRow?.inserted) {
         rodarTriagemIA(parsed).then(async (triagem) => {
           if (!triagem) return;
           await pool.query(`
             INSERT INTO atb_avaliacoes (ficha_id, triagem_ia, triagem_ia_at)
-            VALUES ($1, $2, now())
+            VALUES ($1,$2,now())
             ON CONFLICT (ficha_id) DO UPDATE
-              SET triagem_ia = EXCLUDED.triagem_ia, triagem_ia_at = now()
+              SET triagem_ia=$2, triagem_ia_at=now()
           `, [fichaRow.id, JSON.stringify(triagem)]);
-        }).catch(e => console.error('[atb] triagem async error:', e.message));
+        }).catch(e => console.error('[atb] triagem webhook error:', e.message));
       }
 
       await pool.query(
@@ -233,7 +261,7 @@ export function handleWebhook(pool) {
       );
     } catch (e) {
       console.error('[atb] webhook error:', e.message);
-      await pool.query(
+      pool.query(
         `INSERT INTO atb_sync_log (tipo, submission_id, status, detalhes)
          VALUES ('webhook',null,'erro',$1)`,
         [JSON.stringify({ error: e.message })]
@@ -248,15 +276,20 @@ async function pollInstituicao(pool, inst) {
   const apiKey = process.env.JOTFORM_API_KEY;
   if (!apiKey || !inst.jotform_form_id) return;
 
-  // Busca submissões das últimas 24h (polling tem overlap intencional)
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0,19).replace('T',' ');
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    .toISOString().slice(0,19).replace('T',' ');
+
   const url = `${JOTFORM_API}/form/${inst.jotform_form_id}/submissions` +
     `?apiKey=${apiKey}&limit=100&orderby=created_at&direction=DESC` +
     `&filter=${encodeURIComponent(JSON.stringify({ 'created_at:gt': since }))}`;
 
   const res  = await fetch(url);
   const data = await res.json();
-  if (data.responseCode !== 200 || !Array.isArray(data.content)) return;
+
+  if (data.responseCode !== 200 || !Array.isArray(data.content)) {
+    console.warn('[atb] poll API error:', data.responseCode, data.message);
+    return;
+  }
 
   let novas = 0;
   for (const sub of data.content) {
@@ -264,32 +297,36 @@ async function pollInstituicao(pool, inst) {
       const parsed   = parseAnswers(sub.answers || {}, inst.jotform_form_id);
       const criadaEm = sub.created_at ? new Date(sub.created_at) : new Date();
       const fichaRow = await upsertFicha(pool, sub.id, parsed, inst.id, sub, criadaEm);
+
       if (fichaRow?.inserted) {
         novas++;
         rodarTriagemIA(parsed).then(async (triagem) => {
           if (!triagem) return;
           await pool.query(`
             INSERT INTO atb_avaliacoes (ficha_id, triagem_ia, triagem_ia_at)
-            VALUES ($1, $2, now())
+            VALUES ($1,$2,now())
             ON CONFLICT (ficha_id) DO UPDATE
-              SET triagem_ia = EXCLUDED.triagem_ia, triagem_ia_at = now()
+              SET triagem_ia=$2, triagem_ia_at=now()
           `, [fichaRow.id, JSON.stringify(triagem)]);
-        }).catch(() => {});
+        }).catch(e => console.error('[atb] triagem poll error:', e.message));
       }
     } catch (e) {
-      console.error(`[atb] poll sub ${sub.id} error:`, e.message);
+      console.error(`[atb] poll sub ${sub.id} error:`, e.message, e.stack);
     }
   }
-  if (novas > 0) console.log(`[atb] poll ${inst.sigla}: ${novas} novas fichas`);
+
+  if (novas > 0 || data.content.length > 0) {
+    console.log(`[atb] poll ${inst.sigla}: ${data.content.length} encontradas, ${novas} novas`);
+  }
 }
 
 export async function iniciarPolling(pool) {
-  const INTERVALO_MS = 10 * 60 * 1000; // 10 minutos
+  const INTERVALO_MS = 10 * 60 * 1000;
 
   const poll = async () => {
     try {
       const { rows: insts } = await pool.query(
-        'SELECT id, sigla, jotform_form_id FROM atb_instituicoes WHERE ativo = true AND jotform_form_id IS NOT NULL'
+        'SELECT id, sigla, jotform_form_id FROM atb_instituicoes WHERE ativo=true AND jotform_form_id IS NOT NULL'
       );
       await Promise.all(insts.map(inst => pollInstituicao(pool, inst)));
     } catch (e) {
@@ -297,7 +334,7 @@ export async function iniciarPolling(pool) {
     }
   };
 
-  await poll(); // roda imediatamente no startup
+  await poll();
   setInterval(poll, INTERVALO_MS);
-  console.log(`[atb] polling ativo (intervalo: ${INTERVALO_MS/60000} min)`);
+  console.log(`[atb] polling ativo (intervalo: ${INTERVALO_MS / 60000} min)`);
 }

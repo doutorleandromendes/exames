@@ -102,31 +102,18 @@ export async function rodarTriagemIA(ficha) {
 // ── Inserção/atualização de ficha no banco ────────────────────────────────
 
 async function upsertFicha(pool, submissionId, parsed, instituicaoId, payload_raw, criadaEm) {
-  // Normaliza nome (Claude)
   const nomeFinal = await normalizarNome(parsed.paciente_nome_raw);
 
-  const {
-    paciente_nome_raw, paciente_dn, paciente_idade, prontuario, atendimento,
-    setor, leito, equipe_responsavel, data_internacao, data_admissao_uti,
-    tipo_terapia, historia_clinica, cirurgia, foco_infeccao, sepse, gestante, lactante,
-    comorbidades, uso_atb_7d, atb_previos, culturas_colhidas, culturas_previas,
-    dispositivos_invasivos, dialise, acesso_dialise, data_insercao_cateter,
-    sitio_cvc, sitio_cdl, sitio_pai, peso_nascimento, acesso_vascular_neo,
-    insuficiencia_renal, clcr, peso, altura,
-    faz_quimio, cateter_quimio, acesso_quimio, classificacao_fratura,
-    atb_solicitado, posologia, tempo_previsto, oxacilina_associacao,
-    crm, prescritor_nome, sofa, sofa_renal,
-    recomendacao_scih, recomendacoes_especificacao, recomendacoes_adicionais,
-    ha_esquema_sugerido, avaliador, complemento_scih, parecer_evolutivo,
-    obito, data_obito, link_exames, link_labs,
-  } = parsed;
+  const p = parsed; // alias curto
 
-  const { rows: [row] } = await pool.query(`
+  const result = await pool.query(`
     INSERT INTO atb_fichas (
       instituicao_id, jotform_submission_id, jotform_created_at,
-      paciente_nome, paciente_nome_raw, paciente_dn, paciente_idade, prontuario, atendimento,
+      paciente_nome, paciente_nome_raw, paciente_dn, paciente_idade,
+      prontuario, atendimento,
       setor, leito, equipe_responsavel, data_internacao, data_admissao_uti,
-      tipo_terapia, historia_clinica, cirurgia, foco_infeccao, sepse, gestante, lactante,
+      tipo_terapia, historia_clinica, cirurgia, foco_infeccao,
+      sepse, gestante, lactante,
       comorbidades, uso_atb_7d, atb_previos, culturas_colhidas, culturas_previas,
       dispositivos_invasivos, dialise, acesso_dialise, data_insercao_cateter,
       sitio_cvc, sitio_cdl, sitio_pai, peso_nascimento, acesso_vascular_neo,
@@ -144,42 +131,60 @@ async function upsertFicha(pool, submissionId, parsed, instituicaoId, payload_ra
       $57,$58,$59,$60,$61,$62,$63,now()
     )
     ON CONFLICT (jotform_submission_id) DO UPDATE SET
-      paciente_nome             = EXCLUDED.paciente_nome,
-      paciente_nome_raw         = EXCLUDED.paciente_nome_raw,
-      recomendacao_scih         = EXCLUDED.recomendacao_scih,
+      paciente_nome               = EXCLUDED.paciente_nome,
+      paciente_nome_raw           = EXCLUDED.paciente_nome_raw,
+      recomendacao_scih           = EXCLUDED.recomendacao_scih,
       recomendacoes_especificacao = EXCLUDED.recomendacoes_especificacao,
-      recomendacoes_adicionais  = EXCLUDED.recomendacoes_adicionais,
-      ha_esquema_sugerido       = EXCLUDED.ha_esquema_sugerido,
-      avaliador                 = EXCLUDED.avaliador,
-      complemento_scih          = EXCLUDED.complemento_scih,
-      parecer_evolutivo         = EXCLUDED.parecer_evolutivo,
-      obito                     = EXCLUDED.obito,
-      data_obito                = EXCLUDED.data_obito,
-      payload_raw               = EXCLUDED.payload_raw,
-      synced_at                 = now(),
-      updated_at                = now()
+      recomendacoes_adicionais    = EXCLUDED.recomendacoes_adicionais,
+      ha_esquema_sugerido         = EXCLUDED.ha_esquema_sugerido,
+      avaliador                   = EXCLUDED.avaliador,
+      complemento_scih            = EXCLUDED.complemento_scih,
+      parecer_evolutivo           = EXCLUDED.parecer_evolutivo,
+      obito                       = EXCLUDED.obito,
+      data_obito                  = EXCLUDED.data_obito,
+      payload_raw                 = EXCLUDED.payload_raw,
+      synced_at                   = now(),
+      updated_at                  = now()
     RETURNING id, (xmax = 0) AS inserted
   `, [
     instituicaoId, submissionId, criadaEm,
-    nomeFinal, paciente_nome_raw, paciente_dn, paciente_idade, prontuario, atendimento,
-    setor, leito, equipe_responsavel, data_internacao, data_admissao_uti,
-    tipo_terapia, historia_clinica, cirurgia, foco_infeccao, sepse, gestante, lactante,
-    JSON.stringify(comorbidades), uso_atb_7d, JSON.stringify(atb_previos),
-    JSON.stringify(culturas_colhidas), JSON.stringify(culturas_previas),
-    JSON.stringify(dispositivos_invasivos), dialise, acesso_dialise, data_insercao_cateter,
-    JSON.stringify(sitio_cvc), JSON.stringify(sitio_cdl), JSON.stringify(sitio_pai),
-    peso_nascimento, JSON.stringify(acesso_vascular_neo),
-    JSON.stringify(insuficiencia_renal), clcr, peso, altura,
-    faz_quimio, cateter_quimio, acesso_quimio, classificacao_fratura,
-    JSON.stringify(atb_solicitado), JSON.stringify(posologia), tempo_previsto, oxacilina_associacao,
-    crm, prescritor_nome, sofa, sofa_renal,
-    JSON.stringify(recomendacao_scih), recomendacoes_especificacao, recomendacoes_adicionais,
-    ha_esquema_sugerido, avaliador, complemento_scih, JSON.stringify(parecer_evolutivo),
-    obito, data_obito, link_exames, link_labs, JSON.stringify(payload_raw),
+    nomeFinal, p.paciente_nome_raw, p.paciente_dn, p.paciente_idade,
+    p.prontuario, p.atendimento,
+    p.setor, p.leito, p.equipe_responsavel, p.data_internacao, p.data_admissao_uti,
+    p.tipo_terapia, p.historia_clinica, p.cirurgia, p.foco_infeccao,
+    p.sepse, p.gestante, p.lactante,
+    JSON.stringify(p.comorbidades || []),
+    p.uso_atb_7d,
+    JSON.stringify(p.atb_previos || []),
+    JSON.stringify(p.culturas_colhidas || {}),
+    JSON.stringify(p.culturas_previas || []),
+    JSON.stringify(p.dispositivos_invasivos || []),
+    p.dialise, p.acesso_dialise, p.data_insercao_cateter,
+    JSON.stringify(p.sitio_cvc || []),
+    JSON.stringify(p.sitio_cdl || []),
+    JSON.stringify(p.sitio_pai || []),
+    p.peso_nascimento,
+    JSON.stringify(p.acesso_vascular_neo || []),
+    JSON.stringify(p.insuficiencia_renal || []),
+    p.clcr, p.peso, p.altura,
+    p.faz_quimio, p.cateter_quimio, p.acesso_quimio, p.classificacao_fratura,
+    JSON.stringify(p.atb_solicitado || []),
+    JSON.stringify(p.posologia || []),
+    p.tempo_previsto, p.oxacilina_associacao,
+    p.crm, p.prescritor_nome, p.sofa, p.sofa_renal,
+    JSON.stringify(p.recomendacao_scih || []),
+    p.recomendacoes_especificacao, p.recomendacoes_adicionais,
+    p.ha_esquema_sugerido, p.avaliador, p.complemento_scih,
+    JSON.stringify(p.parecer_evolutivo || []),
+    p.obito || false, p.data_obito,
+    p.link_exames, p.link_labs,
+    JSON.stringify(payload_raw),
   ]);
 
-  return row;
+  // Retorna { id, inserted } ou null se nenhuma linha foi retornada
+  return result.rows[0] || null;
 }
+
 
 // ── Webhook handler ───────────────────────────────────────────────────────
 

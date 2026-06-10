@@ -1364,7 +1364,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         [exam_name, sample_type, method, result_value, reference_value, observation, result_color, id]
       );
 
-      const { rows: [r] } = await pool.query(
+     const { rows: [r] } = await pool.query(
         'SELECT collection_id FROM lab_results WHERE id=$1', [id]
       );
       const isAjax = req.headers['x-requested-with'] === 'XMLHttpRequest';

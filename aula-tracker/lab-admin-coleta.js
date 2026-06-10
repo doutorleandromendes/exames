@@ -19,6 +19,7 @@
     'REAGENTE',
     'FRACAMENTE REAGENTE',
     'INDETERMINADO',
+    'EM ANDAMENTO',
   ];
 
   // Exames que usam textarea livre diretamente (sem dropdown)

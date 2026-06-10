@@ -664,6 +664,10 @@ function buildResultField(type) {
     if (refInput)    refInput.value    = data.reference_value || '';
     if (methodInput) methodInput.value = data.method          || '';
     if (obsInput)    obsInput.value    = data.observation     || '';
+    // 4b. Cor semântica
+    if (typeof setResultColor === 'function') {
+      setResultColor(data.result_color || 'auto');
+    }
 
     // 5. Muda formulário para modo edição
     form.action = '/lab/admin/resultados/' + editResultId + '/edit';

@@ -81,5 +81,9 @@ export async function runLabMigrations(pool) {
       ON lab_result_images(result_id, sort_index NULLS LAST, id)
   `);
 
+  await pool.query(`
+    ALTER TABLE lab_results ADD COLUMN IF NOT EXISTS result_color TEXT DEFAULT 'auto'
+  `);
+
   console.log('[lab-db] migrations OK');
 }

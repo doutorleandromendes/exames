@@ -511,6 +511,7 @@ function buildResultField(type) {
         return;
       }
     } catch (err) {
+      console.error('Submit error:', err);
       alert('Erro de conexão ao adicionar exame.'); return;
     }
 

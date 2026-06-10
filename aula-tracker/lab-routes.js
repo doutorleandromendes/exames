@@ -962,6 +962,28 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
               <label>Resultado</label>
               <div id="result-container"></div>
+              <div style="margin-top:8px">
+                <label style="margin-bottom:6px">Cor semântica</label>
+                <div style="display:flex;gap:6px">
+                  <button type="button" id="color-btn-auto"     onclick="setResultColor('auto')"
+                    style="padding:4px 12px;border-radius:20px;border:1px solid #2a2f39;background:#20242b;color:#a7adbb;font-size:12px;cursor:pointer;opacity:1">
+                    Auto
+                  </button>
+                  <button type="button" id="color-btn-negativo" onclick="setResultColor('negativo')"
+                    style="padding:4px 12px;border-radius:20px;border:1px solid #1a7a4a;background:#20242b;color:#3fb950;font-size:12px;cursor:pointer;opacity:0.4">
+                    ● Negativo
+                  </button>
+                  <button type="button" id="color-btn-neutro"   onclick="setResultColor('neutro')"
+                    style="padding:4px 12px;border-radius:20px;border:1px solid #555;background:#20242b;color:#888;font-size:12px;cursor:pointer;opacity:0.4">
+                    ● Neutro
+                  </button>
+                  <button type="button" id="color-btn-positivo" onclick="setResultColor('positivo')"
+                    style="padding:4px 12px;border-radius:20px;border:1px solid #b03030;background:#20242b;color:#f47067;font-size:12px;cursor:pointer;opacity:0.4">
+                    ● Positivo
+                  </button>
+                </div>
+                <input type="hidden" name="result_color" id="result_color_input" value="auto">
+              </div>
               
               <label>Observação (opcional)</label>
               <input name="observation" placeholder="Ex.: Teste realizado com baixo volume de soro">
@@ -1006,6 +1028,16 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         if (confirm('Remover esta imagem?')) {
           document.getElementById('img-del-' + imgId).submit();
         }
+      }
+
+      function setResultColor(color) {
+        var input = document.getElementById('result_color_input');
+        if (input) input.value = color;
+        var ids = ['auto', 'negativo', 'neutro', 'positivo'];
+        ids.forEach(function(c) {
+          var btn = document.getElementById('color-btn-' + c);
+          if (btn) btn.style.opacity = c === color ? '1' : '0.4';
+        });
       }
 
       async function loadImgList(resultId) {
@@ -1108,6 +1140,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       const result_value    = String(req.body?.result_value    || '').trim();
       const reference_value = String(req.body?.reference_value || '').trim() || null;
       const observation     = String(req.body?.observation     || '').trim() || null;
+      const result_color = String(req.body?.result_color || 'auto').trim();
 
       if (!exam_name || !method || !result_value) {
         return res.status(400).json({ error: 'Nome do exame, método e resultado são obrigatórios' });
@@ -1119,10 +1152,10 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       );
       const { rows: [newResult] } = await pool.query(
         `INSERT INTO lab_results
-           (collection_id, exam_name, sample_type, method, result_value, reference_value, observation, sort_index)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+           (collection_id, exam_name, sample_type, method, result_value, reference_value, observation, sort_index, result_color)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
         [collection_id, exam_name, sample_type, method, result_value,
-         reference_value, observation, parseInt(max_sort, 10) + 10]
+         reference_value, observation, parseInt(max_sort, 10) + 10, result_color]
       );
 
       // Suporta tanto AJAX (retorna JSON) quanto submit nativo (redireciona)
@@ -1317,6 +1350,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       const result_value    = String(req.body?.result_value    || '').trim();
       const reference_value = String(req.body?.reference_value || '').trim() || null;
       const observation     = String(req.body?.observation     || '').trim() || null;
+      const result_color = String(req.body?.result_color || 'auto').trim();
 
       if (!exam_name || !method || !result_value) {
         return res.status(400).send('Campos obrigatórios em falta');
@@ -1325,9 +1359,9 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       await pool.query(
         `UPDATE lab_results
          SET exam_name=$1, sample_type=$2, method=$3, result_value=$4,
-             reference_value=$5, observation=$6
-         WHERE id=$7`,
-        [exam_name, sample_type, method, result_value, reference_value, observation, id]
+             reference_value=$5, observation=$6, result_color=$7
+         WHERE id=$8`,
+        [exam_name, sample_type, method, result_value, reference_value, observation, result_color, id]
       );
 
       const { rows: [r] } = await pool.query(
@@ -1497,12 +1531,13 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         SELECT lc.id, lc.collected_at,
                COALESCE(
                  json_agg(
-                   json_build_object(
-                     'id',           lr.id,
-                     'exam_name',    lr.exam_name,
-                     'result_value', lr.result_value,
-                     'sample_type',  lr.sample_type
-                   ) ORDER BY lr.sort_index NULLS LAST, lr.id
+json_build_object(
+  'id',           lr.id,
+  'exam_name',    lr.exam_name,
+  'result_value', lr.result_value,
+  'result_color', lr.result_color,
+  'sample_type',  lr.sample_type
+) ORDER BY lr.sort_index NULLS LAST, lr.id
                  ) FILTER (WHERE lr.id IS NOT NULL),
                  '[]'
                ) AS results
@@ -1513,7 +1548,10 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         ORDER BY lc.collected_at DESC
       `, [patient.id]);
 
-      function resultClass(val) {
+      function resultClass(val, storedColor) {
+        if (storedColor === 'positivo') return 'tag-pos';
+        if (storedColor === 'negativo') return 'tag-neg';
+        if (storedColor === 'neutro')   return '';
         const v = (val || '').toUpperCase();
         if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v)) return 'tag-neg';
         if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))          return 'tag-pos';
@@ -1539,7 +1577,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             <td style="padding:10px 12px">${safe(r.exam_name)}</td>
             <td style="padding:10px 12px;font-size:11px;color:#888">${safe(r.sample_type)}</td>
             <td style="padding:10px 12px">
-              <span class="${resultClass(r.result_value)}" style="font-size:13px">
+              <span class="${resultClass(r.result_value, r.result_color)}" style="font-size:13px">
                 ${renderText((r.result_value || '').split('\n')[0])}
               </span>
             </td>

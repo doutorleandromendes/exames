@@ -39,11 +39,14 @@ function toBR(dateStr) {
 }
 
 // Determina a cor do resultado com base no valor
-function resultColor(value) {
+function resultColor(value, storedColor) {
+  if (storedColor === 'positivo') return '#b03030';
+  if (storedColor === 'negativo') return '#1a7a4a';
+  if (storedColor === 'neutro')   return '#888888';
   const v = (value || '').toUpperCase();
-  if (/EM\s+ANDAMENTO/.test(v))                              return '#888888';
+  if (/EM\s+ANDAMENTO/.test(v))                                   return '#888888';
   if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v)) return '#1a7a4a';
-  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))      return '#b03030';
+  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))          return '#b03030';
   return '#1a1a1a';
 }
 
@@ -119,7 +122,7 @@ export function buildPdfHtml({ patient, collection, results }) {
         </div>
         <div class="res-block">
           <div class="res-label">Resultado</div>
-          <div class="res-text" style="color:${resultColor(mainValue)}">${formatResultText(mainValue)}</div>
+          <div class="res-text" style="color:${resultColor(r.result_value, r.result_color)}">${formatResultText(r.result_value)}</div>
           ${tcHtml}
           ${obs}
         </div>

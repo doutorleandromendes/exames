@@ -742,7 +742,18 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(err.message)}</p></div>`));
     }
   });
-
+// GET /lab/admin/resultados/:id/json — dados do resultado para edição inline
+  app.get('/lab/admin/resultados/:id/json', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rows: [r] } = await pool.query('SELECT * FROM lab_results WHERE id=$1', [id]);
+      if (!r) return res.status(404).json({ error: 'Não encontrado' });
+      res.json(r);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  
   // POST /lab/admin/pacientes/:id/renovar-chave
   app.post('/lab/admin/pacientes/:id/renovar-chave', adminRequired, async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -1322,6 +1333,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       const { rows: [r] } = await pool.query(
         'SELECT collection_id FROM lab_results WHERE id=$1', [id]
       );
+      const isAjax = req.headers['x-requested-with'] === 'XMLHttpRequest';
+      if (isAjax) return res.json({ ok: true, collection_id: r.collection_id });
       res.redirect(`/lab/admin/coletas/${r.collection_id}`);
     } catch (err) {
       console.error('LAB EDIT RESULT POST ERROR', err);

@@ -479,6 +479,8 @@ function buildResultField(type) {
       ? (sampleManualEl?.value || 'Soro').trim()
       : (sampleSelectEl?.value || 'Soro');
 
+    const colorInput = document.getElementById('result_color_input');
+
     const params = new URLSearchParams();
     params.set('exam_name',       examName);
     params.set('sample_type',     sampleType);
@@ -486,6 +488,7 @@ function buildResultField(type) {
     params.set('result_value',    resultHidden.value.trim());
     params.set('reference_value', (refEl?.value     || '').trim());
     params.set('observation',     (obsEl?.value     || '').trim());
+    params.set('result_color',    colorInput?.value || 'auto');
 
     let result_id = null;
     try {

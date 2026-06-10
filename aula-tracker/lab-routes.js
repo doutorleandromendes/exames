@@ -836,7 +836,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
             ${safe((r.result_value || '').split('\n')[0])}
           </td>
           <td style="white-space:nowrap">
-            <a href="/lab/admin/resultados/${r.id}/edit"
+            <a href="#exam-form" onclick="loadExamForEdit(${r.id})"
                style="color:#8fb6ff;font-size:12px;margin-right:8px">editar</a>
             <a href="#imgs-${r.id}"
                onclick="toggleImgs(${r.id})"
@@ -908,7 +908,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <!-- Formulário de novo exame -->
           <div class="card">
             <h2 style="margin-bottom:14px">Adicionar exame</h2>
-            <form method="POST" action="/lab/admin/coletas/${id}/resultados" id="exam-form">
+           <form method="POST" action="/lab/admin/coletas/${id}/resultados" id="exam-form"
+      data-original-action="/lab/admin/coletas/${id}/resultados">
 
               <label>Nome do exame</label>
               <select id="examSelect"
@@ -1021,7 +1022,18 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           container.innerHTML = '<span style="font-size:12px;color:#b03030">Erro ao carregar imagens.</span>';
         }
       }
-
+      async function loadExamForEdit(resultId) {
+        try {
+          var resp = await fetch('/lab/admin/resultados/' + resultId + '/json');
+          var data = await resp.json();
+          if (typeof window.prefillExamForm === 'function') {
+            window.prefillExamForm(data, resultId);
+          }
+        } catch(e) {
+          alert('Erro ao carregar exame para edição.');
+          console.error(e);
+        }
+      }
       async function uploadImgs(resultId) {
         var fileInput    = document.getElementById('img-file-' + resultId);
         var captionInput = document.getElementById('img-caption-' + resultId);

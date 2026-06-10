@@ -499,6 +499,13 @@ function buildResultField(type) {
       const json = await resp.json();
       if (!resp.ok) { alert(json.error || 'Erro ao adicionar exame.'); return; }
       result_id = json.result_id;
+
+      // Se estava em modo edição, reseta e recarrega (sem upload de imagens)
+      if (form.dataset.editMode === '1') {
+        resetToAddMode();
+        window.location.reload();
+        return;
+      }
     } catch (err) {
       alert('Erro de conexão ao adicionar exame.'); return;
     }
@@ -549,5 +556,137 @@ function buildResultField(type) {
     sampleSelect.name               = isManual ? 'sample_type_disabled' : 'sample_type';
   });
   buildResultField('select');
+// ── Reseta formulário para modo "Adicionar" ───────────────────────────────
+  function resetToAddMode() {
+    var form = document.getElementById('exam-form');
+    if (!form) return;
+    form.action = form.dataset.originalAction || form.action;
+    form.dataset.editMode = '';
 
+    var submitBtn = form.querySelector('button.mt');
+    if (submitBtn) { submitBtn.textContent = '+ Adicionar exame'; submitBtn.style.background = ''; }
+
+    var cancelBtn = document.getElementById('edit-cancel-btn');
+    if (cancelBtn) cancelBtn.remove();
+
+    // Reseta selects e toggles
+    if (examManualToggle && examManualToggle.checked) {
+      examManualToggle.checked = false;
+      examManualToggle.dispatchEvent(new Event('change'));
+    }
+    if (sampleManualToggle && sampleManualToggle.checked) {
+      sampleManualToggle.checked = false;
+      sampleManualToggle.dispatchEvent(new Event('change'));
+    }
+    if (examSelect) examSelect.value = '';
+    if (examHidden) examHidden.value = '';
+
+    buildResultField('select');
+
+    var refInput    = document.querySelector('[name="reference_value"]');
+    var methodInput = document.querySelector('[name="method"]');
+    var obsInput    = document.querySelector('[name="observation"]');
+    if (refInput)    refInput.value    = '';
+    if (methodInput) methodInput.value = '';
+    if (obsInput)    obsInput.value    = '';
+  }
+
+  // ── API pública: pré-preenche formulário para edição inline ──────────────
+  window.prefillExamForm = function(data, editResultId) {
+    var form = document.getElementById('exam-form');
+    if (!form) return;
+
+    // Remove cancelar anterior se existir
+    var oldCancel = document.getElementById('edit-cancel-btn');
+    if (oldCancel) oldCancel.remove();
+
+    // 1. Nome do exame
+    var examOpts = examSelect
+      ? Array.from(examSelect.options).map(function(o) { return o.value; }).filter(Boolean)
+      : [];
+    if (examOpts.indexOf(data.exam_name) >= 0) {
+      if (examManualToggle && examManualToggle.checked) {
+        examManualToggle.checked = false;
+        examManualToggle.dispatchEvent(new Event('change'));
+      }
+      examSelect.value = data.exam_name;
+      if (examHidden) examHidden.value = data.exam_name;
+    } else {
+      if (examManualToggle) {
+        examManualToggle.checked = true;
+        examManualToggle.dispatchEvent(new Event('change'));
+      }
+      if (examManualInput) examManualInput.value = data.exam_name || '';
+    }
+
+    // Reconstrói campo de resultado conforme tipo
+    applyDefaults(data.exam_name || '');
+
+    // 2. Resultado — ativa toggle manual para preservar rich text
+    var manualToggle = document.getElementById('resultManualToggle');
+    if (manualToggle) {
+      if (!manualToggle.checked) {
+        manualToggle.checked = true;
+        manualToggle.dispatchEvent(new Event('change'));
+      }
+      var manualTA = document.getElementById('resultManualTA');
+      if (manualTA) manualTA.value = data.result_value || '';
+    } else {
+      // tipo texto — textarea direta
+      var primary = document.getElementById('result_primary');
+      if (primary) primary.value = data.result_value || '';
+    }
+    syncHidden(data.result_value || '');
+
+    // 3. Amostra
+    var sampleOpts = sampleSelect
+      ? Array.from(sampleSelect.options).map(function(o) { return o.value; })
+      : [];
+    if (sampleOpts.indexOf(data.sample_type) >= 0) {
+      if (sampleManualToggle && sampleManualToggle.checked) {
+        sampleManualToggle.checked = false;
+        sampleManualToggle.dispatchEvent(new Event('change'));
+      }
+      if (sampleSelect) sampleSelect.value = data.sample_type;
+    } else {
+      if (sampleManualToggle) {
+        sampleManualToggle.checked = true;
+        sampleManualToggle.dispatchEvent(new Event('change'));
+      }
+      if (sampleManualInput) sampleManualInput.value = data.sample_type || '';
+    }
+
+    // 4. Demais campos
+    var refInput    = document.querySelector('[name="reference_value"]');
+    var methodInput = document.querySelector('[name="method"]');
+    var obsInput    = document.querySelector('[name="observation"]');
+    if (refInput)    refInput.value    = data.reference_value || '';
+    if (methodInput) methodInput.value = data.method          || '';
+    if (obsInput)    obsInput.value    = data.observation     || '';
+
+    // 5. Muda formulário para modo edição
+    form.action = '/lab/admin/resultados/' + editResultId + '/edit';
+    form.dataset.editMode = '1';
+
+    var submitBtn = form.querySelector('button.mt');
+    if (submitBtn) {
+      submitBtn.textContent = 'Salvar alterações';
+      submitBtn.style.background = '#4f8cff';
+    }
+
+    // Botão cancelar
+    var cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.id   = 'edit-cancel-btn';
+    cancelBtn.textContent = 'Cancelar edição';
+    Object.assign(cancelBtn.style, {
+      width: '100%', padding: '11px', fontSize: '14px', marginTop: '8px',
+      background: '#20242b', color: '#e7e9ee', border: '0',
+      borderRadius: '8px', cursor: 'pointer',
+    });
+    cancelBtn.addEventListener('click', resetToAddMode);
+    if (submitBtn) submitBtn.parentNode.insertBefore(cancelBtn, submitBtn.nextSibling);
+
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 })();

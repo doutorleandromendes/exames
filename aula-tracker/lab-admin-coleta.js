@@ -505,7 +505,7 @@ function buildResultField(type) {
       result_id = json.result_id;
 
       // Se estava em modo edição, reseta e recarrega (sem upload de imagens)
-      if (form.dataset.editMode === '1') {
+      if (theForm.dataset.editMode === '1') {
         resetToAddMode();
         window.location.reload();
         return;

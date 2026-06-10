@@ -41,9 +41,10 @@ function toBR(dateStr) {
 // Determina a cor do resultado com base no valor
 function resultColor(value) {
   const v = (value || '').toUpperCase();
-  if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE|NORMAL/.test(v)) return '#1a7a4a';
-  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))                  return '#b03030';
-  return '#111111';
+  if (/EM\s+ANDAMENTO/.test(v))                              return '#888888';
+  if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v)) return '#1a7a4a';
+  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))      return '#b03030';
+  return '#1a1a1a';
 }
 
 // Colore marcadores SENSÍVEL A / RESISTENTE A dentro do texto de resultado
@@ -51,8 +52,12 @@ function formatResultText(value) {
   return safe((value || '').trim())
     .replace(/\*(.+?)\*/gs,  '<strong>$1</strong>')
     .replace(/_(.+?)_/gs,    '<em>$1</em>')
-    .replace(/SENSÍVEL A:/gi,   '<span style="color:#1a7a4a;font-weight:700">SENSÍVEL A:</span>')
-    .replace(/RESISTENTE A:/gi, '<span style="color:#b03030;font-weight:700">RESISTENTE A:</span>');
+    .replace(/^EM ANDAMENTO$/im,
+      '<em style="color:#888">Em andamento</em>')
+    .replace(/SENSÍVEL A:/gi,
+      '<span style="color:#1a7a4a;font-weight:700">SENSÍVEL A:</span>')
+    .replace(/RESISTENTE A:/gi,
+      '<span style="color:#b03030;font-weight:700">RESISTENTE A:</span>');
 }
 
 // ====== Template HTML do laudo ======

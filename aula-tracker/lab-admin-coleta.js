@@ -698,4 +698,82 @@ function buildResultField(type) {
 
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  // ── Pré-preenche formulário para duplicação (mantém modo add) ─────────────
+  window.prefillForDuplicate = function(data) {
+    var form = document.getElementById('exam-form');
+    if (!form) return;
+
+    // Se estava em modo edição, reseta primeiro
+    if (form.dataset.editMode === '1') resetToAddMode();
+
+    // Nome do exame
+    var examOpts = examSelect
+      ? Array.from(examSelect.options).map(function(o) { return o.value; }).filter(Boolean)
+      : [];
+    if (examOpts.indexOf(data.exam_name) >= 0) {
+      if (examManualToggle && examManualToggle.checked) {
+        examManualToggle.checked = false;
+        examManualToggle.dispatchEvent(new Event('change'));
+      }
+      examSelect.value = data.exam_name;
+      if (examHidden) examHidden.value = data.exam_name;
+    } else {
+      if (examManualToggle) {
+        examManualToggle.checked = true;
+        examManualToggle.dispatchEvent(new Event('change'));
+      }
+      if (examManualInput) examManualInput.value = data.exam_name || '';
+    }
+
+    applyDefaults(data.exam_name || '');
+
+    // Resultado — ativa toggle manual para preservar rich text
+    var manualToggle = document.getElementById('resultManualToggle');
+    if (manualToggle) {
+      if (!manualToggle.checked) {
+        manualToggle.checked = true;
+        manualToggle.dispatchEvent(new Event('change'));
+      }
+      var manualTA = document.getElementById('resultManualTA');
+      if (manualTA) manualTA.value = data.result_value || '';
+    } else {
+      var primary = document.getElementById('result_primary');
+      if (primary) primary.value = data.result_value || '';
+    }
+    syncHidden(data.result_value || '');
+
+    // Amostra
+    var sampleOpts = sampleSelect
+      ? Array.from(sampleSelect.options).map(function(o) { return o.value; })
+      : [];
+    if (sampleOpts.indexOf(data.sample_type) >= 0) {
+      if (sampleManualToggle && sampleManualToggle.checked) {
+        sampleManualToggle.checked = false;
+        sampleManualToggle.dispatchEvent(new Event('change'));
+      }
+      if (sampleSelect) sampleSelect.value = data.sample_type;
+    } else {
+      if (sampleManualToggle) {
+        sampleManualToggle.checked = true;
+        sampleManualToggle.dispatchEvent(new Event('change'));
+      }
+      if (sampleManualInput) sampleManualInput.value = data.sample_type || '';
+    }
+
+    // Demais campos
+    var refInput    = document.querySelector('[name="reference_value"]');
+    var methodInput = document.querySelector('[name="method"]');
+    var obsInput    = document.querySelector('[name="observation"]');
+    if (refInput)    refInput.value    = data.reference_value || '';
+    if (methodInput) methodInput.value = data.method          || '';
+    if (obsInput)    obsInput.value    = data.observation     || '';
+
+    // Cor semântica
+    if (typeof setResultColor === 'function') {
+      setResultColor(data.result_color || 'auto');
+    }
+
+    // Formulário permanece em modo add — só rola até ele
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 })();

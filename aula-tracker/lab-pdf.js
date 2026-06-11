@@ -26,7 +26,6 @@ function safe(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// Converte YYYY-MM-DD (ou Date) para DD/MM/AAAA sem problemas de fuso
 function toBR(dateStr) {
   if (!dateStr) return '—';
   const s = String(dateStr);
@@ -36,19 +35,17 @@ function toBR(dateStr) {
   return d.toLocaleDateString('pt-BR');
 }
 
-// Determina a cor do resultado — respeita cor explícita ou detecta por palavras-chave
 function resultColor(value, storedColor) {
   if (storedColor === 'positivo') return '#b03030';
   if (storedColor === 'negativo') return '#1a7a4a';
   if (storedColor === 'neutro')   return '#888888';
   const v = (value || '').toUpperCase();
-  if (/EM\s+ANDAMENTO/.test(v))                                    return '#888888';
-  if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v))  return '#1a7a4a';
-  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))           return '#b03030';
+  if (/EM\s+ANDAMENTO/.test(v))                                   return '#888888';
+  if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v)) return '#1a7a4a';
+  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))          return '#b03030';
   return '#1a1a1a';
 }
 
-// Formata texto do resultado: negrito, itálico, marcadores semânticos
 function formatResultText(value) {
   return safe((value || '').trim())
     .replace(/\*(.+?)\*/gs,  '<strong>$1</strong>')
@@ -80,7 +77,6 @@ export function buildPdfHtml({ patient, collection, results }) {
       ? '<div class="ex-divider"></div>'
       : '';
 
-    // Detecta e extrai valor T/C embutido no result_value
     const tcMatch   = r.result_value ? r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/) : null;
     const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
     const tcDisplay = tcMatch ? tcMatch[2].trim() : null;
@@ -92,7 +88,6 @@ export function buildPdfHtml({ patient, collection, results }) {
          </div>`
       : '';
 
-    // Bloco de imagens (se houver)
     const imagesHtml = (r.images && r.images.length)
       ? `<div class="img-block">
            <div class="img-block-label">Imagens</div>
@@ -151,13 +146,13 @@ export function buildPdfHtml({ patient, collection, results }) {
       flex-direction: column;
     }
 
-    /* ── Cabeçalho (primeira página, oculto na impressão — Puppeteer usa headerTemplate) ── */
+    /* ── Cabeçalho decorativo (visível em preview E no PDF) ── */
     .report-header-body {
       display: flex;
       align-items: flex-end;
       justify-content: flex-end;
       gap: 14px;
-      padding: 14px 22mm 10px;
+      padding: 10px 22mm 8px;
     }
     .pdf-head-meta { text-align: right; }
     .pdf-clinic {
@@ -213,7 +208,7 @@ export function buildPdfHtml({ patient, collection, results }) {
       page-break-inside: avoid;
     }
 
-    /* Cabeçalho do exame (nome) */
+    /* Nome do exame */
     .ex-box {
       font-weight: 600;
       font-style: italic;
@@ -225,7 +220,7 @@ export function buildPdfHtml({ patient, collection, results }) {
       border-left: 2.5px solid #222;
     }
 
-    /* Metadados (amostra, método, VR) */
+    /* Metadados */
     .ex-meta-row {
       display: flex;
       justify-content: space-between;
@@ -314,11 +309,7 @@ export function buildPdfHtml({ patient, collection, results }) {
       margin-bottom: 6px;
       display: block;
     }
-    .img-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
+    .img-grid { display: flex; flex-wrap: wrap; gap: 6px; }
     .img-item {
       flex: 0 0 calc(50% - 3px);
       max-width: calc(50% - 3px);
@@ -350,7 +341,7 @@ export function buildPdfHtml({ patient, collection, results }) {
       margin-top: 8px;
     }
 
-    /* Rodapé do body (visível no preview, oculto na impressão via Puppeteer footerTemplate) */
+    /* Rodapé do body — visível no preview, oculto no PDF (footerTemplate substitui) */
     .report-footer-body {
       background: #111;
       color: #f5f5f5;
@@ -362,12 +353,10 @@ export function buildPdfHtml({ patient, collection, results }) {
       print-color-adjust: exact;
     }
 
-    /* Oculta header/footer do body na impressão — Puppeteer usa headerTemplate/footerTemplate */
+    /* Na impressão: oculta apenas o rodapé do body (footerTemplate repete em todas as págs).
+       O cabeçalho decorativo (.report-header-body) permanece visível — aparece na pág. 1. */
     @media print {
-      .report-header-body { display: none !important; }
       .report-footer-body { display: none !important; }
-      .pdf-rule-body      { display: none !important; }
-      .pdf-ident-body     { display: none !important; }
     }
 
     a { color: #f5f5f5; text-decoration: none; }
@@ -377,7 +366,7 @@ export function buildPdfHtml({ patient, collection, results }) {
 <body>
 <div class="page">
 
-  <!-- Cabeçalho visível no preview, oculto no PDF (substituído por headerTemplate) -->
+  <!-- Cabeçalho decorativo: logo + título. Visível no preview e na pág. 1 do PDF. -->
   <div class="report-header-body">
     <div class="pdf-head-meta">
       <div class="pdf-clinic">Consultório · Dr. Leandro Mendes</div>
@@ -403,7 +392,7 @@ export function buildPdfHtml({ patient, collection, results }) {
     Assinado Digitalmente por: Leandro César Mendes — CRM 134.985SP
   </div>
 
-  <!-- Rodapé visível no preview, oculto no PDF (substituído por footerTemplate) -->
+  <!-- Rodapé: visível no preview. Na impressão, footerTemplate assume. -->
   <div class="report-footer-body">
     Consultório Dr. Leandro Mendes – Euroville Tower Corporate<br>
     Praça Maastrich, 200, sala 603, Bragança Paulista-SP<br>
@@ -442,26 +431,27 @@ export async function generateLabPdf(data) {
   const esc = s => String(s || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-  const headerTemplate = `<div style="width:100%;padding:5px 22mm 4px;box-sizing:border-box;
-      font-size:8px;font-family:system-ui,-apple-system,Arial,sans-serif;
-      border-bottom:0.5px solid #ccc;display:flex;
-      justify-content:space-between;align-items:center;color:#333">
-    <span style="font-weight:600">Dr. Leandro Mendes
-      <span style="font-weight:400;color:#888"> · Infectologia · CRM 134.985-SP</span>
+  // Cabeçalho compacto repetido em todas as páginas (inclusive pág. 1, acima do header decorativo)
+  const headerTemplate = `<div style="width:100%;padding:4px 22mm 3px;box-sizing:border-box;
+      font-size:7.5px;font-family:system-ui,-apple-system,Arial,sans-serif;
+      border-bottom:0.5px solid #ddd;display:flex;
+      justify-content:space-between;align-items:center;color:#555">
+    <span style="font-weight:600;color:#333">Dr. Leandro Mendes
+      <span style="font-weight:400;color:#999"> · Infectologia · CRM 134.985-SP</span>
     </span>
-    <span style="text-align:right">
-      <strong>${esc(patient.full_name)}</strong>
-      &nbsp;·&nbsp;DN:&nbsp;${toBR(patient.birth_date)}
-      &nbsp;·&nbsp;Coleta:&nbsp;${toBR(collection.collected_at)}
+    <span>
+      <strong style="color:#333">${esc(patient.full_name)}</strong>
+      <span style="color:#999">&nbsp;·&nbsp;DN:&nbsp;${toBR(patient.birth_date)}&nbsp;·&nbsp;Coleta:&nbsp;${toBR(collection.collected_at)}</span>
     </span>
   </div>`;
 
-  const footerTemplate = `<div style="width:100%;padding:3px 22mm 0;box-sizing:border-box;
-      font-size:7px;font-family:system-ui,-apple-system,Arial,sans-serif;
-      border-top:0.5px solid #ccc;display:flex;
-      justify-content:space-between;align-items:center;color:#999">
+  // Rodapé compacto repetido em todas as páginas
+  const footerTemplate = `<div style="width:100%;padding:2px 22mm 0;box-sizing:border-box;
+      font-size:6.5px;font-family:system-ui,-apple-system,Arial,sans-serif;
+      border-top:0.5px solid #ddd;display:flex;
+      justify-content:space-between;align-items:center;color:#aaa">
     <span>Consultório Dr. Leandro Mendes · Euroville Tower Corporate · Praça Maastrich, 200, sala 603, Bragança Paulista-SP</span>
-    <span style="white-space:nowrap;margin-left:8px">
+    <span style="white-space:nowrap;margin-left:8px;color:#888">
       p.&nbsp;<span class="pageNumber"></span>/<span class="totalPages"></span>
     </span>
   </div>`;
@@ -476,7 +466,7 @@ export async function generateLabPdf(data) {
       displayHeaderFooter: true,
       headerTemplate,
       footerTemplate,
-      margin: { top: '28mm', bottom: '20mm', left: '22mm', right: '22mm' },
+      margin: { top: '20mm', bottom: '18mm', left: '0', right: '0' },
     });
   } finally {
     await page.close();

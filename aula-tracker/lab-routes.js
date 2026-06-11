@@ -203,6 +203,74 @@ function renderPatientShell(title, body, patient = null) {
 </body>
 </html>`;
 }
+async function getCollectionData(pool, collectionId, patientIdCheck = null, resultIds = null) {
+  const q = patientIdCheck
+    ? `SELECT lc.*, lp.full_name, lp.birth_date
+       FROM lab_collections lc
+       JOIN lab_patients lp ON lp.id = lc.patient_id
+       WHERE lc.id = $1 AND lc.patient_id = $2`
+    : `SELECT lc.*, lp.full_name, lp.birth_date
+       FROM lab_collections lc
+       JOIN lab_patients lp ON lp.id = lc.patient_id
+       WHERE lc.id = $1`;
+
+  const params = patientIdCheck ? [collectionId, patientIdCheck] : [collectionId];
+  const { rows: [collection] } = await pool.query(q, params);
+  if (!collection) return null;
+
+  let resultsQ, resultsParams;
+  if (resultIds && resultIds.length) {
+    resultsQ = `SELECT lr.*,
+      (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
+      FROM lab_results lr
+      WHERE lr.collection_id=$1 AND lr.id = ANY($2::int[])
+      ORDER BY lr.sort_index NULLS LAST, lr.id ASC`;
+    resultsParams = [collectionId, resultIds];
+  } else {
+    resultsQ = `SELECT lr.*,
+      (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
+      FROM lab_results lr
+      WHERE lr.collection_id=$1
+      ORDER BY lr.sort_index NULLS LAST, lr.id ASC`;
+    resultsParams = [collectionId];
+  }
+  const { rows: results } = await pool.query(resultsQ, resultsParams);
+
+  const resultIds2 = results.map(r => r.id);
+  let imagesByResult = {};
+  if (resultIds2.length) {
+    const { rows: imgs } = await pool.query(
+      `SELECT * FROM lab_result_images WHERE result_id = ANY($1::int[])
+       ORDER BY result_id, sort_index NULLS LAST, id`,
+      [resultIds2]
+    );
+    for (const img of imgs) {
+      if (!imagesByResult[img.result_id]) imagesByResult[img.result_id] = [];
+      imagesByResult[img.result_id].push(img);
+    }
+  }
+
+  const { fetchR2ImageAsDataURI } = await import('./lab-storage.js');
+  for (const r of results) {
+    const imgs = imagesByResult[r.id] || [];
+    r.images = await Promise.all(imgs.map(async img => {
+      try {
+        const dataUri = await fetchR2ImageAsDataURI(img.r2_key);
+        return { ...img, dataUri };
+      } catch (e) {
+        console.warn('[lab] imagem não carregada:', img.r2_key, e.message);
+        return null;
+      }
+    }));
+    r.images = r.images.filter(Boolean);
+  }
+
+  return {
+    patient:    { full_name: collection.full_name, birth_date: collection.birth_date },
+    collection: { collected_at: collection.collected_at },
+    results,
+  };
+}
 
 async function getCollectionDataLite(pool, collectionId, patientIdCheck = null, resultIds = null) {
   const q = patientIdCheck

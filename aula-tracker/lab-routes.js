@@ -204,69 +204,29 @@ function renderPatientShell(title, body, patient = null) {
 </html>`;
 }
 
-// ====== Loader de dados compartilhado ======
-
-async function getCollectionData(pool, collectionId, patientIdCheck = null, resultIds = null) {
+async function getCollectionDataLite(pool, collectionId, patientIdCheck = null, resultIds = null) {
   const q = patientIdCheck
     ? `SELECT lc.*, lp.full_name, lp.birth_date
-       FROM lab_collections lc
-       JOIN lab_patients lp ON lp.id = lc.patient_id
+       FROM lab_collections lc JOIN lab_patients lp ON lp.id = lc.patient_id
        WHERE lc.id = $1 AND lc.patient_id = $2`
     : `SELECT lc.*, lp.full_name, lp.birth_date
-       FROM lab_collections lc
-       JOIN lab_patients lp ON lp.id = lc.patient_id
+       FROM lab_collections lc JOIN lab_patients lp ON lp.id = lc.patient_id
        WHERE lc.id = $1`;
-
   const params = patientIdCheck ? [collectionId, patientIdCheck] : [collectionId];
   const { rows: [collection] } = await pool.query(q, params);
   if (!collection) return null;
 
   let resultsQ, resultsParams;
   if (resultIds && resultIds.length) {
-    resultsQ = `SELECT lr.*,
-      (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
-      FROM lab_results lr
-      WHERE lr.collection_id=$1 AND lr.id = ANY($2::int[])
-      ORDER BY lr.sort_index NULLS LAST, lr.id ASC`;
+    resultsQ      = `SELECT * FROM lab_results WHERE collection_id=$1 AND id = ANY($2::int[]) ORDER BY sort_index NULLS LAST, id ASC`;
     resultsParams = [collectionId, resultIds];
   } else {
-    resultsQ = `SELECT lr.*,
-      (SELECT COUNT(*) FROM lab_result_images WHERE result_id = lr.id) AS _img_count
-      FROM lab_results lr
-      WHERE lr.collection_id=$1
-      ORDER BY lr.sort_index NULLS LAST, lr.id ASC`;
+    resultsQ      = `SELECT * FROM lab_results WHERE collection_id=$1 ORDER BY sort_index NULLS LAST, id ASC`;
     resultsParams = [collectionId];
   }
   const { rows: results } = await pool.query(resultsQ, resultsParams);
 
-  const resultIds2 = results.map(r => r.id);
-  let imagesByResult = {};
-  if (resultIds2.length) {
-    const { rows: imgs } = await pool.query(
-      `SELECT * FROM lab_result_images WHERE result_id = ANY($1::int[])
-       ORDER BY result_id, sort_index NULLS LAST, id`,
-      [resultIds2]
-    );
-    for (const img of imgs) {
-      if (!imagesByResult[img.result_id]) imagesByResult[img.result_id] = [];
-      imagesByResult[img.result_id].push(img);
-    }
-  }
-
-  const { fetchR2ImageAsDataURI } = await import('./lab-storage.js');
-  for (const r of results) {
-    const imgs = imagesByResult[r.id] || [];
-    r.images = await Promise.all(imgs.map(async img => {
-      try {
-        const dataUri = await fetchR2ImageAsDataURI(img.r2_key);
-        return { ...img, dataUri };
-      } catch (e) {
-        console.warn('[lab] imagem não carregada:', img.r2_key, e.message);
-        return null;
-      }
-    }));
-    r.images = r.images.filter(Boolean);
-  }
+  for (const r of results) r.images = [];
 
   return {
     patient:    { full_name: collection.full_name, birth_date: collection.birth_date },
@@ -1614,18 +1574,25 @@ json_build_object(
                   <tbody>${resRows}</tbody>
                 </table>
                 <div class="dl-bar">
-                  <span class="muted">Selecione os exames a incluir no PDF</span>
-                  <button type="submit" class="btn-download">
-                    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 12l-4-4h2.5V3h3v5H12L8 12z"/>
-                      <path d="M2 14h12v-1.5H2V14z"/>
-                    </svg>
-                    Baixar PDF
-                  </button>
+                  <span class="muted">Selecione os exames a incluir</span>
+                  <div style="display:flex;gap:8px">
+                    <button type="submit" formaction="/lab/coleta/${c.id}/view"
+                            class="btn-download" style="background:#333">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 3C4 3 1 8 1 8s3 5 7 5 7-5 7-5-3-5-7-5zm0 8a3 3 0 110-6 3 3 0 010 6z"/>
+                        <circle cx="8" cy="8" r="1.5"/>
+                      </svg>
+                      Visualizar
+                    </button>
+                    <button type="submit" class="btn-download">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 12l-4-4h2.5V3h3v5H12L8 12z"/>
+                        <path d="M2 14h12v-1.5H2V14z"/>
+                      </svg>
+                      Baixar PDF
+                    </button>
+                  </div>
                 </div>
-              </form>
-            </div>
-          </div>
         `;
       }).join('');
 
@@ -1643,6 +1610,26 @@ json_build_object(
     } catch (err) {
       console.error('LAB RESULTS PAGE ERROR', err);
       res.status(500).send(renderPatientShell('Erro', '<p>Falha ao carregar resultados. Tente novamente.</p>'));
+    }
+  });
+
+  // GET /lab/coleta/:id/view — visualização HTML para o paciente
+  app.get('/lab/coleta/:id/view', labAuth, async (req, res) => {
+    try {
+      const collectionId = parseInt(req.params.id, 10);
+      const patient      = req.labPatient;
+      let ids = req.query.result_ids || req.query['result_ids[]'];
+      if (ids && !Array.isArray(ids)) ids = [ids];
+      const parsedIds = (ids || []).map(id => parseInt(id, 10)).filter(Number.isFinite);
+      const data = await getCollectionDataLite(
+        pool, collectionId, patient.id, parsedIds.length ? parsedIds : null
+      );
+      if (!data) return res.status(404).send('Coleta não encontrada');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(buildPdfHtml(data));
+    } catch (err) {
+      console.error('LAB PATIENT VIEW ERROR', err);
+      res.status(500).send('Falha ao carregar visualização.');
     }
   });
 

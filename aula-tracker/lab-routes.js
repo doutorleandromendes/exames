@@ -849,6 +849,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <td style="white-space:nowrap">
             <a href="#exam-form" onclick="loadExamForEdit(${r.id})"
                style="color:#8fb6ff;font-size:12px;margin-right:8px">editar</a>
+            <a href="#exam-form" onclick="duplicateExam(${r.id})"
+               style="color:#8fb6ff;font-size:12px;margin-right:8px">duplicar</a>
             <a href="#imgs-${r.id}"
                onclick="toggleImgs(${r.id})"
                style="color:#8fb6ff;font-size:12px;margin-right:8px"
@@ -1074,6 +1076,18 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           }
         } catch(e) {
           alert('Erro ao carregar exame para edição.');
+          console.error(e);
+        }
+      }
+      async function duplicateExam(resultId) {
+        try {
+          var resp = await fetch('/lab/admin/resultados/' + resultId + '/json');
+          var data = await resp.json();
+          if (typeof window.prefillForDuplicate === 'function') {
+            window.prefillForDuplicate(data);
+          }
+        } catch(e) {
+          alert('Erro ao duplicar exame.');
           console.error(e);
         }
       }

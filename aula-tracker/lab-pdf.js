@@ -1,6 +1,6 @@
 // lab-pdf.js
 // Geração de PDF dos laudos via Puppeteer
-// O logo é lido uma vez na inicialização de public/logo-lm.svg
+// O logo é lido uma vez na inicialização de logo-lm.svg
 
 import puppeteer from 'puppeteer';
 import { readFileSync } from 'fs';
@@ -15,7 +15,7 @@ let LOGO_SVG = '';
 try {
   LOGO_SVG = readFileSync(join(__dirname, 'logo-lm.svg'), 'utf-8');
 } catch {
-  console.warn('[lab-pdf] public/logo-lm.svg não encontrado — usando círculo vazio');
+  console.warn('[lab-pdf] logo-lm.svg não encontrado — usando círculo vazio');
 }
 
 // ====== Helpers ======
@@ -30,27 +30,25 @@ function safe(s) {
 function toBR(dateStr) {
   if (!dateStr) return '—';
   const s = String(dateStr);
-  // Se já é DD/MM/AAAA, retorna como está
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
-  // Adiciona T12:00:00 para evitar virar o dia por fuso
   const d = new Date(s.length === 10 ? s + 'T12:00:00' : s);
   if (isNaN(d)) return s;
   return d.toLocaleDateString('pt-BR');
 }
 
-// Determina a cor do resultado com base no valor
+// Determina a cor do resultado — respeita cor explícita ou detecta por palavras-chave
 function resultColor(value, storedColor) {
   if (storedColor === 'positivo') return '#b03030';
   if (storedColor === 'negativo') return '#1a7a4a';
   if (storedColor === 'neutro')   return '#888888';
   const v = (value || '').toUpperCase();
-  if (/EM\s+ANDAMENTO/.test(v))                                   return '#888888';
-  if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v)) return '#1a7a4a';
-  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))          return '#b03030';
+  if (/EM\s+ANDAMENTO/.test(v))                                    return '#888888';
+  if (/NÃO\s+REAGENTE|NAO\s+REAGENTE|NEGATIVO|AUSENTE/.test(v))  return '#1a7a4a';
+  if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO/.test(v))           return '#b03030';
   return '#1a1a1a';
 }
 
-// Colore marcadores SENSÍVEL A / RESISTENTE A dentro do texto de resultado
+// Formata texto do resultado: negrito, itálico, marcadores semânticos
 function formatResultText(value) {
   return safe((value || '').trim())
     .replace(/\*(.+?)\*/gs,  '<strong>$1</strong>')
@@ -83,7 +81,7 @@ export function buildPdfHtml({ patient, collection, results }) {
       : '';
 
     // Detecta e extrai valor T/C embutido no result_value
-    const tcMatch   = r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/);
+    const tcMatch   = r.result_value ? r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/) : null;
     const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
     const tcDisplay = tcMatch ? tcMatch[2].trim() : null;
 
@@ -122,7 +120,7 @@ export function buildPdfHtml({ patient, collection, results }) {
         </div>
         <div class="res-block">
           <div class="res-label">Resultado</div>
-          <div class="res-text" style="color:${resultColor(r.result_value, r.result_color)}">${formatResultText(r.result_value)}</div>
+          <div class="res-text" style="color:${resultColor(mainValue, r.result_color)}">${formatResultText(mainValue)}</div>
           ${tcHtml}
           ${obs}
         </div>
@@ -153,8 +151,8 @@ export function buildPdfHtml({ patient, collection, results }) {
       flex-direction: column;
     }
 
-    /* Cabeçalho */
-    .pdf-head {
+    /* ── Cabeçalho (primeira página, oculto na impressão — Puppeteer usa headerTemplate) ── */
+    .report-header-body {
       display: flex;
       align-items: flex-end;
       justify-content: flex-end;
@@ -208,6 +206,12 @@ export function buildPdfHtml({ patient, collection, results }) {
 
     /* Corpo dos exames */
     .pdf-body { padding: 0 22mm 16px; flex: 1; }
+
+    /* Sem quebra de página dentro de um bloco de exame */
+    .exam-block {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
 
     /* Cabeçalho do exame (nome) */
     .ex-box {
@@ -293,6 +297,7 @@ export function buildPdfHtml({ patient, collection, results }) {
       padding-top: 5px;
       font-weight: 400;
     }
+
     /* Bloco de imagens */
     .img-block {
       margin: 6px 0 3px;
@@ -333,7 +338,8 @@ export function buildPdfHtml({ patient, collection, results }) {
       margin-top: 3px;
       font-style: italic;
     }
-    /* Assinatura e rodapé */
+
+    /* Assinatura */
     .pdf-sign {
       font-size: 8.5px;
       font-weight: 600;
@@ -343,7 +349,9 @@ export function buildPdfHtml({ patient, collection, results }) {
       border-top: 0.5px solid #e5e5e5;
       margin-top: 8px;
     }
-    .pdf-footer {
+
+    /* Rodapé do body (visível no preview, oculto na impressão via Puppeteer footerTemplate) */
+    .report-footer-body {
       background: #111;
       color: #f5f5f5;
       padding: 7px 16px;
@@ -353,6 +361,15 @@ export function buildPdfHtml({ patient, collection, results }) {
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
+
+    /* Oculta header/footer do body na impressão — Puppeteer usa headerTemplate/footerTemplate */
+    @media print {
+      .report-header-body { display: none !important; }
+      .report-footer-body { display: none !important; }
+      .pdf-rule-body      { display: none !important; }
+      .pdf-ident-body     { display: none !important; }
+    }
+
     a { color: #f5f5f5; text-decoration: none; }
     a[href]:after { content: "" !important; }
   </style>
@@ -360,7 +377,8 @@ export function buildPdfHtml({ patient, collection, results }) {
 <body>
 <div class="page">
 
-  <div class="pdf-head">
+  <!-- Cabeçalho visível no preview, oculto no PDF (substituído por headerTemplate) -->
+  <div class="report-header-body">
     <div class="pdf-head-meta">
       <div class="pdf-clinic">Consultório · Dr. Leandro Mendes</div>
       <div class="pdf-title">RESULTADO DE EXAME</div>
@@ -385,7 +403,8 @@ export function buildPdfHtml({ patient, collection, results }) {
     Assinado Digitalmente por: Leandro César Mendes — CRM 134.985SP
   </div>
 
-  <div class="pdf-footer">
+  <!-- Rodapé visível no preview, oculto no PDF (substituído por footerTemplate) -->
+  <div class="report-footer-body">
     Consultório Dr. Leandro Mendes – Euroville Tower Corporate<br>
     Praça Maastrich, 200, sala 603, Bragança Paulista-SP<br>
     doutorleandromendes@gmail.com | (11) 99611-2338
@@ -418,14 +437,46 @@ async function getBrowser() {
 
 // Gera o PDF e retorna um Buffer
 export async function generateLabPdf(data) {
+  const { patient, collection } = data;
+
+  const esc = s => String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const headerTemplate = `<div style="width:100%;padding:5px 22mm 4px;box-sizing:border-box;
+      font-size:8px;font-family:system-ui,-apple-system,Arial,sans-serif;
+      border-bottom:0.5px solid #ccc;display:flex;
+      justify-content:space-between;align-items:center;color:#333">
+    <span style="font-weight:600">Dr. Leandro Mendes
+      <span style="font-weight:400;color:#888"> · Infectologia · CRM 134.985-SP</span>
+    </span>
+    <span style="text-align:right">
+      <strong>${esc(patient.full_name)}</strong>
+      &nbsp;·&nbsp;DN:&nbsp;${toBR(patient.birth_date)}
+      &nbsp;·&nbsp;Coleta:&nbsp;${toBR(collection.collected_at)}
+    </span>
+  </div>`;
+
+  const footerTemplate = `<div style="width:100%;padding:3px 22mm 0;box-sizing:border-box;
+      font-size:7px;font-family:system-ui,-apple-system,Arial,sans-serif;
+      border-top:0.5px solid #ccc;display:flex;
+      justify-content:space-between;align-items:center;color:#999">
+    <span>Consultório Dr. Leandro Mendes · Euroville Tower Corporate · Praça Maastrich, 200, sala 603, Bragança Paulista-SP</span>
+    <span style="white-space:nowrap;margin-left:8px">
+      p.&nbsp;<span class="pageNumber"></span>/<span class="totalPages"></span>
+    </span>
+  </div>`;
+
   const browser = await getBrowser();
-  const page = await browser.newPage();
+  const page    = await browser.newPage();
   try {
     await page.setContent(buildPdfHtml(data), { waitUntil: 'networkidle0' });
     return await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      format:              'A4',
+      printBackground:     true,
+      displayHeaderFooter: true,
+      headerTemplate,
+      footerTemplate,
+      margin: { top: '28mm', bottom: '20mm', left: '22mm', right: '22mm' },
     });
   } finally {
     await page.close();

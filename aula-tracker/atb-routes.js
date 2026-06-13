@@ -2,6 +2,7 @@
 
 import { handleWebhook, iniciarPolling, rodarTriagemIA } from './atb-sync.js';
 import { parseFormPayload } from './atb-parser.js';
+import { fetchR2Stream, fetchR2ImageAsDataURI } from './lab-storage.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -192,7 +193,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h1>Controle ATB</h1>
             <div>
-              <a href="/atb/admin/fichas" style="margin-right:12px">Ver todas</a>
+              <a href="/atb/admin/grid" style="margin-right:12px">Grade de fichas</a>
               <a href="/atb/admin/config">Configurar</a>
             </div>
           </div>
@@ -417,6 +418,28 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
       `, [id]);
       if (!f) return res.status(404).send(renderShell('Erro','<div class="card"><h1>Ficha não encontrada</h1></div>'));
 
+      // anexos da ficha
+      const { rows: anexos } = await pool.query(
+        `SELECT id, tipo, nome_original FROM atb_ficha_imagens WHERE ficha_id=$1 ORDER BY tipo, id`, [id]
+      );
+      const pdfs = anexos.filter(a => a.tipo === 'pdf');
+      const imgs = anexos.filter(a => a.tipo !== 'pdf');
+      const anexosHtml = (pdfs.length || imgs.length) ? `
+        <div class="card" style="margin-bottom:12px">
+          <h2>Anexos</h2>
+          ${pdfs.length ? `<div style="margin-top:8px">
+            ${pdfs.map(a=>`<a href="/atb/admin/ficha/${id}/anexo/${a.id}" target="_blank"
+              style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;margin:3px;border-radius:8px;background:#20242b;color:#8fb6ff;text-decoration:none;font-size:13px">
+              📄 ${safe(a.nome_original||('PDF '+a.id))}</a>`).join('')}
+          </div>` : ''}
+          ${imgs.length ? `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px">
+            ${imgs.map(a=>`<a href="/atb/admin/ficha/${id}/anexo/${a.id}" target="_blank" title="${safe(a.nome_original||'')}"
+              style="display:block">
+              <img src="/atb/admin/ficha/${id}/anexo/${a.id}" loading="lazy"
+                style="width:90px;height:90px;object-fit:cover;border-radius:6px;border:1px solid #2a2f39"></a>`).join('')}
+          </div>` : ''}
+        </div>` : '';
+
       const triagem = f.triagem_ia;
       const triagemHtml = triagem ? `
         <div style="background:#181c22;border:1px solid #2a2f39;border-radius:8px;padding:14px;margin-top:12px">
@@ -431,6 +454,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
 
       const atbs = Array.isArray(f.atb_solicitado) ? f.atb_solicitado.join(', ') : '—';
       const disp = Array.isArray(f.dispositivos_invasivos) ? f.dispositivos_invasivos.join(', ') : '—';
+      const IRAS_OPC = ['','PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC','CDI','Onco_Bact','Sem dados','Descartado','Repetida'];
+      const DESF_OPC = ['','Sobrev_int','Sobrev_alta','Obito_R','Obito_NR','Alta'];
 
       const html = `
         <div class="card" style="margin-bottom:12px">
@@ -443,10 +468,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
                 · Prontuário ${safe(f.prontuario||'—')}
                 · Atend. ${safe(f.atendimento||'—')}
               </p>
-              ${f.link_exames?`<a href="${f.link_exames}" target="_blank" style="font-size:12px">🔗 Exames</a>`:''}
-              ${f.link_labs?` · <a href="${f.link_labs}" target="_blank" style="font-size:12px">🔬 LIS</a>`:''}
+              ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" style="font-size:12px">🔗 Exames</a>`:''}
+              ${f.link_labs?` · <a href="${safe(f.link_labs)}" target="_blank" style="font-size:12px">🔬 LIS</a>`:''}
             </div>
-            <a href="/atb/admin/fichas">← Fichas</a>
+            <a href="/atb/admin/grid">← Grade</a>
           </div>
         </div>
 
@@ -476,8 +501,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
                   <div>
                     <label>IrAS</label>
                     <select name="iras" style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee">
-                      <option value="">—</option>
-                      ${['Sim','Não','Suspeita'].map(v=>`<option ${f.iras===v?'selected':''}>${v}</option>`).join('')}
+                      ${IRAS_OPC.map(v=>`<option value="${v}" ${(f.iras||'')===v?'selected':''}>${v||'—'}</option>`).join('')}
                     </select>
                   </div>
                   <div>
@@ -490,7 +514,9 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
                   </div>
                   <div>
                     <label>Desfecho IrAS</label>
-                    <input name="desfecho_iras" value="${safe(f.desfecho_iras||'')}">
+                    <select name="desfecho_iras" style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee">
+                      ${DESF_OPC.map(v=>`<option value="${v}" ${(f.desfecho_iras||'')===v?'selected':''}>${v||'—'}</option>`).join('')}
+                    </select>
                   </div>
                   <div>
                     <label>Data desfecho</label>
@@ -512,6 +538,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           </div>
 
           <div>
+            ${anexosHtml}
             <div class="card" style="margin-bottom:12px">
               <h2>Triagem IA</h2>
               ${triagemHtml}
@@ -538,7 +565,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
     }
   });
 
-  // ── Salva avaliação ───────────────────────────────────────────────────
+  // ── Salva avaliação (form do detalhe) ──────────────────────────────────
   app.post('/atb/admin/fichas/:id/avaliar', adminRequired, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const { iras, etiol_iras, micro, desfecho_iras, desfecho_data, saps3, status } = req.body||{};
@@ -634,6 +661,327 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
     await pool.query('UPDATE atb_instituicoes SET jotform_form_id=$1 WHERE id=$2',
       [jotform_form_id?.trim()||null, id]);
     res.redirect('/atb/admin/config');
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // GRADE DE FICHAS (estilo Tables) + anexos
+  // ════════════════════════════════════════════════════════════════════════
+
+  const _C = {
+    laranjaClaro:'#fcd9b6', pessego:'#fcdcd2', rosa:'#f8d7e8', roxoClaro:'#e3d4f5',
+    tealClaro:'#c3efe0', azulClaro:'#cfe9f7', azulClaro2:'#b8e0ed', verdeClaro:'#d4f0c4',
+    amareloClaro:'#f0ead0', cinzaAzul:'#c5cce0', lilas:'#ecd6f7',
+    verdeMedio:'#74c47d', cinzaMedio:'#a9b0c7', laranjaMedio:'#d98a3d',
+    azulMedio:'#5a9bf0', vermelho:'#e85d5d', amareloMedio:'#f0b840',
+  };
+  const _FG = '#3a3a3a', _FGW = '#ffffff';
+  const IRAS_CORES = {
+    'PAV':{bg:_C.laranjaClaro,fg:_FG},'PAV/EVA':{bg:_C.azulMedio,fg:_FGW},
+    'IPCSLab':{bg:_C.vermelho,fg:_FGW},'IPCSClin':{bg:_C.roxoClaro,fg:_FG},
+    'ITU':{bg:_C.amareloMedio,fg:_FG},'ISC':{bg:_C.azulClaro,fg:_FG},
+    '(HD)ILAV':{bg:_C.verdeClaro,fg:_FG},'(HD)ICS':{bg:_C.amareloClaro,fg:_FG},
+    '(HD)Bact':{bg:_C.laranjaClaro,fg:_FG},'Sem dados':{bg:_C.laranjaClaro,fg:_FG},
+    'Descartado':{bg:_C.verdeMedio,fg:_FGW},'Repetida':{bg:_C.cinzaMedio,fg:_FGW},
+    'CDI':{bg:_C.laranjaMedio,fg:_FGW},'HD_Bact_FAV':{bg:_C.laranjaClaro,fg:_FG},
+    'HD_Bact_CDL':{bg:_C.pessego,fg:_FG},'HD_Bact_PC':{bg:_C.rosa,fg:_FG},
+    'HD_ILAV_FAV':{bg:_C.roxoClaro,fg:_FG},'HD_ILAV_CDL':{bg:_C.tealClaro,fg:_FG},
+    'HD_ILAV_PC':{bg:_C.azulClaro,fg:_FG},'Onco_Bact':{bg:_C.cinzaMedio,fg:_FGW},
+  };
+  const SETOR_CORES = {
+    'PS':{bg:_C.laranjaClaro,fg:_FG},'EPM':{bg:_C.pessego,fg:_FG},
+    'Cuidados Intermediários':{bg:_C.rosa,fg:_FG},'Psiquiatria':{bg:_C.roxoClaro,fg:_FG},
+    'Apartamento':{bg:_C.tealClaro,fg:_FG},'Oncologia':{bg:_C.azulClaro,fg:_FG},
+    'Clínica Cirúrgica':{bg:_C.verdeClaro,fg:_FG},'Semi':{bg:_C.amareloClaro,fg:_FG},
+    'Hemodiálise':{bg:_C.laranjaClaro,fg:_FG},'Pediatria':{bg:_C.cinzaAzul,fg:_FG},
+    'UTI':{bg:_C.azulClaro2,fg:_FG},'UTI Neo / Infantil':{bg:_C.pessego,fg:_FG},
+    'UTI C':{bg:_C.lilas,fg:_FG},'UTI Respiratória':{bg:_C.azulClaro,fg:_FG},
+    'Ginecologia/Obstetrícia':{bg:_C.cinzaAzul,fg:_FG},'Clínica Médica':{bg:_C.amareloClaro,fg:_FG},
+  };
+  const ATB_CORES = {
+    'Cefepime':{bg:_C.laranjaClaro,fg:_FG},'Ceftriaxone':{bg:_C.pessego,fg:_FG},
+    'Fosfomicina':{bg:_C.rosa,fg:_FG},'Anfotericina B':{bg:_C.roxoClaro,fg:_FG},
+    'Daptomicina':{bg:_C.tealClaro,fg:_FG},'Tigeciclina':{bg:_C.azulClaro,fg:_FG},
+    'Micafungina':{bg:_C.verdeClaro,fg:_FG},'Meropenem':{bg:_C.amareloClaro,fg:_FG},
+    'Piperacilina/Tazobactam':{bg:_C.laranjaClaro,fg:_FG},'Vancomicina':{bg:_C.cinzaAzul,fg:_FG},
+    'Teicoplanina':{bg:_C.azulClaro2,fg:_FG},'Polimixina B':{bg:_C.pessego,fg:_FG},
+    'Polimixina E (colestimetato)':{bg:_C.lilas,fg:_FG},'Amicacina':{bg:_C.roxoClaro,fg:_FG},
+    'Gentamicina':{bg:_C.amareloClaro,fg:_FG},'LINEZOLIDA':{bg:_C.cinzaAzul,fg:_FG},
+  };
+  const REC_CORES = {
+    'Sim':{bg:_C.laranjaClaro,fg:_FG},'Não':{bg:_C.pessego,fg:_FG},
+    'Com ajustes (especificados abaixo)':{bg:_C.rosa,fg:_FG},'Ficha Repetida':{bg:_C.roxoClaro,fg:_FG},
+    'ATB não controlado':{bg:_C.tealClaro,fg:_FG},'Suspenso':{bg:_C.azulClaro,fg:_FG},
+    'Audit_post':{bg:_C.verdeClaro,fg:_FG},
+  };
+  const _pill = (mapa, val) => {
+    const c = mapa[val] || { bg:'#eceff3', fg:_FG };
+    return `<span style="display:inline-block;padding:3px 9px;border-radius:5px;font-size:12px;line-height:1.3;white-space:nowrap;background:${c.bg};color:${c.fg}">${safe(val)}</span>`;
+  };
+  const _pillsIras = (val) => !val ? '' :
+    String(val).split(/\n+/).map(v => _pill(IRAS_CORES, v.trim())).join(' ');
+  const _pillsMulti = (mapa, arr) => {
+    const items = Array.isArray(arr) ? arr : (arr ? [arr] : []);
+    return items.map(v => _pill(mapa, v)).join(' ');
+  };
+  const IRAS_OPCOES = ['','PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC','CDI','Onco_Bact','Sem dados','Descartado','Repetida'];
+  const DESFECHO_OPCOES = ['','Sobrev_int','Sobrev_alta','Obito_R','Obito_NR','Alta'];
+
+  // ── A GRADE: /atb/admin/grid ───────────────────────────────────────────
+  app.get('/atb/admin/grid', adminRequired, async (req, res) => {
+    try {
+      const { q='', inst='', setor='', mes='', iras='', page='1' } = req.query;
+      const pageNum = Math.max(1, parseInt(page,10));
+      const pageSize = 80;
+      const offset = (pageNum-1)*pageSize;
+
+      const where = ['1=1'], params = [];
+      if (q.trim()) {
+        params.push(`%${q.toLowerCase()}%`);
+        where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length})`);
+      }
+      if (inst)  { params.push(inst);  where.push(`i.sigla = $${params.length}`); }
+      if (setor) { params.push(setor); where.push(`f.setor = $${params.length}`); }
+      if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)) = $${params.length}`); }
+      if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
+      else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras <> ''`);
+      else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);
+      const whereSql = where.join(' AND ');
+
+      const { rows:[{total}] } = await pool.query(`
+        SELECT COUNT(*) AS total FROM atb_fichas f
+        LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
+        LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${whereSql}`, params);
+
+      const { rows:[vig] } = await pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras<>'') AS confirmadas,
+          COUNT(*) FILTER (WHERE a.iras = 'Descartado') AS descartadas,
+          COUNT(*) FILTER (WHERE a.iras IS NULL OR a.iras = '') AS pendentes,
+          COUNT(*) FILTER (WHERE a.desfecho_iras IN ('Obito_R','Obito_NR')) AS obitos
+        FROM atb_fichas f
+        LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
+        LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${whereSql}`, params);
+
+      const { rows } = await pool.query(`
+        SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
+               f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,
+               f.link_exames, f.link_labs, f.data_referencia, f.jotform_created_at, f.created_at,
+               i.sigla AS instituicao,
+               a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data,
+               (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='pdf')    AS n_pdf,
+               (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='imagem') AS n_img
+        FROM atb_fichas f
+        LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
+        LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
+        WHERE ${whereSql}
+        ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC
+        LIMIT $${params.length+1} OFFSET $${params.length+2}`, [...params, pageSize, offset]);
+
+      const totalPages = Math.max(1, Math.ceil(parseInt(total,10)/pageSize));
+      const dtFmt = d => d ? new Date(d).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '—';
+
+      const linhas = rows.map((f,i) => {
+        const nome = f.paciente_nome || f.paciente_nome_raw || '—';
+        const dd = f.desfecho_data ? String(f.desfecho_data).slice(0,10) : '';
+        const irasVal = (f.iras||'').split(/\n+/)[0];
+        const anexos = (f.n_pdf>0?`<a href="/atb/admin/fichas/${f.id}" title="${f.n_pdf} PDF" style="text-decoration:none">📄${f.n_pdf}</a>`:'') +
+                       (f.n_img>0?` <span title="${f.n_img} imagem" style="color:#9aa0a6">📷${f.n_img}</span>`:'');
+        return `<tr data-ficha="${f.id}">
+          <td class="rownum">${offset+i+1}</td>
+          <td class="sticky-col" title="${safe(nome)}">
+            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>
+            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
+          </td>
+          <td class="sub">${safe(f.prontuario||'—')}</td>
+          <td>${f.setor?_pill(SETOR_CORES,f.setor):'—'}</td>
+          <td>${_pillsMulti(ATB_CORES, f.atb_solicitado)||'—'}</td>
+          <td style="text-align:center;font-family:monospace">${f.sofa!=null?f.sofa:'—'}</td>
+          <td>${_pillsMulti(REC_CORES, f.recomendacao_scih)}</td>
+          <td class="iras-cell">${_pillsIras(f.iras)}
+            <select data-field="iras" class="iras-select">
+              ${IRAS_OPCOES.map(o=>`<option value="${o}" ${irasVal===o?'selected':''}>${o||'— classificar —'}</option>`).join('')}
+            </select></td>
+          <td class="edit"><input data-field="etiol_iras" value="${safe(f.etiol_iras||'')}" placeholder="—" style="width:90px"></td>
+          <td class="edit"><input data-field="micro" value="${safe(f.micro||'')}" placeholder="—" style="width:150px"></td>
+          <td class="edit"><input data-field="saps3" type="number" value="${f.saps3!=null?f.saps3:''}" placeholder="—" style="width:52px;text-align:center"></td>
+          <td class="edit"><select data-field="desfecho_iras" style="width:108px">
+              ${DESFECHO_OPCOES.map(o=>`<option value="${o}" ${f.desfecho_iras===o?'selected':''}>${o||'—'}</option>`).join('')}
+            </select></td>
+          <td class="edit"><input data-field="desfecho_data" type="date" value="${dd}" style="width:120px"></td>
+          <td style="text-align:center;white-space:nowrap">
+            ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" title="Exames">🔗</a>`:''}
+            ${f.link_labs?`<a href="${safe(f.link_labs)}" target="_blank" title="LIS" style="margin-left:3px">🔬</a>`:''}
+          </td>
+          <td><span class="saved">✓</span></td>
+        </tr>`;
+      }).join('');
+
+      const vigTabs = [
+        ['','Todas',total],['pendente','A classificar',vig.pendentes],
+        ['confirmada','IrAS confirmadas',vig.confirmadas],['descartado','Descartadas',vig.descartadas],
+      ].map(([val,label,count])=>{
+        const active = iras===val;
+        const u = new URLSearchParams({...req.query,iras:val,page:'1'});
+        const cor = val==='confirmada'?'#e85d5d':val==='pendente'?'#5a9bf0':val==='descartado'?'#74c47d':'#888';
+        return `<a href="/atb/admin/grid?${u}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:18px;font-size:13px;text-decoration:none;font-weight:${active?600:400};background:${active?cor:'#eef0f2'};color:${active?'#fff':'#5f6368'}">${label} <span style="font-size:11px;opacity:.85">${count}</span></a>`;
+      }).join('');
+
+      const meses=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+      const mesOpts = meses.map((m,idx)=> idx===0?`<option value="">Todos os meses</option>`:`<option value="${idx}" ${String(idx)===mes?'selected':''}>${m}</option>`).join('');
+      const mkUrl = p => `/atb/admin/grid?${new URLSearchParams({...req.query,page:p})}`;
+      const pager = totalPages>1?`<div style="display:flex;align-items:center;gap:10px;font-size:13px">
+          ${pageNum>1?`<a href="${mkUrl(pageNum-1)}">←</a>`:'<span style="color:#ccc">←</span>'}
+          <span style="color:#80868b">Pág. ${pageNum}/${totalPages} · ${total} fichas</span>
+          ${pageNum<totalPages?`<a href="${mkUrl(pageNum+1)}">→</a>`:'<span style="color:#ccc">→</span>'}
+        </div>`:`<span style="color:#80868b;font-size:13px">${total} fichas</span>`;
+
+      const html = `
+        <div class="atb-light">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          <div style="display:flex;align-items:baseline;gap:14px">
+            <h1 style="margin:0;color:#202124">Controle ATB</h1>
+            <span style="color:#80868b;font-size:13px">Vigilância · avaliação · stewardship</span>
+          </div>
+          <div style="display:flex;gap:14px"><a href="/atb/admin">Resumo</a><a href="/atb/admin/config">Configurar</a></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+          <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${vig.confirmadas}</div><div class="ml">IrAS confirmadas</div></div>
+          <div class="metric" style="border-left-color:#5a9bf0"><div class="mv" style="color:#2c6fb5">${vig.pendentes}</div><div class="ml">A classificar</div></div>
+          <div class="metric" style="border-left-color:#74c47d"><div class="mv" style="color:#3a8a4a">${vig.descartadas}</div><div class="ml">Descartadas</div></div>
+          <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${vig.obitos}</div><div class="ml">Óbitos no recorte</div></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}</div>
+        <form method="GET" action="/atb/admin/grid" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+          <input type="hidden" name="iras" value="${safe(iras)}">
+          <input name="q" value="${safe(q)}" placeholder="Paciente, prontuário..." class="fil" style="width:210px">
+          <select name="inst" class="fil"><option value="">Todos hospitais</option><option value="HUSF" ${inst==='HUSF'?'selected':''}>HUSF</option><option value="H2" ${inst==='H2'?'selected':''}>H2</option></select>
+          <select name="mes" class="fil">${mesOpts}</select>
+          <input name="setor" value="${safe(setor)}" placeholder="Setor" class="fil" style="width:120px">
+          <button class="btn-fil">Filtrar</button>
+          ${(q||inst||mes||setor)?`<a href="/atb/admin/grid?iras=${safe(iras)}" style="color:#80868b;font-size:13px">Limpar</a>`:''}
+          <div style="margin-left:auto">${pager}</div>
+        </form>
+        <div class="grid-wrap">
+          <table class="atb-grid">
+            <thead><tr>
+              <th class="rownum">#</th><th class="sticky-col">Paciente</th>
+              <th>Pront.</th><th>Setor</th><th>ATB</th>
+              <th style="text-align:center">SOFA</th><th>Parecer</th>
+              <th class="grp">IrAS</th><th class="grp">Etiol</th><th class="grp">Microrganismo</th>
+              <th class="grp">SAPS3</th><th class="grp">Desfecho</th><th class="grp">Dt. desf.</th>
+              <th style="text-align:center">Links</th><th></th>
+            </tr></thead>
+            <tbody>${linhas || '<tr><td colspan="15" style="padding:30px;text-align:center;color:#80868b">Nenhuma ficha no recorte.</td></tr>'}</tbody>
+          </table>
+        </div>
+        </div>
+        <style>
+          .atb-light h1{font-weight:600}
+          .atb-light a{color:#3b6fd4;text-decoration:none}
+          .atb-light .metric{background:#fff;border:1px solid #e8eaed;border-left:3px solid;border-radius:8px;padding:10px 14px}
+          .atb-light .metric .mv{font-size:20px;font-weight:600}
+          .atb-light .metric .ml{font-size:10px;color:#80868b;text-transform:uppercase;letter-spacing:.05em;margin-top:1px}
+          .atb-light .fil{padding:7px 11px;border-radius:7px;border:1px solid #dadce0;background:#fff;color:#202124;font-size:13px}
+          .atb-light .btn-fil{padding:7px 16px;background:#2bb673;color:#fff;border:0;border-radius:7px;font-size:13px;cursor:pointer;font-weight:600}
+          .atb-light .grid-wrap{overflow-x:auto;border:1px solid #e8eaed;border-radius:10px;background:#fff}
+          table.atb-grid{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:13px}
+          table.atb-grid th{position:sticky;top:0;z-index:5;background:#fff;color:#5f6368;text-align:left;font-size:11px;font-weight:600;padding:11px 12px;border-bottom:1px solid #e0e2e6;border-right:1px solid #f0f1f3;white-space:nowrap}
+          table.atb-grid th.grp{background:#f3faf6;color:#1a8a5a}
+          table.atb-grid td{padding:8px 12px;border-bottom:1px solid #f0f1f3;border-right:1px solid #f6f7f8;white-space:nowrap;vertical-align:middle;color:#202124}
+          table.atb-grid tbody tr:hover td{background:#fafbfc}
+          table.atb-grid tbody tr:hover td.sticky-col{background:#f5f7f9}
+          .atb-light .rownum{color:#bdc1c6;font-size:12px;text-align:center;width:34px}
+          .atb-light .sticky-col{position:sticky;left:0;z-index:4;background:#fff;box-shadow:1px 0 0 #e8eaed;min-width:175px;max-width:175px}
+          table.atb-grid th.sticky-col{z-index:6}
+          .atb-light .pac-link{font-weight:600;font-size:13px;color:#202124!important;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .atb-light .sub{font-size:11px;color:#9aa0a6}
+          .atb-light .edit input,.atb-light .edit select,.atb-light .iras-select{border:1px solid #dadce0;border-radius:5px;color:#202124;font-size:12px;padding:4px 7px;font-family:inherit;background:#fff}
+          .atb-light .edit input:focus,.atb-light .edit select:focus,.atb-light .iras-select:focus{outline:none;border-color:#2bb673;box-shadow:0 0 0 2px rgba(43,182,115,.2)}
+          .atb-light .edit input::placeholder{color:#bdc1c6}
+          .atb-light .iras-cell .iras-select{margin-top:3px;width:140px;display:block}
+          .atb-light .saved{opacity:0;color:#2bb673;font-size:13px;transition:opacity .3s}
+        </style>
+        <script>
+        (function(){
+          var timers={};
+          function salvar(id,field,value,row){
+            fetch('/atb/admin/api/avaliacao/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({field:field,value:value})})
+            .then(function(r){return r.json()}).then(function(j){
+              if(j.ok){var s=row.querySelector('.saved');if(s){s.style.opacity='1';setTimeout(function(){s.style.opacity='0'},1100);}}
+            }).catch(function(){});
+          }
+          document.querySelectorAll('tr[data-ficha]').forEach(function(row){
+            var id=row.getAttribute('data-ficha');
+            row.querySelectorAll('[data-field]').forEach(function(el){
+              var ev=(el.tagName==='SELECT'||el.type==='date')?'change':'input';
+              el.addEventListener(ev,function(){
+                var field=el.getAttribute('data-field');
+                clearTimeout(timers[id+field]);
+                timers[id+field]=setTimeout(function(){salvar(id,field,el.value,row)},ev==='input'?700:0);
+              });
+            });
+          });
+        })();
+        </script>`;
+      res.send(renderShell('ATB · Controle', html));
+    } catch (e) {
+      console.error('[atb] grid error:', e);
+      res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(e.message)}</p></div>`));
+    }
+  });
+
+  // ── Endpoint: grava célula de avaliação inline ─────────────────────────
+  app.post('/atb/admin/api/avaliacao/:id', adminRequired, async (req, res) => {
+    const id = parseInt(req.params.id,10);
+    const { field, value } = req.body || {};
+    const OK = ['iras','etiol_iras','micro','saps3','tempo_saps','desfecho_iras','desfecho_data'];
+    if (!OK.includes(field)) return res.status(400).json({ ok:false, error:'campo inválido' });
+    try {
+      let v = value === '' ? null : value;
+      if ((field==='saps3'||field==='tempo_saps') && v!=null) v = parseFloat(v);
+      await pool.query(`
+        INSERT INTO atb_avaliacoes (ficha_id, ${field}, avaliado_por, updated_at)
+        VALUES ($1,$2,$3,now())
+        ON CONFLICT (ficha_id) DO UPDATE SET ${field}=EXCLUDED.${field}, avaliado_por=$3, updated_at=now()
+      `, [id, v, req.user?.id]);
+      res.json({ ok:true });
+    } catch (e) {
+      console.error('[atb] inline save error:', e.message);
+      res.status(500).json({ ok:false, error:e.message });
+    }
+  });
+
+  // ── Serve anexo (PDF/imagem via stream do R2) ──────────────────────────
+  app.get('/atb/admin/ficha/:fid/anexo/:aid', adminRequired, async (req, res) => {
+    try {
+      const fid = parseInt(req.params.fid,10);
+      const aid = parseInt(req.params.aid,10);
+      const { rows:[a] } = await pool.query(
+        'SELECT r2_key, nome_original, tipo FROM atb_ficha_imagens WHERE id=$1 AND ficha_id=$2',
+        [aid, fid]
+      );
+      if (!a) return res.status(404).send('Anexo não encontrado');
+
+      const r2resp = await fetchR2Stream(a.r2_key);
+      const ct = r2resp.headers.get('content-type') ||
+                 (a.tipo==='pdf' ? 'application/pdf' : 'application/octet-stream');
+      res.setHeader('Content-Type', ct);
+      const len = r2resp.headers.get('content-length');
+      if (len) res.setHeader('Content-Length', len);
+      const nome = (a.nome_original || `anexo-${aid}`).replace(/"/g,'');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(nome)}"`);
+
+      const reader = r2resp.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+      res.end();
+    } catch (e) {
+      console.error('[atb] anexo error:', e.message);
+      res.status(500).send('Falha ao carregar anexo');
+    }
   });
 
 }

@@ -159,3 +159,37 @@ export async function deleteFromR2(key) {
     console.warn('[lab-storage] deleteFromR2 best-effort error:', e.message);
   }
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ADIÇÃO ao lab-storage.js
+// Cole esta função no FINAL do lab-storage.js (depois de deleteFromR2),
+// antes de qualquer coisa. Ela reusa os helpers já existentes no arquivo
+// (buildAuthHeader, nowParts, cfg, encodeR2Key, EMPTY_HASH).
+// ════════════════════════════════════════════════════════════════════
+
+// ── Busca objeto do R2 e devolve a Response (para stream/pipe) ─────────────────
+// Diferente de fetchR2ImageAsDataURI (que carrega tudo em memória como base64),
+// esta retorna a Response do fetch para repassar o corpo direto ao cliente —
+// adequado para PDFs grandes sem estourar memória.
+export async function fetchR2Stream(key) {
+  const { bucket, endpoint } = cfg();
+  const host = new URL(endpoint).host;
+  const { amzdate, datestamp } = nowParts();
+
+  const { authorization } = buildAuthHeader({
+    method: 'GET', key, payloadHash: EMPTY_HASH, amzdate, datestamp, host,
+  });
+
+  const url  = `${endpoint}/${encodeURIComponent(bucket)}/${encodeR2Key(key)}`;
+  const resp = await fetch(url, {
+    headers: {
+      'Host':                  host,
+      'X-Amz-Content-Sha256': EMPTY_HASH,
+      'X-Amz-Date':           amzdate,
+      'Authorization':        authorization,
+    },
+  });
+
+  if (!resp.ok) throw new Error(`R2 GET ${resp.status} — ${key}`);
+  return resp; // resp.body é um ReadableStream; resp.headers tem content-type/length
+}

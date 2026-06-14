@@ -1013,6 +1013,11 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
       }
       res.end();
     } catch (e) {
+      console.error('[atb] anexo error:', e.message);
+      res.status(500).send('Falha ao carregar anexo');
+    }
+  });
+
   // ════════════════════════════════════════════════════════════════════════
   // EDITOR DO FORMULÁRIO (Capacidade A: editar opções) — /atb/admin/form
   // ════════════════════════════════════════════════════════════════════════

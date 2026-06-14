@@ -13,6 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
+import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +40,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   // ── Complementação: cria a coluna de rastreabilidade no boot ──────────
   ensureParecerSchema(pool).catch(e => console.error('[atb] falha ao preparar parecer:', e.message));
   ensureComplementoSchema(pool).catch(e => console.error('[atb] falha ao preparar complemento:', e.message));
+  ensureAnexosSchema(pool).catch(e => console.error('[atb] falha ao preparar anexos:', e.message));
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -46,6 +48,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   registerComplementoRoutes(app, pool, adminRequired);
   registerFichaCardRoutes(app, pool, adminRequired);
   registerFichaViewRoutes(app, pool, adminRequired);
+  registerAnexosRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

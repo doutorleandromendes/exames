@@ -12,7 +12,7 @@
 //    // no boot:        await ensureComplementoSchema(pool);
 //    // em registerAtbRoutes:  registerComplementoRoutes(app, pool, adminRequired);
 // ════════════════════════════════════════════════════════════════════════════
-
+import { anexosManagerWidget } from './atb-anexos-routes.js';
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 
 const GRUPOS = {
@@ -240,7 +240,9 @@ function paginaComplemento(f) {
       <textarea name="complemento_scih" placeholder="Observações complementares do SCIH...">${safe(f.complemento_scih || '')}</textarea>
     </div>
   </form>
-
+   <div class="wrap">
+    ${anexosManagerWidget(f.id)}
+  </div>
   <div class="rodape">
     <div class="nome-campo">
       <label>Quem está preenchendo <span class="req">*</span></label>

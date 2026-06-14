@@ -7,6 +7,7 @@ import { ensureFormSchemaTable, getFormSchema, saveFormSchema } from './atb-form
 import { carregarPrescritores, validarFormatoCRM, buscarCRM, statusCache } from './atb-prescritores.js';
 import { registerParecerApiRoutes } from './atb-parecer-routes.js';
 import { ensureComplementoSchema, registerComplementoRoutes } from './atb-complemento-routes.js';
+import { ensureParecerSchema, registerParecerEditRoutes, renderParecerCell, parecerGridAssets } from './atb-parecer-edit-routes.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -34,8 +35,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   carregarPrescritores().catch(e => console.error('[atb] falha ao carregar prescritores:', e.message));
 
   // ── Complementação: cria a coluna de rastreabilidade no boot ──────────
+  ensureParecerSchema(pool).catch(e => console.error('[atb] falha ao preparar parecer:', e.message));
   ensureComplementoSchema(pool).catch(e => console.error('[atb] falha ao preparar complemento:', e.message));
-
+  
+  registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
   registerParecerApiRoutes(app, pool);
   registerComplementoRoutes(app, pool, adminRequired);
@@ -612,6 +615,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
               ${Array.isArray(f.recomendacao_scih)&&f.recomendacao_scih.length
                 ?`<div style="margin-top:8px">${f.recomendacao_scih.map(r=>`<span style="display:inline-block;font-size:11px;margin:2px;padding:2px 8px;border-radius:8px;background:#20242b;color:#a7adbb">${safe(r)}</span>`).join('')}</div>`:''}
               ${f.recomendacoes_especificacao?`<p style="font-size:12px;color:#a7adbb;margin-top:6px">${safe(f.recomendacoes_especificacao)}</p>`:''}
+              <a href="/atb/admin/parecer/${id}" style="display:inline-block;margin-top:10px;padding:8px 14px;background:#00469e;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">✎ Emitir / editar parecer</a>
             </div>
           </div>
         </div>`;
@@ -853,7 +857,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           <td>${f.setor?_pill(SETOR_CORES,f.setor):'—'}</td>
           <td>${_pillsMulti(ATB_CORES, f.atb_solicitado)||'—'}</td>
           <td style="text-align:center;font-family:monospace">${f.sofa!=null?f.sofa:'—'}</td>
-          <td>${_pillsMulti(REC_CORES, f.recomendacao_scih)}</td>
+          ${renderParecerCell(f, safe)}
           <td class="iras-cell">${_pillsIras(f.iras)}
             <select data-field="iras" class="iras-select">
               ${IRAS_OPCOES.map(o=>`<option value="${o}" ${irasVal===o?'selected':''}>${o||'— classificar —'}</option>`).join('')}
@@ -981,7 +985,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
             });
           });
         })();
-        </script>`;
+       </script>
+        ${parecerGridAssets()}`;
       res.send(renderShell('ATB · Controle', html));
     } catch (e) {
       console.error('[atb] grid error:', e);

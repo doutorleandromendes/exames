@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
+import { applyGridFilters, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -809,6 +810,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   app.get('/atb/admin/grid', adminRequired, async (req, res) => {
     try {
       const { q='', inst='', setor='', mes='', iras='', page='1' } = req.query;
+      const cols = (req.query.cols || '').split(',').filter(Boolean);
       const pageNum = Math.max(1, parseInt(page,10));
       const pageSize = 80;
       const offset = (pageNum-1)*pageSize;
@@ -824,6 +826,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
       if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
       else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras <> ''`);
       else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);
+      applyGridFilters(req.query, where, params);
       const whereSql = where.join(' AND ');
 
       const { rows:[{total}] } = await pool.query(`
@@ -847,7 +850,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
                f.link_exames, f.link_labs, f.data_referencia, f.jotform_created_at, f.created_at,
                i.sigla AS instituicao,
                a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data,
-               (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='pdf')    AS n_pdf,
+               ${extraSelectSql(cols)}(SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='pdf')    AS n_pdf,
                (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='imagem') AS n_img
         FROM atb_fichas f
         LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
@@ -930,16 +933,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${vig.obitos}</div><div class="ml">Óbitos no recorte</div></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}</div>
-        <form method="GET" action="/atb/admin/grid" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
-          <input type="hidden" name="iras" value="${safe(iras)}">
-          <input name="q" value="${safe(q)}" placeholder="Paciente, prontuário..." class="fil" style="width:210px">
-          <select name="inst" class="fil"><option value="">Todos hospitais</option><option value="HUSF" ${inst==='HUSF'?'selected':''}>HUSF</option><option value="H2" ${inst==='H2'?'selected':''}>H2</option></select>
-          <select name="mes" class="fil">${mesOpts}</select>
-          <input name="setor" value="${safe(setor)}" placeholder="Setor" class="fil" style="width:120px">
-          <button class="btn-fil">Filtrar</button>
-          ${(q||inst||mes||setor)?`<a href="/atb/admin/grid?iras=${safe(iras)}" style="color:#80868b;font-size:13px">Limpar</a>`:''}
-          <div style="margin-left:auto">${pager}</div>
-        </form>
+        ${gridControlsUI(req.query, pager)}
         <div class="grid-wrap">
           <table class="atb-grid">
             <thead><tr>
@@ -948,9 +942,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
               <th style="text-align:center">SOFA</th><th>Parecer</th>
               <th class="grp">IrAS</th><th class="grp">Etiol</th><th class="grp">Microrganismo</th>
               <th class="grp">SAPS3</th><th class="grp">Desfecho</th><th class="grp">Dt. desf.</th>
+              ${renderExtraHeaders(cols, safe)}
               <th style="text-align:center">Links</th><th></th>
             </tr></thead>
-            <tbody>${linhas || '<tr><td colspan="15" style="padding:30px;text-align:center;color:#80868b">Nenhuma ficha no recorte.</td></tr>'}</tbody>
+           <tbody>${linhas || `<tr><td colspan="${15 + cols.length}" style="padding:30px;text-align:center;color:#80868b">Nenhuma ficha no recorte.</td></tr>`}</tbody>
           </table>
         </div>
         </div>

@@ -327,33 +327,82 @@
     return blocos;
   }
 
-  // ── CRM (valida contra a API e preenche o nome do prescritor) ─────────────
+  // ── CRM: formato → cadastrado (auto) ou fora do cadastro (nome + declaração) ──
   function CampoCRM(p) {
     var f = p.campo;
-    var st = p.crmState;
+    var st = p.crmState; // { status, nome }  status: ''|checando|ok|fora|invalido|erro
     function valida(crm) {
-      if (!crm) { p.setCrm({ status: '', nome: '' }); p.set('prescritor_nome', ''); return; }
+      if (!crm) {
+        p.setCrm({ status: '', nome: '' });
+        p.set('prescritor_nome', ''); p.set('_crm_cadastrado', undefined);
+        p.set('_declaracao', undefined);
+        return;
+      }
       p.setCrm({ status: 'checando', nome: '' });
-      fetch('/atb/api/validar-crm?crm=' + encodeURIComponent(crm) + '&instituicao=' + encodeURIComponent(p.inst))
+      fetch('/atb/api/validar-crm?crm=' + encodeURIComponent(crm))
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.encontrado) { p.setCrm({ status: 'ok', nome: d.nome }); p.set('prescritor_nome', d.nome); }
-          else { p.setCrm({ status: 'nao', nome: '' }); p.set('prescritor_nome', ''); }
+          if (!d.valido) {
+            // Salvaguarda 1: formato reprovado
+            p.setCrm({ status: 'invalido', nome: '', motivo: d.motivo || 'CRM inválido' });
+            p.set('prescritor_nome', ''); p.set('_crm_cadastrado', false);
+            p.set('_declaracao', undefined);
+          } else if (d.cadastrado) {
+            // cadastrado: preenche nome automaticamente
+            p.setCrm({ status: 'ok', nome: d.nome });
+            p.set('prescritor_nome', d.nome); p.set('_crm_cadastrado', true);
+            p.set('_declaracao', undefined);
+          } else {
+            // formato ok, fora do cadastro: exige nome manual + declaração
+            p.setCrm({ status: 'fora', nome: '' });
+            p.set('prescritor_nome', ''); p.set('_crm_cadastrado', false);
+            p.set('_declaracao', false);
+          }
         })
         .catch(function () { p.setCrm({ status: 'erro', nome: '' }); });
     }
+
+    var fora = st && st.status === 'fora';
+    var declarado = p.valores['_declaracao'] === true;
+
     return e('div', { className: 'campo' },
       e(Rotulo, { texto: f.label, required: f.required }),
       e('input', {
-        type: 'text', className: p.erro ? 'erro' : '', value: p.valor || '',
-        placeholder: 'Digite o CRM',
-        onChange: function (ev) { p.set(f.key, ev.target.value); },
+        type: 'text', className: (p.erro || (st && st.status === 'invalido')) ? 'erro' : '',
+        value: p.valor || '', placeholder: 'Digite o CRM (somente números)',
+        inputMode: 'numeric',
+        onChange: function (ev) { p.set(f.key, ev.target.value.replace(/\D/g, '')); },
         onBlur: function (ev) { valida(ev.target.value.trim()); }
       }),
       st && st.status === 'checando' ? e('div', { className: 'dica' }, 'Verificando…') : null,
-      st && st.status === 'ok' ? e('div', { className: 'idade' }, '✓ ' + st.nome) : null,
-      st && st.status === 'nao' ? e('div', { className: 'erro-msg' }, 'CRM não encontrado nesta instituição') : null,
-      p.erro ? e('div', { className: 'erro-msg' }, p.erro) : null
+      st && st.status === 'ok' ? e('div', { className: 'idade' }, '✓ ' + st.nome + ' · cadastrado') : null,
+      st && st.status === 'invalido' ? e('div', { className: 'erro-msg' }, st.motivo) : null,
+      st && st.status === 'erro' ? e('div', { className: 'dica' }, 'Não foi possível verificar agora. Tente novamente.') : null,
+      p.erro ? e('div', { className: 'erro-msg' }, p.erro) : null,
+
+      // Fluxo "fora do cadastro": aviso + nome manual + declaração
+      fora ? e('div', { className: 'aviso-fora' },
+        e('div', { className: 'aviso-titulo' }, '⚠ CRM não consta no cadastro do hospital'),
+        e('div', { className: 'aviso-texto' },
+          'Para prosseguir, informe seu nome completo e confirme a declaração abaixo.'),
+        e('div', { className: 'mini-campo', style: { marginTop: '12px' } },
+          e('span', { className: 'mini' }, 'Nome completo do prescritor'),
+          e('input', {
+            type: 'text', className: p.erroNome ? 'erro' : '',
+            value: p.valores['prescritor_nome'] || '',
+            placeholder: 'Digite seu nome completo',
+            onChange: function (ev) { p.set('prescritor_nome', ev.target.value.toUpperCase()); }
+          })),
+        e('div', {
+          className: 'declaracao' + (declarado ? ' on' : '') + (p.erroDecl ? ' erro' : ''),
+          onClick: function () { p.set('_declaracao', !declarado); }
+        },
+          e('span', { className: 'marca check' }),
+          e('span', { className: 'declaracao-txt' },
+            'Declaro que sou o(a) profissional responsável por esta solicitação, ' +
+            'portador(a) do CRM ' + (p.valor || '') + ', e que as informações são verídicas.')),
+        p.erroDecl ? e('div', { className: 'erro-msg' }, 'É necessário confirmar a declaração para enviar.') : null
+      ) : null
     );
   }
 
@@ -473,7 +522,19 @@
       visiveis.forEach(function (sec) {
         sec.campos.forEach(function (c) {
           var v = valores[c.key];
-          if (c.validate === 'nome_completo') {
+          if (c.type === 'crm') {
+            // CRM: precisa de status resolvido. Se fora do cadastro, exige nome + declaração.
+            if (!v) { novos[c.key] = 'Campo obrigatório'; return; }
+            if (valores['_crm_cadastrado'] === false) {
+              var nomeManual = valores['prescritor_nome'];
+              if (!nomeManual || String(nomeManual).trim().split(/\s+/).filter(Boolean).length < 2) {
+                novos['crm__nome'] = 'Informe o nome completo';
+              }
+              if (valores['_declaracao'] !== true) {
+                novos['crm__decl'] = 'Confirme a declaração';
+              }
+            }
+          } else if (c.validate === 'nome_completo') {
             var msg = validaNomeCompleto(v); if (msg) novos[c.key] = msg;
           } else if (c.required) {
             var vazio = Array.isArray(v) ? v.length === 0 : (v === undefined || v === '' || v === null);
@@ -532,6 +593,7 @@
               return e(Campo, {
                 key: c.key, campo: c, valor: valores[c.key], valores: valores,
                 erro: erros[c.key], set: set, inst: inst,
+                erroNome: erros['crm__nome'], erroDecl: erros['crm__decl'],
                 crmState: crm, setCrm: setCrm
               });
             }))

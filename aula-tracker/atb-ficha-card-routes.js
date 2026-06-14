@@ -37,6 +37,22 @@ const _bool = b => b === true ? 'Sim' : b === false ? 'Não' : '—';
 const _dt = d => d ? new Date(d).toLocaleDateString('pt-BR') : '—';
 const _txt = s => (s == null || s === '') ? '—' : String(s);
 
+// idade calculada a partir da DN (anos; meses se <2a; dias se <2m). Fallback: idade armazenada.
+function _idade(dn, fallback) {
+  if (!dn) return fallback || null;
+  const d = new Date(dn);
+  if (isNaN(d.getTime())) return fallback || null;
+  const now = new Date();
+  let anos = now.getFullYear() - d.getFullYear();
+  const mDiff = now.getMonth() - d.getMonth();
+  if (mDiff < 0 || (mDiff === 0 && now.getDate() < d.getDate())) anos--;
+  if (anos >= 2) return anos + ' anos';
+  let meses = anos * 12 + mDiff - (now.getDate() < d.getDate() ? 1 : 0);
+  if (meses >= 2) return meses + ' meses';
+  const dias = Math.max(0, Math.floor((now - d) / 86400000));
+  return dias + ' dias';
+}
+
 // ── monta um bloco "definição" (lista de pares rótulo/valor) ─────────────────
 function _bloco(titulo, itens, s) {
   const linhas = itens
@@ -176,6 +192,14 @@ function renderCardBody(f, evol, s) {
     blocos.push(compHtml.replace('</div>', por + '</div>'));
   }
 
+  // ── ACESSOS (links gerados) — sempre no topo quando existirem ──────────────
+  const links = [];
+  if (f.link_exames) links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
+  if (f.link_labs)   links.push(`<a href="${s(f.link_labs)}" target="_blank" rel="noopener" class="fc-link">🔬 LIS (labs)</a>`);
+  if (links.length) {
+    blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
+  }
+
   return blocos.filter(Boolean).join('');
 }
 
@@ -203,6 +227,10 @@ export function fichaCardAssets() {
     #fc-modal .fc-v{flex:1;color:#1a2733;white-space:pre-wrap;word-break:break-word}
     #fc-modal .fc-pos{font-size:13px}
     #fc-modal .fc-mut{color:#9aa0a6;font-size:11px}
+    #fc-modal .fc-links{display:flex;flex-wrap:wrap;gap:8px}
+    #fc-modal .fc-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;text-decoration:none;
+      padding:7px 12px;border:1px solid #bcd0ec;border-radius:8px;background:#eef4fc;color:#0c447c;font-weight:500}
+    #fc-modal .fc-link:hover{background:#e0ebfa}
     #fc-modal .fc-foot{border-top:1px solid #eef1f5;padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;background:#fafbfc}
     #fc-modal .fc-btn{font-size:13px;padding:9px 16px;border-radius:8px;cursor:pointer;text-decoration:none;
       border:1px solid #d8dee6;background:#fff;color:#0c447c;font-weight:500}
@@ -238,7 +266,7 @@ export function fichaCardAssets() {
 
     function fechar(){ ov.style.display='none'; }
     function abrir(id){
-      btnCompleta.href = '/atb/admin/fichas/' + id;
+      btnCompleta.href = '/atb/admin/ficha/' + id;
       btnParecer.href  = '/atb/admin/parecer/' + id;
       nomeEl.textContent = '—'; metaEl.textContent = '';
       contentEl.innerHTML = '<div class="fc-loading">Carregando…</div>';
@@ -297,8 +325,10 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         preenchido_por_nome: f.preenchido_por_nome, evol_updated: f.evol_updated,
       };
       const nome = f.paciente_nome || f.paciente_nome_raw || '—';
+      const idade = _idade(f.paciente_dn, f.paciente_idade);
       const metaParts = [
         f.prontuario ? 'Pront. ' + f.prontuario : '',
+        idade || '',
         f.setor || '',
         f.leito ? 'Leito ' + f.leito : '',
         f.equipe_responsavel || '',

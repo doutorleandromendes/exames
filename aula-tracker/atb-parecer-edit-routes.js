@@ -72,6 +72,18 @@ export const PARECER_ESPECIFICACOES = [
   'Dados inconsistentes, favor rever preenchimento.',
 ];
 
+// Cores do veredito na coluna "Parecer" — fiéis ao JotForm Tables (paleta clara _C).
+export const PARECER_VEREDITO_CORES = {
+  'Sim':                                 '#fcd9b6', // laranjaClaro
+  'Não':                                 '#fcdcd2', // pessego
+  'Com ajustes (especificados abaixo)':  '#f8d7e8', // rosa
+  'ATB não controlado':                  '#c3efe0', // tealClaro
+  'Suspenso':                            '#cfe9f7', // azulClaro
+  'Ficha Repetida':                      '#e3d4f5', // roxoClaro
+  'Audit_post':                          '#d4f0c4', // verdeClaro
+};
+export const PARECER_VEREDITO_FG = '#3a3a3a';
+
 // helper local (caso quem chame não passe um safe)
 function _safe(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -110,8 +122,11 @@ export function renderParecerCell(f, safe) {
   const btnLabel = espec ? '✎ ' + s(preview) : '+ especificação';
   const btnCls = espec ? 'parecer-espec-btn tem' : 'parecer-espec-btn';
 
+  const cor = PARECER_VEREDITO_CORES[ver];
+  const selStyle = cor ? ` style="background:${cor};color:${PARECER_VEREDITO_FG};border-color:${cor}"` : '';
+
   return `<td class="parecer-cell">
-    <select class="parecer-veredito" data-fid="${f.id}">${opts}</select>
+    <select class="parecer-veredito" data-fid="${f.id}"${selStyle}>${opts}</select>
     <button type="button" class="${btnCls}" data-fid="${f.id}"
       data-espec="${s(espec)}" title="${espec ? s(espec) : 'Adicionar especificação'}">${btnLabel}</button>
   </td>`;
@@ -122,6 +137,7 @@ export function renderParecerCell(f, safe) {
 // ════════════════════════════════════════════════════════════════════════════
 export function parecerGridAssets() {
   const FRASES = JSON.stringify(PARECER_ESPECIFICACOES);
+  const CORES = JSON.stringify(PARECER_VEREDITO_CORES);
 
   // CSS pensado p/ a grade clara (.atb-light). Cores alinhadas à Complementação.
   const css = `
@@ -176,6 +192,8 @@ export function parecerGridAssets() {
   <script>
   (function(){
     var FRASES = ${FRASES};
+    var CORES = ${CORES};
+    var COR_FG = '${PARECER_VEREDITO_FG}';
     var pop = document.getElementById('parecer-pop');
     if(!pop) return;
     var busca = pop.querySelector('.busca');
@@ -193,9 +211,16 @@ export function parecerGridAssets() {
       setTimeout(function(){ el.style.boxShadow='none'; }, 700); }
 
     // ── veredito inline ──────────────────────────────────────────────
+    function corVeredito(sel){
+      var c = CORES[sel.value];
+      if(c){ sel.style.background=c; sel.style.color=COR_FG; sel.style.borderColor=c; }
+      else { sel.style.background='#fff'; sel.style.color='#1a2733'; sel.style.borderColor='#d8dee6'; }
+    }
     document.querySelectorAll('.parecer-veredito').forEach(function(sel){
+      corVeredito(sel);
       sel.addEventListener('change', function(){
         var fid = sel.getAttribute('data-fid');
+        corVeredito(sel);
         postParecer(fid, {veredito: sel.value}, function(){ flash(sel); });
       });
     });

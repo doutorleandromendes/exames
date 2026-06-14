@@ -3,6 +3,7 @@
 import { handleWebhook, iniciarPolling, rodarTriagemIA } from './atb-sync.js';
 import { parseFormPayload } from './atb-parser.js';
 import { fetchR2Stream, fetchR2ImageAsDataURI } from './lab-storage.js';
+import { ensureFormSchemaTable, getFormSchema, saveFormSchema } from './atb-form-schema.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -23,13 +24,44 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   // ── Polling no startup ────────────────────────────────────────────────
   iniciarPolling(pool).catch(e => console.error('[atb] falha ao iniciar polling:', e.message));
 
-  // ── Formulário do prescritor (público) ────────────────────────────────
+  // ── Schema do formulário: cria tabela + semeia HUSF/H2 no boot ─────────
+  ensureFormSchemaTable(pool).catch(e => console.error('[atb] falha ao preparar schema:', e.message));
+
+  // Logo institucional (data URI) lido uma vez do disco
+  let ATB_LOGO = '';
+  try { ATB_LOGO = fs.readFileSync(path.join(__dirname, 'atb-logo.b64'), 'utf8').trim(); }
+  catch (e) { console.warn('[atb] logo não encontrado:', e.message); }
+
+  // ── Formulário do prescritor (público, motor schema-driven) ────────────
   app.get('/atb/form', (req, res) => {
-    const inst = (req.query.inst || 'HUSF').replace(/'/g, '');
+    const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     let html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');
-    html = html.replace("window.ATB_INSTITUICAO || 'HUSF'", `'${inst}'`);
+    // injeta instituição + logo antes do bootstrap do motor
+    const inject = `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_LOGO=${JSON.stringify(ATB_LOGO)};</script>`;
+    html = html.replace(
+      `<script>window.ATB_INSTITUICAO = window.ATB_INSTITUICAO || 'HUSF';</script>`,
+      inject
+    );
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
+  });
+
+  // ── Serve o motor de renderização (JS) ─────────────────────────────────
+  app.get('/atb/form-engine.js', (req, res) => {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.sendFile(path.join(__dirname, 'atb-form-engine.js'));
+  });
+
+  // ── API: definição do formulário (público — o motor consome) ───────────
+  app.get('/atb/api/form-schema', async (req, res) => {
+    const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
+    try {
+      const def = await getFormSchema(pool, inst);
+      if (!def) return res.status(404).json({ erro: 'schema não encontrado' });
+      res.json(def);
+    } catch (e) {
+      res.status(500).json({ erro: e.message });
+    }
   });
 
   // ── API: valida CRM ───────────────────────────────────────────────────
@@ -876,6 +908,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
         </div>
         </div>
         <style>
+          /* escapa do .wrap (max-width:1100px) do renderShell: estica para quase toda a largura e pinta fundo claro */
+          .atb-light{position:relative;left:50%;right:50%;margin-left:-49vw;margin-right:-49vw;width:98vw;background:#f5f6f8;min-height:100vh;margin-top:-40px;padding:28px 24px 60px;border-radius:0}
           .atb-light h1{font-weight:600}
           .atb-light a{color:#3b6fd4;text-decoration:none}
           .atb-light .metric{background:#fff;border:1px solid #e8eaed;border-left:3px solid;border-radius:8px;padding:10px 14px}
@@ -979,8 +1013,88 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
       }
       res.end();
     } catch (e) {
-      console.error('[atb] anexo error:', e.message);
-      res.status(500).send('Falha ao carregar anexo');
+  // ════════════════════════════════════════════════════════════════════════
+  // EDITOR DO FORMULÁRIO (Capacidade A: editar opções) — /atb/admin/form
+  // ════════════════════════════════════════════════════════════════════════
+  app.get('/atb/admin/form', adminRequired, async (req, res) => {
+    const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
+    let def;
+    try { def = await getFormSchema(pool, inst); }
+    catch (e) { return res.send(renderShell('ATB · Editor', `<div class="card"><p>Erro: ${safe(e.message)}</p></div>`)); }
+    if (!def) return res.send(renderShell('ATB · Editor', `<div class="card"><p>Schema não encontrado para ${safe(inst)}.</p></div>`));
+
+    // Lista apenas campos com opções editáveis (select/radio/checkbox)
+    const blocos = [];
+    def.secoes.forEach(sec => {
+      sec.campos.forEach(c => {
+        if ((c.type === 'select' || c.type === 'radio' || c.type === 'checkbox') && Array.isArray(c.options)) {
+          blocos.push(`
+            <div class="card" style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline">
+                <h2 style="margin:0">${safe(c.label)}</h2>
+                <code style="font-size:11px;color:#888">${safe(c.key)} · ${c.type}</code>
+              </div>
+              <p class="mut" style="font-size:12px;margin:4px 0 10px">Seção: ${safe(sec.titulo)} · uma opção por linha</p>
+              <textarea name="opt__${safe(c.key)}" rows="${Math.max(3, c.options.length)}"
+                style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #2a2d36;background:#0f1116;color:#e6e6e6;font-family:monospace;font-size:13px;line-height:1.6"
+              >${safe(c.options.join('\n'))}</textarea>
+            </div>`);
+        }
+      });
+    });
+
+    const html = `
+      <form method="POST" action="/atb/admin/form?inst=${encodeURIComponent(inst)}">
+        <div class="card" style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <h1 style="margin:0">Editor do formulário</h1>
+              <p class="mut" style="margin:4px 0 0">${safe(def.titulo || '')} · ${safe(inst)} · versão ${def.versao || 1}</p>
+            </div>
+            <a href="/atb/admin">← Dashboard</a>
+          </div>
+          <p class="mut" style="font-size:13px;margin-top:12px">
+            Edite as opções dos campos de seleção. Ao salvar, uma nova versão é criada
+            e o formulário passa a usá-la imediatamente — sem deploy.
+            <a href="/atb/form?inst=${encodeURIComponent(inst)}" target="_blank">Abrir formulário ↗</a>
+          </p>
+          <div style="margin-top:10px">
+            <label class="mut" style="font-size:12px">Instituição: </label>
+            <a href="/atb/admin/form?inst=HUSF" style="margin-right:10px;${inst==='HUSF'?'font-weight:700':''}">HUSF</a>
+            <a href="/atb/admin/form?inst=H2" style="${inst==='H2'?'font-weight:700':''}">H2</a>
+          </div>
+        </div>
+        ${blocos.join('')}
+        <div class="card">
+          <button type="submit" style="background:#00469e;color:#fff;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer">
+            Salvar nova versão
+          </button>
+        </div>
+      </form>`;
+    res.send(renderShell('ATB · Editor do formulário', html));
+  });
+
+  app.post('/atb/admin/form', adminRequired, async (req, res) => {
+    const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
+    try {
+      const def = await getFormSchema(pool, inst);
+      if (!def) throw new Error('schema não encontrado');
+      // aplica as opções editadas (campos opt__<key>)
+      const body = req.body || {};
+      Object.keys(body).forEach(k => {
+        if (!k.startsWith('opt__')) return;
+        const key = k.slice(5);
+        const opcoes = String(body[k] || '').split('\n').map(s => s.trim()).filter(Boolean);
+        def.secoes.forEach(sec => sec.campos.forEach(c => {
+          if (c.key === key && Array.isArray(c.options)) c.options = opcoes;
+        }));
+      });
+      const adminId = req.cookies && req.cookies.uid ? parseInt(req.cookies.uid, 10) : null;
+      const v = await saveFormSchema(pool, inst, def, adminId);
+      console.log(`[atb] schema ${inst} salvo como v${v}`);
+      res.redirect('/atb/admin/form?inst=' + encodeURIComponent(inst));
+    } catch (e) {
+      res.send(renderShell('ATB · Editor', `<div class="card"><p>Erro ao salvar: ${safe(e.message)}</p></div>`));
     }
   });
 

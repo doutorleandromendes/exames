@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ficha de solicitação de ATB — HUSF</title>
+<style>
+  :root{
+    --azul:#00469e; --azul-claro:#e6eef8; --azul-texto:#0c447c;
+    --vermelho:#e12229; --tinta:#1a2733; --tinta-suave:#3a4654;
+    --rotulo:#5a6b7d; --dica:#8595a5; --borda:#cdd5de; --borda-leve:#e2e7ec;
+    --fundo:#eef1f4; --campo-fundo:#fafbfc; --linha:#eef1f4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fundo);color:var(--tinta);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  #app{max-width:620px;margin:0 auto;padding:0 0 60px}
+  .cab{background:#fff;border-bottom:2px solid var(--azul);padding:16px 22px;display:flex;align-items:center}
+  .cab img{height:42px;width:auto}
+  .faixa{background:var(--azul);padding:13px 22px;position:sticky;top:0;z-index:20}
+  .faixa h1{color:#fff;font-size:15px;font-weight:600;margin:0;line-height:1.3}
+  .faixa .sub{color:#aecbed;font-size:11px;margin-top:2px;text-transform:uppercase;letter-spacing:.08em}
+  .secao{background:#fff;border:1px solid var(--borda-leve);border-radius:10px;
+    overflow:hidden;margin:14px 16px;animation:surge .28s ease}
+  @keyframes surge{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .secao-cab{padding:13px 18px;border-bottom:1px solid var(--linha);display:flex;align-items:center;gap:9px}
+  .secao-num{font-size:10px;font-weight:700;color:var(--azul);background:var(--azul-claro);
+    border-radius:4px;padding:3px 7px;letter-spacing:.05em;flex-shrink:0}
+  .secao-tit{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--rotulo)}
+  .secao-corpo{padding:18px}
+  .campo{margin-bottom:16px;animation:fade .22s ease}
+  .campo:last-child{margin-bottom:0}
+  @keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .rotulo{display:block;font-size:11px;font-weight:600;text-transform:uppercase;
+    letter-spacing:.06em;color:var(--rotulo);margin-bottom:6px}
+  .req{color:var(--vermelho);margin-left:2px}
+  .dica{font-size:11px;color:var(--dica);margin-top:4px;font-style:italic}
+  .erro-msg{font-size:11px;color:var(--vermelho);margin-top:4px}
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--borda);border-radius:8px;
+    font-size:14px;background:var(--campo-fundo);color:var(--tinta);font-family:inherit;
+    transition:border-color .15s,box-shadow .15s}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azul);
+    box-shadow:0 0 0 3px rgba(0,70,158,.12)}
+  input.erro,select.erro,textarea.erro{border-color:var(--vermelho)}
+  textarea{min-height:96px;resize:vertical;line-height:1.5}
+  .sel-wrap{position:relative}
+  .sel-wrap select{-webkit-appearance:none;appearance:none;padding-right:34px}
+  .sel-wrap .seta{position:absolute;right:13px;top:13px;color:var(--dica);pointer-events:none;font-size:11px}
+  .idade{font-size:11px;color:var(--azul-texto);background:var(--azul-claro);
+    border-radius:6px;padding:4px 9px;margin-top:6px;display:inline-block;font-weight:500}
+  .opcoes{display:flex;flex-direction:column;gap:10px}
+  .opc{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:14px;color:var(--tinta-suave);user-select:none}
+  .opc:hover{color:var(--tinta)}
+  .marca{width:18px;height:18px;border:2px solid var(--borda);flex-shrink:0;
+    display:inline-flex;align-items:center;justify-content:center;transition:all .15s}
+  .marca.radio{border-radius:50%}
+  .marca.check{border-radius:5px}
+  .opc.on{color:var(--tinta);font-weight:500}
+  .opc.on .marca{border-color:var(--azul)}
+  .opc.on .marca.radio::after{content:'';width:9px;height:9px;background:var(--azul);border-radius:50%}
+  .opc.on .marca.check{background:var(--azul)}
+  .opc.on .marca.check::after{content:'✓';color:#fff;font-size:12px;font-weight:700;line-height:1}
+  .opc.dim{opacity:.4;cursor:not-allowed}
+  .matriz .cartao{border:1px solid var(--borda-leve);border-radius:9px;padding:14px;
+    margin-bottom:10px;background:var(--campo-fundo);animation:fade .2s ease}
+  .cartao-cab{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
+  .cartao-tag{font-size:11px;font-weight:700;color:var(--azul);background:var(--azul-claro);border-radius:20px;padding:3px 11px}
+  .cartao-x{color:#b9c2cc;font-size:16px;cursor:pointer;line-height:1;background:none;border:none;padding:0}
+  .cartao-x:hover{color:var(--vermelho)}
+  .mini{display:block;font-size:10px;color:var(--dica);margin-bottom:3px}
+  .mini-campo{margin-bottom:10px}
+  .mini-campo:last-child{margin-bottom:0}
+  .mini-campo input,.mini-campo select{padding:8px 10px;border-radius:6px;font-size:13px;background:#fff}
+  .mini-linha{display:flex;gap:8px}
+  .mini-linha>div{flex:1}
+  .add-btn{width:100%;padding:10px;background:#fff;border:1px dashed #aebccb;border-radius:8px;
+    font-size:13px;color:var(--azul);cursor:pointer;font-weight:500;transition:background .15s}
+  .add-btn:hover{background:var(--azul-claro)}
+  .add-btn:disabled{opacity:.5;cursor:not-allowed}
+  .check-linha{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--linha)}
+  .check-linha:last-child{border-bottom:none}
+  .check-linha .nome{font-size:13px;flex:1;color:var(--tinta-suave)}
+  .rodape{background:#fff;border-top:1px solid var(--borda-leve);padding:14px 22px;
+    display:flex;align-items:center;justify-content:space-between;margin:14px 16px 0;border-radius:10px}
+  .prog{font-size:11px;color:var(--dica)}
+  .enviar{background:var(--azul);color:#fff;border:none;border-radius:8px;padding:11px 26px;
+    font-size:14px;font-weight:600;cursor:pointer;transition:opacity .15s}
+  .enviar:hover{opacity:.92}
+  .enviar:disabled{opacity:.5;cursor:not-allowed}
+  .carregando,.erro-load{text-align:center;padding:60px 22px;color:var(--rotulo)}
+  .ok{text-align:center;padding:60px 22px}
+  .ok .icone{font-size:40px;color:var(--azul);margin-bottom:12px}
+  .ok h2{font-size:18px;margin:0 0 6px}
+  .ok p{color:var(--rotulo);font-size:14px;margin:0}
+  .sofa-item{padding:11px 0;border-bottom:1px solid var(--linha)}
+  .sofa-item:last-child{border-bottom:none}
+  .sofa-total{margin-top:12px;padding:12px;background:var(--azul-claro);border-radius:8px;
+    font-size:14px;font-weight:600;color:var(--azul-texto);text-align:center}
+</style>
+</head>
+<body>
+<div id="app"><div class="carregando">Carregando formulário…</div></div>
+<script>window.ATB_INSTITUICAO = window.ATB_INSTITUICAO || 'HUSF';</script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="/atb/form-engine.js"></script>
+</body>
+</html>

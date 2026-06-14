@@ -69,6 +69,17 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
     res.send(html);
   });
 
+  // ── Logo do formulário (servido como arquivo, robusto a falha de injeção) ──
+  app.get('/atb/logo.png', (req, res) => {
+    try {
+      const raw = fs.readFileSync(path.join(__dirname, 'atb-logo.b64'), 'utf8').trim();
+      const b64 = raw.replace(/^data:image\/\w+;base64,/, '');
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(Buffer.from(b64, 'base64'));
+    } catch (e) { res.status(404).end(); }
+  });
+
   // ── Serve o motor de renderização (JS) ─────────────────────────────────
   app.get('/atb/form-engine.js', (req, res) => {
     res.setHeader('Content-Type', 'application/javascript; charset=utf-8');

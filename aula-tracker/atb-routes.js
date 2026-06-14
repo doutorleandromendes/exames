@@ -5,6 +5,8 @@ import { parseFormPayload } from './atb-parser.js';
 import { fetchR2Stream, fetchR2ImageAsDataURI } from './lab-storage.js';
 import { ensureFormSchemaTable, getFormSchema, saveFormSchema } from './atb-form-schema.js';
 import { carregarPrescritores, validarFormatoCRM, buscarCRM, statusCache } from './atb-prescritores.js';
+import { registerParecerApiRoutes } from './atb-parecer-routes.js';
+import { ensureComplementoSchema, registerComplementoRoutes } from './atb-complemento-routes.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -30,6 +32,13 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
 
   // ── Prescritores: carrega o CSV vivo no boot (cache em memória, recarrega a cada 15min) ──
   carregarPrescritores().catch(e => console.error('[atb] falha ao carregar prescritores:', e.message));
+
+  // ── Complementação: cria a coluna de rastreabilidade no boot ──────────
+  ensureComplementoSchema(pool).catch(e => console.error('[atb] falha ao preparar complemento:', e.message));
+
+  // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
+  registerParecerApiRoutes(app, pool);
+  registerComplementoRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -518,6 +527,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
               ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" style="font-size:12px">🔗 Exames</a>`:''}
               ${f.link_labs?` · <a href="${safe(f.link_labs)}" target="_blank" style="font-size:12px">🔬 LIS</a>`:''}
             </div>
+            <a href="/atb/admin/complementar/${id}" style="background:#00469e;color:#fff;padding:6px 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;margin-right:12px">+ Complementar dados</a>
             <a href="/atb/admin/grid">← Grade</a>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { handleWebhook, iniciarPolling, rodarTriagemIA } from './atb-sync.js';
 import { parseFormPayload } from './atb-parser.js';
 import { fetchR2Stream, fetchR2ImageAsDataURI } from './lab-storage.js';
 import { ensureFormSchemaTable, getFormSchema, saveFormSchema } from './atb-form-schema.js';
+import { carregarPrescritores, validarFormatoCRM, buscarCRM, statusCache } from './atb-prescritores.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -26,6 +27,9 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
 
   // ── Schema do formulário: cria tabela + semeia HUSF/H2 no boot ─────────
   ensureFormSchemaTable(pool).catch(e => console.error('[atb] falha ao preparar schema:', e.message));
+
+  // ── Prescritores: carrega o CSV vivo no boot (cache em memória, recarrega a cada 15min) ──
+  carregarPrescritores().catch(e => console.error('[atb] falha ao carregar prescritores:', e.message));
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -64,27 +68,38 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
     }
   });
 
-  // ── API: valida CRM ───────────────────────────────────────────────────
+  // ── API: valida CRM (CSV vivo + salvaguardas anti-fraude) ──────────────
   app.get('/atb/api/validar-crm', async (req, res) => {
-    const { crm, instituicao } = req.query;
+    const { crm } = req.query;
     if (!crm) return res.status(400).json({ erro: 'CRM obrigatório' });
     try {
-      const { rows } = await pool.query(`
-        SELECT m.nome, m.especialidade
-        FROM atb_medicos m
-        JOIN atb_instituicoes i ON i.id = m.instituicao_id
-        WHERE m.crm = $1
-          AND ($2::text IS NULL OR i.sigla = $2)
-          AND m.ativo = true
-        LIMIT 1
-      `, [crm.trim(), instituicao || null]);
-      if (rows[0]) {
-        res.json({ encontrado: true, nome: rows[0].nome, especialidade: rows[0].especialidade });
-      } else {
-        res.json({ encontrado: false });
+      // Salvaguarda 1: formato (4-7 dígitos, sem zeros/letras — derivado dos dados reais)
+      const fmt = validarFormatoCRM(crm);
+      if (!fmt.ok) {
+        return res.json({ valido: false, cadastrado: false, nome: null, motivo: fmt.motivo });
       }
+      // Lookup no cache do CSV (8.345 prescritores; CRM+UF único, 1º match)
+      const hit = buscarCRM(crm);
+      if (hit.cadastrado) {
+        return res.json({ valido: true, cadastrado: true, nome: hit.nome, uf: hit.uf });
+      }
+      // Salvaguarda 2: formato ok mas fora do cadastro → permite com declaração (no front)
+      return res.json({ valido: true, cadastrado: false, nome: null });
     } catch (e) {
       res.status(500).json({ erro: e.message });
+    }
+  });
+
+  // ── Admin: status + recarga manual do cache de prescritores ────────────
+  app.get('/atb/admin/api/prescritores-status', adminRequired, (req, res) => {
+    res.json(statusCache());
+  });
+  app.post('/atb/admin/api/recarregar-prescritores', adminRequired, async (req, res) => {
+    try {
+      const r = await carregarPrescritores(true);
+      res.json({ ok: true, ...statusCache(), recarregados: r });
+    } catch (e) {
+      res.status(500).json({ ok: false, erro: e.message });
     }
   });
 

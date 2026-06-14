@@ -200,6 +200,16 @@ function renderCardBody(f, evol, s) {
     blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
   }
 
+  // ── ANEXOS (PDFs + imagens) — sempre que houver ───────────────────────────
+  const anexos = f._anexos || [];
+  if (anexos.length) {
+    const pdfs = anexos.filter(a => a.tipo === 'pdf');
+    const imgs = anexos.filter(a => a.tipo !== 'pdf');
+    const pdfHtml = pdfs.map(a => `<a class="fc-anexo-pdf" target="_blank" rel="noopener" href="/atb/admin/ficha/${f.id}/anexo/${a.id}">📄 ${s(a.nome_original || ('PDF ' + a.id))}</a>`).join('');
+    const imgHtml = imgs.map(a => `<a target="_blank" rel="noopener" href="/atb/admin/ficha/${f.id}/anexo/${a.id}" title="${s(a.nome_original || '')}"><img class="fc-anexo-img" loading="lazy" src="/atb/admin/ficha/${f.id}/anexo/${a.id}"></a>`).join('');
+    blocos.push(`<div class="fc-bloco"><div class="fc-tit">Anexos</div>${pdfHtml ? `<div class="fc-anexo-pdfs">${pdfHtml}</div>` : ''}${imgHtml ? `<div class="fc-anexo-imgs">${imgHtml}</div>` : ''}</div>`);
+  }
+
   return blocos.filter(Boolean).join('');
 }
 
@@ -231,6 +241,10 @@ export function fichaCardAssets() {
     #fc-modal .fc-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;text-decoration:none;
       padding:7px 12px;border:1px solid #bcd0ec;border-radius:8px;background:#eef4fc;color:#0c447c;font-weight:500}
     #fc-modal .fc-link:hover{background:#e0ebfa}
+    #fc-modal .fc-anexo-pdfs{display:flex;flex-direction:column;gap:5px;margin-bottom:8px}
+    #fc-modal .fc-anexo-pdf{font-size:13px;color:#0c447c;text-decoration:none}
+    #fc-modal .fc-anexo-imgs{display:flex;flex-wrap:wrap;gap:7px}
+    #fc-modal .fc-anexo-img{width:80px;height:80px;object-fit:cover;border:1px solid #d8dee6;border-radius:8px}
     #fc-modal .fc-foot{border-top:1px solid #eef1f5;padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;background:#fafbfc}
     #fc-modal .fc-btn{font-size:13px;padding:9px 16px;border-radius:8px;cursor:pointer;text-decoration:none;
       border:1px solid #d8dee6;background:#fff;color:#0c447c;font-weight:500}
@@ -318,6 +332,11 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         WHERE f.id = $1
       `, [id]);
       if (!f) return res.status(404).json({ ok: false, error: 'Ficha não encontrada' });
+
+      // anexos (PDFs + imagens) — servidos por /atb/admin/ficha/:id/anexo/:aid
+      const { rows: anexos } = await pool.query(
+        `SELECT id, tipo, nome_original FROM atb_ficha_imagens WHERE ficha_id = $1 ORDER BY tipo, id`, [id]);
+      f._anexos = anexos;
 
       const evol = {
         labs: f.labs, hemodinamica: f.hemodinamica, ventilatorio: f.ventilatorio,

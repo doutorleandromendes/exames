@@ -10,7 +10,7 @@
   var e = React.createElement;
   var useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo;
 
-  var LOGO = window.ATB_LOGO || ''; // injetado pela rota; data URI
+  var LOGO = window.ATB_LOGO || '/atb/logo.png'; // injeção (data URI) OU arquivo servido
 
   // ── Avaliação de condicionais ─────────────────────────────────────────────
   // cond = { campo, op, valor }. Retorna true se o campo deve aparecer.

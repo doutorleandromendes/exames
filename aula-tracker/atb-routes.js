@@ -11,6 +11,7 @@ import { ensureParecerSchema, registerParecerEditRoutes, renderParecerCell, pare
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +43,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
   registerParecerApiRoutes(app, pool);
   registerComplementoRoutes(app, pool, adminRequired);
+  registerFichaCardRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -986,7 +988,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           });
         })();
        </script>
-        ${parecerGridAssets()}`;
+        ${parecerGridAssets()}
+        ${fichaCardAssets()}`;
       res.send(renderShell('ATB · Controle', html));
     } catch (e) {
       console.error('[atb] grid error:', e);

@@ -398,6 +398,7 @@ function paginaParecer(f, safe) {
   </div>
 
   <div class="rodape">
+    <button type="button" class="salvar" style="background:#5f6368" onclick="window.open('/atb/admin/parecer/${f.id}/imagem','parecer','width=1060,height=940')">🖼️ Imagem do parecer</button>
     <button class="salvar" id="btnSalvar">Salvar parecer</button>
   </div>
   <div class="toast" id="toast"></div>

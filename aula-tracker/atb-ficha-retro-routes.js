@@ -30,7 +30,7 @@ function _safe(s) {
 export async function ensureRetroSchema(pool) {
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS retrospectiva BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS criada_por INTEGER REFERENCES users(id)`);
-  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS sinais_dialise TEXT`);
+  // sinais_dialise NÃO é coluna — é gravado em payload_raw, como nas fichas nativas
 }
 
 function _sel(name, opcoes, sel, placeholder) {
@@ -83,7 +83,7 @@ function paginaRetro(erro) {
       <div class="campo"><label>ATB usado <span class="req">*</span></label><input name="atb" placeholder="ex.: Vancomicina + Ceftazidima" required></div>
       <div class="grid2">
         <div class="campo"><label>Acesso para diálise</label>${_sel('acesso_dialise', ACESSO_DIALISE, '', '—')}</div>
-        <div class="campo"><label>Sinais locais no acesso</label><input name="sinais_dialise" placeholder="ex.: hiperemia, secreção…"></div>
+        <div class="campo"><label>Sinais de infecção local no acesso?</label>${_sel('sinais_dialise', ['Sim','Não'], '', '—')}</div>
       </div>
       <div class="campo"><label>Observação</label><textarea name="observacao" placeholder="Contexto do caso, motivo da inclusão retrospectiva…"></textarea></div>
     </div>
@@ -116,17 +116,22 @@ export function registerFichaRetroRoutes(app, pool, adminRequired) {
       const { rows: [inst] } = await pool.query(`SELECT id FROM atb_instituicoes WHERE sigla = 'HUSF' LIMIT 1`);
       const instId = inst ? inst.id : null;
 
+      const acesso = (b.acesso_dialise || '').trim() || null;
+      const sinais = (b.sinais_dialise || '').trim() || null;
+      const observacao = (b.observacao || '').trim() || null;
+      // sinais_dialise vai no payload_raw (mesma forma das fichas nativas → card/ficha leem de lá)
+      const payloadRaw = { retrospectiva: true, setor, atb_usado: atb, acesso_dialise: acesso, sinais_dialise: sinais };
+
       const { rows: [nova] } = await pool.query(`
         INSERT INTO atb_fichas
           (instituicao_id, setor, paciente_nome, paciente_nome_raw, prontuario, atendimento,
-           data_referencia, atb_solicitado, acesso_dialise, sinais_dialise, historia_clinica,
+           data_referencia, atb_solicitado, acesso_dialise, historia_clinica, payload_raw,
            retrospectiva, criada_por, status, created_at, updated_at)
-        VALUES ($1,$2,$3,$3,$4,$5,$6::date,$7::jsonb,$8,$9,$10,true,$11,'pendente',now(),now())
+        VALUES ($1,$2,$3,$3,$4,$5,$6::date,$7::jsonb,$8,$9,$10::jsonb,true,$11,'pendente',now(),now())
         RETURNING id`,
         [instId, setor, nome, prontuario, (b.atendimento || '').trim() || null,
-         data, JSON.stringify(atb ? [atb] : []), (b.acesso_dialise || '').trim() || null,
-         (b.sinais_dialise || '').trim() || null, (b.observacao || '').trim() || null,
-         req.user?.id || null]);
+         data, JSON.stringify(atb ? [atb] : []), acesso, observacao,
+         JSON.stringify(payloadRaw), req.user?.id || null]);
 
       // vai pra ficha completa: anexar PDF + classificar IrAS inline na grade
       res.redirect('/atb/admin/ficha/' + nova.id);

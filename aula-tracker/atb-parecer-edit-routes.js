@@ -373,7 +373,7 @@ function paginaParecer(f, safe) {
 <body>
   <div class="cab">
     <h1>Parecer SCIH</h1>
-    <a href="/atb/admin/fichas/${f.id}">← voltar à ficha</a>
+    <a href="/atb/admin/grid">← voltar à grade</a>
   </div>
   <div class="faixa">Veredito e especificação da recomendação</div>
   <div class="wrap">
@@ -398,7 +398,6 @@ function paginaParecer(f, safe) {
   </div>
 
   <div class="rodape">
-    <button type="button" class="salvar" style="background:#5f6368" onclick="window.open('/atb/admin/parecer/${f.id}/imagem','parecer','width=1060,height=940')">🖼️ Imagem do parecer</button>
     <button class="salvar" id="btnSalvar">Salvar parecer</button>
   </div>
   <div class="toast" id="toast"></div>

@@ -263,6 +263,7 @@ export function fichaCardAssets() {
       <div class="fc-foot">
         <a class="fc-btn" id="fc-completa" href="#">Ver ficha completa</a>
         <a class="fc-btn prim" id="fc-parecer" href="#">✎ Emitir / editar parecer</a>
+        <a class="fc-btn" id="fc-imagem" href="#" onclick="window.open(this.href,'parecer','width=1060,height=940');return false;">🖼️ Imagem</a>
       </div>
     </div>
   </div>`;
@@ -281,6 +282,7 @@ export function fichaCardAssets() {
     function fechar(){ ov.style.display='none'; }
     function abrir(id){
       btnCompleta.href = '/atb/admin/ficha/' + id;
+      document.getElementById('fc-imagem').href = '/atb/admin/parecer/' + id + '/imagem';
       btnParecer.href  = '/atb/admin/parecer/' + id;
       nomeEl.textContent = '—'; metaEl.textContent = '';
       contentEl.innerHTML = '<div class="fc-loading">Carregando…</div>';

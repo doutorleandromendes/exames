@@ -206,11 +206,8 @@ function paginaParecerImagem(f, s) {
 </body></html>`;
 }
 
-export function registerParecerImagemRoutes(app, pool, adminRequired) {
-  app.get('/atb/admin/parecer/:id/imagem', adminRequired, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      const { rows: [f] } = await pool.query(`
+async function carregarFichaParecer(pool, id) {
+  const { rows: [f] } = await pool.query(`
         SELECT f.paciente_nome, f.paciente_nome_raw, f.atendimento, f.prontuario, f.sepse,
                f.setor, f.leito, f.equipe_responsavel, f.atb_solicitado, f.tempo_previsto,
                f.posologia, f.prescritor_nome, f.crm, f.avaliador, f.recomendacao_scih,
@@ -222,12 +219,32 @@ export function registerParecerImagemRoutes(app, pool, adminRequired) {
         LEFT JOIN users u ON u.id = f.parecer_emitido_por
         WHERE f.id = $1
       `, [id]);
+  return f;
+}
+
+export function registerParecerImagemRoutes(app, pool, adminRequired) {
+  // página (popup) com a imagem + botões
+  app.get('/atb/admin/parecer/:id/imagem', adminRequired, async (req, res) => {
+    try {
+      const f = await carregarFichaParecer(pool, parseInt(req.params.id, 10));
       if (!f) return res.status(404).send('Ficha não encontrada');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(paginaParecerImagem(f, _safe));
     } catch (e) {
       console.error('[atb] parecer imagem error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));
+    }
+  });
+
+  // fragmento (CSS + HTML da tabela) — p/ copiar a imagem direto de outros lugares (ex.: card do grid)
+  app.get('/atb/admin/parecer/:id/imagem.json', adminRequired, async (req, res) => {
+    try {
+      const f = await carregarFichaParecer(pool, parseInt(req.params.id, 10));
+      if (!f) return res.status(404).json({ ok: false, error: 'Ficha não encontrada' });
+      res.json({ ok: true, css: parecerCardCss(), html: renderParecerTabela(f, _safe) });
+    } catch (e) {
+      console.error('[atb] parecer imagem.json error:', e.message);
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
 }

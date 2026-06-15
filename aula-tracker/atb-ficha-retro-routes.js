@@ -86,9 +86,67 @@ function paginaRetro(erro) {
         <div class="campo"><label>Sinais de infecção local no acesso?</label>${_sel('sinais_dialise', ['Sim','Não'], '', '—')}</div>
       </div>
       <div class="campo"><label>Observação</label><textarea name="observacao" placeholder="Contexto do caso, motivo da inclusão retrospectiva…"></textarea></div>
+      <div class="campo"><label>Anexos (imagem ou PDF)</label>
+        <input type="file" id="anexos" multiple accept="image/*,application/pdf">
+        <div id="anexos-lista" class="dica" style="margin-top:6px"></div>
+      </div>
     </div>
   </form>
-  <div class="rodape"><button type="submit" form="f-retro" class="salvar">Criar ficha retrospectiva</button></div>
+  <div class="rodape">
+    <span id="retro-status" style="margin-right:auto;font-size:13px"></span>
+    <button type="button" id="btn-criar" class="salvar">Criar ficha retrospectiva</button>
+  </div>
+  <script>
+  (function(){
+    var form = document.getElementById('f-retro');
+    var btn = document.getElementById('btn-criar');
+    var inputArq = document.getElementById('anexos');
+    var lista = document.getElementById('anexos-lista');
+    var status = document.getElementById('retro-status');
+    function diz(t, erro){ status.textContent = t; status.style.color = erro ? '#c0392b' : '#0c447c'; }
+
+    inputArq.addEventListener('change', function(){
+      var n = inputArq.files ? inputArq.files.length : 0;
+      if(!n){ lista.textContent = ''; return; }
+      var nomes = []; for(var i=0;i<n;i++) nomes.push(inputArq.files[i].name);
+      lista.textContent = n + ' arquivo(s): ' + nomes.join(', ');
+    });
+
+    btn.addEventListener('click', function(){
+      var campos = ['setor','nome','prontuario','atendimento','data','atb','acesso_dialise','sinais_dialise','observacao'];
+      var body = new URLSearchParams();
+      campos.forEach(function(n){ var el = form.elements[n]; if(el) body.append(n, el.value || ''); });
+      if(!form.elements['nome'].value.trim() || !form.elements['prontuario'].value.trim() ||
+         !form.elements['atb'].value.trim() || !form.elements['data'].value || !form.elements['setor'].value){
+        diz('Preencha os obrigatórios: setor, nome, prontuário, data e ATB.', true); return;
+      }
+      btn.disabled = true; diz('Criando ficha…');
+      fetch('/atb/admin/ficha-retrospectiva', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/x-www-form-urlencoded', 'Accept':'application/json' },
+        body: body.toString()
+      })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j || !j.ok) throw new Error((j && j.error) || 'Falha ao criar a ficha');
+        var files = inputArq.files;
+        if(!files || !files.length) return j.id;
+        diz('Enviando anexos (0/' + files.length + ')…');
+        var seq = Promise.resolve(), enviados = 0;
+        for(var i=0;i<files.length;i++){ (function(file){
+          seq = seq.then(function(){
+            return fetch('/atb/admin/ficha/' + j.id + '/anexo?nome=' + encodeURIComponent(file.name) + '&ct=' + encodeURIComponent(file.type || ''),
+              { method:'POST', body: file })
+              .then(function(){ enviados++; diz('Enviando anexos (' + enviados + '/' + files.length + ')…'); });
+          });
+        })(files[i]); }
+        return seq.then(function(){ return j.id; });
+      })
+      .then(function(id){ diz('Pronto! Abrindo a ficha…'); window.location.href = '/atb/admin/ficha/' + id; })
+      .catch(function(e){ btn.disabled = false; diz('Erro: ' + (e.message || e), true); });
+    });
+  })();
+  </script>
 </body></html>`;
 }
 
@@ -101,6 +159,7 @@ export function registerFichaRetroRoutes(app, pool, adminRequired) {
 
   app.post('/atb/admin/ficha-retrospectiva', adminRequired, async (req, res) => {
     const b = req.body || {};
+    const wantsJson = (req.get('accept') || '').includes('application/json');
     const nome = (b.nome || '').trim();
     const prontuario = (b.prontuario || '').trim();
     const atb = (b.atb || '').trim();
@@ -108,8 +167,10 @@ export function registerFichaRetroRoutes(app, pool, adminRequired) {
     const setor = (b.setor || '').trim();
 
     if (!nome || !prontuario || !atb || !data || !setor) {
+      const msg = 'Preencha os campos obrigatórios: setor, nome, prontuário, data e ATB usado.';
+      if (wantsJson) return res.status(400).json({ ok: false, error: msg });
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(paginaRetro('Preencha os campos obrigatórios: setor, nome, prontuário, data e ATB usado.'));
+      return res.send(paginaRetro(msg));
     }
 
     try {
@@ -133,10 +194,12 @@ export function registerFichaRetroRoutes(app, pool, adminRequired) {
          data, JSON.stringify(atb ? [atb] : []), acesso, observacao,
          JSON.stringify(payloadRaw), req.user?.id || null]);
 
-      // vai pra ficha completa: anexar PDF + classificar IrAS inline na grade
+      // o cliente (JS) envia os anexos com o id retornado e então redireciona
+      if (wantsJson) return res.json({ ok: true, id: nova.id });
       res.redirect('/atb/admin/ficha/' + nova.id);
     } catch (e) {
       console.error('[atb] ficha retrospectiva error:', e.message);
+      if (wantsJson) return res.status(500).json({ ok: false, error: e.message });
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(paginaRetro('Erro ao criar a ficha: ' + e.message));
     }

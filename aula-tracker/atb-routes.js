@@ -15,6 +15,7 @@ import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-route
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
 import { applyGridFilters, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
+import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +51,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   registerFichaCardRoutes(app, pool, adminRequired);
   registerFichaViewRoutes(app, pool, adminRequired);
   registerAnexosRoutes(app, pool, adminRequired);
+  registerParecerImagemRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

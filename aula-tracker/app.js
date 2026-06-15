@@ -148,7 +148,7 @@ const authRequired = async (req,res,next)=>{
   const uid = req.cookies?.uid;
   if(!uid) return res.redirect('/');
   try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at FROM users WHERE id=$1',[uid]);
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin FROM users WHERE id=$1',[uid]);
     const user = rows[0];
     if(!user) return res.redirect('/');
     const exp = parseISO(user.expires_at);
@@ -158,6 +158,26 @@ const authRequired = async (req,res,next)=>{
   }catch{
     return res.redirect('/');
   }
+};
+
+// SCIH: exige login com flag scih/super_admin; ADMIN_SECRET (cookie adm) é break-glass
+const scihRequired = async (req,res,next)=>{
+  const adm = isAdmin(req);
+  const uid = req.cookies?.uid;
+  if(!uid){
+    if(adm){ req.user = null; return next(); }
+    return res.redirect('/');
+  }
+  try{
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin FROM users WHERE id=$1',[uid]);
+    const user = rows[0];
+    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    const exp = parseISO(user.expires_at);
+    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+    req.user = user;
+    if(user.scih || user.super_admin || adm) return next();
+    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao SCIH</h1><p class="mut">Sua conta não tem permissão para esta área. Fale com a coordenação.</p><a href="/inicio">Início</a></div>`));
+  }catch{ return res.redirect('/'); }
 };
 
 // ====== MIGRAÇÕES ======
@@ -171,6 +191,8 @@ async function migrate(){
       created_at TIMESTAMPTZ DEFAULT now(),
       expires_at TIMESTAMPTZ
     );`);
+  await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS scih BOOLEAN DEFAULT false`);
+  await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS super_admin BOOLEAN DEFAULT false`);
 
   await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS courses(
@@ -718,7 +740,7 @@ app.get('/', (req,res)=>{
         e.preventDefault(); const f = new FormData(e.target);
         try{
           await postJSON('/api/login',{ email:f.get('email'), password:f.get('password') });
-          location.href='/aulas';
+          location.href='/inicio';
         }catch(err){ alert(err.message); }
       });
     </script>`;
@@ -785,7 +807,7 @@ app.post('/solicitar-acesso', async (req, res) => {
 
 
 // ====== Admin (ativação por ADMIN_SECRET em cookie) ======
-app.get('/admin', authRequired, (req,res)=>{
+app.get('/admin', (req,res)=>{
   if(!ADMIN_SECRET) return res.send(renderShell('Admin', `<div class="card"><h1>Admin</h1><p class="mut">Defina ADMIN_SECRET.</p></div>`));
   const html = `<div class="card"><h1>Admin</h1>
     <form method="POST" action="/admin">
@@ -796,14 +818,39 @@ app.get('/admin', authRequired, (req,res)=>{
   </div>`;
   res.send(renderShell('Admin', html));
 });
-app.post('/admin', authRequired, (req,res)=>{
+app.post('/admin', (req,res)=>{
   const { secret } = req.body || {};
   if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado');
   if(secret !== ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
   res.cookie('adm','1',{ httpOnly:true, sameSite:'lax', secure:true, maxAge: 1000*60*60*24 });
-  res.redirect('/aulas');
+  res.redirect('/inicio');
 });
-app.get('/admin/logout', authRequired, (req,res)=>{ res.clearCookie('adm'); res.redirect('/aulas'); });
+app.get('/admin/logout', (req,res)=>{ res.clearCookie('adm'); res.redirect('/'); });
+
+// ====== Início — hub por papel (SCIH vê atalhos do ATB; aluno vai pro Aulas) ======
+app.get('/inicio', async (req,res)=>{
+  const adm = isAdmin(req);
+  const uid = req.cookies?.uid;
+  let user = null;
+  if(uid){ try{ const { rows } = await pool.query('SELECT id,full_name,scih,super_admin FROM users WHERE id=$1',[uid]); user = rows[0]||null; }catch{} }
+  if(!user && !adm) return res.redirect('/');
+  const ehScih = adm || (user && (user.scih || user.super_admin));
+  if(!ehScih) return res.redirect('/aulas');
+  const nome = user?.full_name || 'Admin (break-glass)';
+  const html = `<div class="card"><h1>Início</h1><p class="mut">Olá, ${nome}.</p>
+    <div class="hub">
+      <a class="hubcard" href="/atb/admin/grid">📋 Controle ATB (grid)</a>
+      <a class="hubcard" href="/atb/admin/adesao">📈 Adesão aos pareceres</a>
+      <a class="hubcard" href="/atb/admin/ficha-retrospectiva">➕ Ficha retrospectiva</a>
+      <a class="hubcard" href="/consulta">🔎 Consulta (Farmácia)</a>
+      <a class="hubcard" href="/atb/admin/config">⚙️ Configurar ATB</a>
+      <a class="hubcard" href="/aulas">🎓 Aulas</a>
+    </div></div>
+  <style>.hub{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px}
+  .hubcard{display:block;padding:16px;border:1px solid #e0e2e6;border-radius:10px;text-decoration:none;color:#0c447c;font-weight:600;background:#fff}
+  .hubcard:hover{background:#f4f6f9}</style>`;
+  res.send(renderShell('Início', html));
+});
 
 // ====== /aulas — Admin vê tudo; aluno só o que está matriculado e liberado pelas datas ======
 app.get('/aulas', authRequired, async (req,res)=>{
@@ -4417,7 +4464,7 @@ app.post('/track', async (req,res)=>{
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED REJECTION', reason));
 process.on('uncaughtException',  (err)    => console.error('UNCAUGHT EXCEPTION', err));
 registerLabRoutes(app, pool, adminRequired, renderShell); // ← ADICIONAR
-registerAtbRoutes(app, pool, adminRequired, renderShell);  // ← ADICIONAR
+registerAtbRoutes(app, pool, scihRequired, renderShell);
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

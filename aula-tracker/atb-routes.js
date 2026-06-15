@@ -17,6 +17,7 @@ import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js
 import { applyGridFilters, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
+import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +46,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   ensureComplementoSchema(pool).catch(e => console.error('[atb] falha ao preparar complemento:', e.message));
   ensureAnexosSchema(pool).catch(e => console.error('[atb] falha ao preparar anexos:', e.message));
   ensureRetroSchema(pool).catch(e => console.error('[atb] ensureRetroSchema:', e.message));
+  ensureAdesaoSchema(pool).catch(e => console.error('[atb] ensureAdesaoSchema:', e.message));
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -55,6 +57,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   registerAnexosRoutes(app, pool, adminRequired);
   registerParecerImagemRoutes(app, pool, adminRequired);
   registerFichaRetroRoutes(app, pool, adminRequired);
+  registerAdesaoRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -935,7 +938,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
             <h1 style="margin:0;color:#202124">Controle ATB</h1>
             <span style="color:#80868b;font-size:13px">Vigilância · avaliação · stewardship</span>
           </div>
-          <div style="display:flex;gap:14px"><a href="/atb/admin/ficha-retrospectiva" style="background:#e6eef8;color:#00469e;padding:4px 12px;border-radius:8px;text-decoration:none;font-weight:600">+ Ficha retrospectiva</a><a href="/atb/admin">Resumo</a><a href="/atb/admin/config">Configurar</a></div>
+          <div style="display:flex;gap:14px"><a href="/atb/admin/ficha-retrospectiva">+ Ficha retrospectiva</a><a href="/atb/admin/adesao">Adesão</a><a href="/atb/admin">Resumo</a><a href="/atb/admin/config">Configurar</a></div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${vig.confirmadas}</div><div class="ml">IrAS confirmadas</div></div>

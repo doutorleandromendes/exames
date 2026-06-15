@@ -59,9 +59,9 @@ export const SEMENTE_HUSF = {
         { key:'data_uti', type:'date', label:'Data de admissão na UTI', required:true,
           cond:{ campo:'setor', op:'in', valor:['UTI','UTI C'] } },
         { key:'gestante', type:'radio', label:'Gestante', options:['Sim','Não'], required:true,
-          cond:{ campo:'setor', op:'eq', valor:'Ginecologia/Obstetrícia' } },
+          cond:{ any:[ { campo:'setor', op:'eq', valor:'Ginecologia/Obstetrícia' }, { campo:'equipe', op:'eq', valor:'Ginecologia / Obstetricia' } ] } },
         { key:'lactante', type:'radio', label:'Lactante', options:['Sim','Não'], required:true,
-          cond:{ campo:'setor', op:'eq', valor:'Ginecologia/Obstetrícia' } },
+          cond:{ any:[ { campo:'setor', op:'eq', valor:'Ginecologia/Obstetrícia' }, { campo:'equipe', op:'eq', valor:'Ginecologia / Obstetricia' } ] } },
       ]
     },
     {
@@ -88,16 +88,22 @@ export const SEMENTE_HUSF = {
       cond:{ campo:'tipo_terapia', op:'eq', valor:'Profilaxia cirúrgica' },
       campos: [
         { key:'cirurgia', type:'textarea', label:'Cirurgia a ser realizada', required:true },
-        { key:'classificacao_fratura', type:'radio', label:'Classificação de fratura exposta (Gustillo-Anderson)',
-          options:['I','II','IIIa','IIIb','IIIc'],
-          cond:{ campo:'equipe', op:'eq', valor:'Ortopedia' } },
       ]
     },
     {
       id: 'sofa', titulo: 'Avaliação de Gravidade (SOFA)',
-      cond:{ campo:'sepse', op:'eq', valor:'Sim' },
+      cond:{ all:[
+        { campo:'tipo_terapia', op:'neq', valor:'Profilaxia cirúrgica' },
+        { any:[
+          { campo:'sepse', op:'eq', valor:'Sim' },
+          { campo:'setor', op:'in', valor:['UTI','UTI C','Semi','Cuidados Intermediários','PS'] },
+          { campo:'foco_infeccao', op:'in', valor:['Corrente sanguínea (bacteremia)','Pneumonia','Meningite/Encefalite','Abdominal'] },
+          { campo:'atb_solicitado', op:'contains_any', valor:['Ceftriaxone','Cefepime','Meropenem','Piperacilina/Tazobactam','Vancomicina','Teicoplanina','Polimixina B','Polimixina E (colestimetato)','Amicacina','Tigeciclina','Daptomicina','Anfotericina B','Micafungina'] },
+          { campo:'historia_clinica', op:'text_contains_any', valor:['sepse','septico','séptico','choque','hipotens','lactato','vasopressor','vasoativa','noradrenalina','dva'] }
+        ] }
+      ] },
       campos: [
-        { key:'_sofa_bloco', type:'sofa', label:'SOFA' },
+        { key:'_sofa_bloco', type:'sofa', label:'SOFA', required:true },
       ]
     },
     {
@@ -107,7 +113,11 @@ export const SEMENTE_HUSF = {
         { key:'comorbidades', type:'checkbox', label:'Comorbidades relevantes',
           options:['DM','Cancer','IRC','Insuficiência cardíaca','DPOC','Cirrose','Institucionalizado','Uso crônico de imunossupressor (corticosteróides, por ex)','HIV/AIDS'] },
         { key:'faz_quimio', type:'radio', label:'Paciente faz quimioterapia na instituição?', options:['Sim','Não'],
-          cond:{ campo:'comorbidades', op:'contains', valor:'Cancer' } },
+          cond:{ any:[
+            { campo:'comorbidades', op:'contains', valor:'Cancer' },
+            { campo:'historia_clinica', op:'text_contains_any',
+              valor:['qt','qtx','quimio','quimioterapia','ca','cancer','câncer','neoplasia','neutropenia','onco','oncolog'] }
+          ] } },
         { key:'cateter_quimio', type:'radio', label:'Possui cateter de longa permanência?', options:['Sim','Não'],
           cond:{ campo:'faz_quimio', op:'eq', valor:'Sim' } },
         { key:'acesso_quimio', type:'select', label:'Tipo de acesso', options:['PICC','Portocath','Permcath/Hickman'],
@@ -156,9 +166,14 @@ export const SEMENTE_HUSF = {
       id: 'dispositivos', titulo: 'Dispositivos Invasivos',
       campos: [
         { key:'dispositivos_invasivos', type:'checkbox', label:'Dispositivos presentes',
-          options:['AVP','CVC','IOT','SVD','CDL (Shilley)','PAi'] },
+          options:['AVP','CVC','IOT','SVD','CDL (Shilley)','PAi'],
+          requiredCond:{ campo:'setor', op:'in', valor:['UTI','UTI C'] } },
         { key:'data_insercao_cateter', type:'date', label:'Data de inserção do cateter',
-          cond:{ campo:'dispositivos_invasivos', op:'contains', valor:'CVC' } },
+          cond:{ any:[
+            { campo:'dispositivos_invasivos', op:'contains', valor:'CVC' },
+            { campo:'acesso_vascular_neo', op:'contains', valor:'PICC' },
+            { campo:'acesso_vascular_neo', op:'contains', valor:'Cateter umbilical' }
+          ] } },
         { key:'sitio_cvc', type:'checkbox', label:'Sítio de inserção do CVC', options:['Jugular','Subclávio','Femoral'],
           cond:{ campo:'dispositivos_invasivos', op:'contains', valor:'CVC' } },
         { key:'sitio_cdl', type:'checkbox', label:'Sítio de inserção do CDL (Shilley)', options:['Jugular','Subclávio','Femoral'],
@@ -207,7 +222,17 @@ export const SEMENTE_HUSF = {
           ] },
         { key:'tempo_previsto', type:'number', label:'Tempo previsto de tratamento (dias)', required:true },
         { key:'oxacilina_associacao', type:'radio', label:'Será prescrita Oxacilina em associação?', options:['Sim','Não'],
-          cond:{ campo:'setor', op:'eq', valor:'UTI Neo / Infantil' } },
+          cond:{ any:[
+            { campo:'setor', op:'eq', valor:'UTI Neo / Infantil' },
+            { campo:'setor', op:'eq', valor:'Pediatria' },
+            { campo:'equipe', op:'eq', valor:'Pediatria' }
+          ] } },
+        { key:'classificacao_fratura', type:'radio', label:'Classificação de fratura exposta (Gustillo-Anderson)',
+          options:['I','II','IIIa','IIIb','IIIc'],
+          cond:{ all:[
+            { campo:'equipe', op:'eq', valor:'Ortopedia' },
+            { campo:'atb_solicitado', op:'contains', valor:'Gentamicina' }
+          ] } },
       ]
     },
     {

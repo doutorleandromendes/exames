@@ -65,7 +65,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   catch (e) { console.warn('[atb] logo não encontrado:', e.message); }
 
   // ── Formulário do prescritor (público, motor schema-driven) ────────────
-  app.get('/atb/form', (req, res) => {
+  const servirFicha = (req, res) => {
     const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     let html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');
     // injeta instituição + logo antes do bootstrap do motor
@@ -76,7 +76,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
     );
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
-  });
+  };
+  app.get('/atb/form', servirFicha);
+  app.get('/ficha', servirFicha);
+  app.get('/grade', (req, res) => res.redirect('/atb/admin/grid'));
 
   // ── Logo do formulário (servido como arquivo, robusto a falha de injeção) ──
   app.get('/atb/logo.png', (req, res) => {

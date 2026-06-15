@@ -42,6 +42,14 @@ function page(title, body) {
   .pill.on{background:#e6f1fb;color:#0c447c} .pill.off{background:#f1efe8;color:#5f5e5a}
   form.inline{display:inline} .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .linkbox{background:#f4f6f9;border:1px dashed #b5c6dc;border-radius:10px;padding:12px;word-break:break-all;font-size:13px}
+  .hub{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+  .hubcard{display:flex;align-items:center;gap:10px;padding:16px;border:1px solid var(--bd);border-radius:12px;background:#fff;color:var(--pri);font-weight:600;font-size:14px;text-decoration:none}
+  .hubcard:hover{background:#f4f6f9}
+  .hubcard.soon{color:#8a93a3;cursor:default;border-style:dashed}
+  .hubcard.soon:hover{background:#fff}
+  .sec{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:18px 0 8px;font-weight:600}
+  .tag{margin-left:auto;font-size:11px;background:#f1efe8;color:#5f5e5a;border-radius:999px;padding:2px 8px;font-weight:600}
+  .ext{margin-left:auto;font-size:13px;color:#8a93a3}
 </style></head><body><div class="wrap">${body}</div></body></html>`;
 }
 
@@ -64,6 +72,53 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     next();
   };
   const adminSuper = [scihRequired, ensureSuper];
+
+  // ───────────────────────── portal pessoal (super admin) ─────────────────
+  // Relatórios de vigilância publicados no GitHub Pages (repo vigilancia_husf).
+  // Para mudar a base é só editar VIG.
+  const VIG = 'https://doutorleandromendes.github.io/vigilancia_husf';
+  app.get('/scih', adminSuper, (req, res) => {
+    const nome = (req.user && req.user.full_name) || 'Dr. Leandro';
+    const card = (href, icon, label, ext) =>
+      `<a class="hubcard" href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}>${icon} ${label}${ext ? ' <span class="ext">↗</span>' : ''}</a>`;
+    res.send(page('Portal do SCIH', `
+      <div class="card">
+        <h1>Portal do SCIH — HUSF</h1>
+        <p class="mut">Olá, ${esc(nome)}. Atalhos do sistema de ATB e dos relatórios de vigilância.</p>
+      </div>
+      <div class="card">
+        <div class="sec" style="margin-top:0">Operação diária — ATB</div>
+        <div class="hub">
+          ${card('/grade', '📋', 'Grade de controle')}
+          ${card('/atb/admin/ficha-retrospectiva', '➕', 'Nova ficha retrospectiva')}
+          ${card('/consulta', '🔎', 'Consulta / Farmácia')}
+          ${card('/ficha', '📝', 'Formulário do prescritor')}
+        </div>
+
+        <div class="sec">Indicadores &amp; consumo</div>
+        <div class="hub">
+          ${card('/atb/admin/adesao', '📈', 'Adesão aos pareceres')}
+          ${card(VIG + '/atb_dots.html', '💊', 'Consumo de ATB (DOTs)', true)}
+        </div>
+
+        <div class="sec">Vigilância — relatórios HUSF</div>
+        <div class="hub">
+          ${card(VIG + '/', '🦠', 'Respiratória (SG/SRAG)', true)}
+          ${card(VIG + '/indicadores.html', '📊', 'IrAS &amp; determinantes', true)}
+          ${card(VIG + '/mdr_mensal.html', '🧫', 'MDR mensal', true)}
+          ${card(VIG + '/isc_v4.html', '🩹', 'Infecção de sítio cirúrgico', true)}
+          ${card(VIG + '/micro.html', '🔬', 'Microbiologia', true)}
+          ${card(VIG + '/sciet.html', '🧭', 'Algoritmo empírico UTI', true)}
+        </div>
+
+        <div class="sec">Acessos &amp; configuração</div>
+        <div class="hub">
+          ${card('/atb/admin/scih', '👥', 'Aprovar acessos do SCIH')}
+          ${card('/scih/solicitar', '✉️', 'Página de solicitação')}
+          ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
+        </div>
+      </div>`));
+  });
 
   // ───────────────────────── público: solicitar acesso (SCIH) ─────────────
   app.get('/scih/solicitar', (req, res) => {

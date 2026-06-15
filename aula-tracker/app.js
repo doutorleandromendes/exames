@@ -846,6 +846,7 @@ app.get('/inicio', async (req,res)=>{
       <a class="hubcard" href="/atb/admin/ficha-retrospectiva">➕ Ficha retrospectiva</a>
       <a class="hubcard" href="/consulta">🔎 Consulta (Farmácia)</a>
       <a class="hubcard" href="/atb/admin/config">⚙️ Configurar ATB</a>
+      ${(user && user.super_admin) ? `<a class="hubcard" href="/atb/admin/scih">👥 Acessos do SCIH</a>` : ''}
       <a class="hubcard" href="/aulas">🎓 Aulas</a>
     </div></div>
   <style>.hub{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px}

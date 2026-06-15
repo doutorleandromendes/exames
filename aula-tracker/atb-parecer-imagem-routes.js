@@ -47,7 +47,7 @@ function _veredictStyle(v) {
   if (v === 'Não')
     return { bg: '#8a1414', fg: '#ffffff', titulo: 'Parecer NEGATIVO - Necessário ALTERAR prescrição', rodape: 'padrao' };
   if (/Com ajustes/i.test(v || ''))
-    return { bg: '#f2d000', fg: '#8a1414', titulo: 'Parecer CONDICIONAL - Necessário AJUSTAR prescrição', rodape: 'padrao' };
+    return { bg: '#ffe000', fg: '#8a1414', titulo: 'Parecer CONDICIONAL - Necessário AJUSTAR prescrição', rodape: 'padrao' };
   return { bg: '#5f6368', fg: '#ffffff', titulo: 'Parecer — ' + (v || '—'), rodape: 'padrao' };
 }
 
@@ -58,21 +58,8 @@ export function renderParecerTabela(f, safe) {
   const ver = _arr(f.recomendacao_scih)[0] || '';
   const st = _veredictStyle(ver);
   const dataParecer = _fmtData(f.parecer_emitido_at || f.jotform_created_at || f.created_at);
-  const avaliador = f.avaliador || f.avaliador_user || '—';
+  const avaliador = 'Dr Leandro Mendes';
   const atb = _arr(f.atb_solicitado).join(', ');
-
-  // posologia: 3 linhas (ATB1-3) como no JotForm
-  const pos = _arr(f.posologia);
-  const linhasPos = [0, 1, 2].map(i => {
-    const r = pos[i] || {};
-    const d = s(r.droga || r.Droga || '');
-    const dose = s(r.dose || r.Dose || '');
-    const iv = s(r.intervalo || r.Intervalo || '');
-    return `<tr><th class="pz-lbl">ATB${i + 1}</th><td>${d}</td><td style="text-align:center">${dose}</td><td style="text-align:center">${iv}</td></tr>`;
-  }).join('');
-  const posTabela = `<table class="pz">
-    <thead><tr><th></th><th>Droga</th><th>Dose</th><th>Intervalo</th></tr></thead>
-    <tbody>${linhasPos}</tbody></table>`;
 
   // linhas (rótulo, valor) — só inclui as condicionais quando há valor
   const linhas = [
@@ -86,7 +73,6 @@ export function renderParecerTabela(f, safe) {
     ['Equipe Responsável*', s(f.equipe_responsavel || '')],
     ['ATB solicitado*', s(atb)],
     ['Tempo previsto de tratamento (em dias)*', f.tempo_previsto != null ? s(f.tempo_previsto) : ''],
-    ['Posologia*', posTabela, true],
     ['Médico*', s(f.prescritor_nome || '')],
     ['CRM*', s(f.crm || '')],
     ['Avaliador', s(avaliador)],
@@ -96,7 +82,7 @@ export function renderParecerTabela(f, safe) {
   if (f.ha_esquema_sugerido) linhas.push(['Há sugestão de outro esquema de ATB conforme parecer?', s(f.ha_esquema_sugerido)]);
 
   const corpo = linhas.map(([k, v, isHtml], idx) => {
-    const bg = idx % 2 === 0 ? '#ffffff' : '#f2f2f2';
+    const bg = idx % 2 === 0 ? '#ffffff' : 'transparent';
     return `<tr style="background:${bg}">
       <td class="pk">${s(k)}</td>
       <td class="pv">${isHtml ? v : (v || '')}</td></tr>`;
@@ -119,19 +105,15 @@ export function renderParecerTabela(f, safe) {
 // estilos do cartão (compartilhados entre a página e quem embutir)
 function parecerCardCss() {
   return `
-    .parecer-card{width:960px;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;padding:0 0 14px;border:1px solid #e3e3e3}
-    .pc-titulo{text-align:center;font-size:26px;font-weight:700;color:#8a1414;padding:22px 24px 4px}
-    .pc-sub{text-align:center;font-style:italic;color:#333;font-size:15px;padding:6px 60px 16px;line-height:1.4}
-    .pc-faixa{text-align:center;font-size:20px;font-weight:700;padding:11px 16px}
+    .parecer-card{width:640px;background:#ececec;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;padding:0 0 12px;border:1px solid #dcdcdc}
+    .pc-titulo{text-align:center;font-size:20px;font-weight:700;color:#8a1414;padding:18px 20px 4px;line-height:1.25}
+    .pc-sub{text-align:center;font-style:italic;color:#444;font-size:12.5px;padding:6px 44px 14px;line-height:1.4}
+    .pc-faixa{text-align:center;font-size:16px;font-weight:700;padding:10px 14px}
     .pc-tab{width:100%;border-collapse:collapse}
-    .pc-tab td{padding:10px 24px;font-size:16px;vertical-align:top}
-    .pc-tab .pk{width:38%;color:#1a1a1a}
+    .pc-tab td{padding:9px 18px;font-size:14px;vertical-align:top}
+    .pc-tab .pk{width:40%;color:#1a1a1a}
     .pc-tab .pv{color:#1a1a1a}
-    .pz{border-collapse:collapse;margin:2px 0}
-    .pz th,.pz td{border:1px solid #cfcfcf;padding:6px 12px;font-size:15px}
-    .pz thead th{background:#efefef;color:#333;font-weight:700;text-align:center}
-    .pz .pz-lbl{background:#efefef;color:#333;font-weight:700;text-align:center}
-    .pc-rodape{text-align:center;font-style:italic;color:#777;font-size:13px;padding:8px 40px 0;line-height:1.4}`;
+    .pc-rodape{text-align:center;font-style:italic;color:#777;font-size:11.5px;padding:8px 30px 0;line-height:1.4}`;
 }
 
 // ── PÁGINA (popup): tabela + botões Copiar imagem / Baixar PNG ───────────────
@@ -174,19 +156,20 @@ function paginaParecerImagem(f, s) {
     function show(t, ok){ msg.textContent = t; msg.style.color = ok ? '#1a6b3a' : '#c0392b'; }
 
     document.getElementById('btn-copiar').addEventListener('click', function(){
+      if(!(navigator.clipboard && window.ClipboardItem)){
+        show('Cópia de imagem não suportada aqui — use "Baixar PNG".', false); return;
+      }
       show('Gerando imagem…', true);
-      render().then(function(canvas){
-        canvas.toBlob(function(blob){
-          if(!blob){ show('Falha ao gerar imagem.', false); return; }
-          if(navigator.clipboard && window.ClipboardItem){
-            navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-              .then(function(){ show('Imagem copiada! Cole no prontuário (Ctrl+V).', true); })
-              .catch(function(){ show('Navegador não permitiu copiar — use "Baixar PNG".', false); });
-          } else {
-            show('Copiar imagem não suportado aqui — use "Baixar PNG".', false);
-          }
-        }, 'image/png');
-      }).catch(function(){ show('Erro ao gerar a imagem.', false); });
+      // ClipboardItem aceita uma Promise<Blob>; chamamos write() ainda dentro do
+      // gesto do clique, o que evita o bloqueio "navegador não permitiu".
+      var blobPromise = render().then(function(canvas){
+        return new Promise(function(res, rej){
+          canvas.toBlob(function(b){ b ? res(b) : rej(new Error('blob nulo')); }, 'image/png');
+        });
+      });
+      navigator.clipboard.write([ new ClipboardItem({ 'image/png': blobPromise }) ])
+        .then(function(){ show('Imagem copiada! Cole no prontuário (Ctrl+V).', true); })
+        .catch(function(err){ show('Não foi possível copiar (' + (err && err.message || 'bloqueado') + ') — use "Baixar PNG".', false); });
     });
 
     document.getElementById('btn-baixar').addEventListener('click', function(){

@@ -18,6 +18,7 @@ import { applyGridFilters, extraSelectSql, renderExtraHeaders, renderExtraCells,
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
+import { registerConsultaRoutes } from './atb-consulta-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +59,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   registerParecerImagemRoutes(app, pool, adminRequired);
   registerFichaRetroRoutes(app, pool, adminRequired);
   registerAdesaoRoutes(app, pool, adminRequired);
+  registerConsultaRoutes(app, pool);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

@@ -141,46 +141,52 @@ function paginaParecerImagem(f, s) {
     <button onclick="window.close()">Fechar</button>
     <span class="msg" id="msg"></span>
   </div>
-  <div class="palco">${card}</div>
+  <div class="palco">
+    <div id="fonte" style="position:absolute;left:-99999px;top:0">${card}</div>
+    <img id="img-parecer" alt="Parecer" style="max-width:100%;border:1px solid #dcdcdc;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+  </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script>
   (function(){
-    var card = document.getElementById('parecer-card');
+    var fonte = document.getElementById('parecer-card');
+    var img = document.getElementById('img-parecer');
     var msg = document.getElementById('msg');
     var nomeArq = ${JSON.stringify((f.paciente_nome || f.paciente_nome_raw || 'parecer').toString().replace(/[^a-zA-Z0-9]+/g, '_'))};
+    var blob = null, url = null;
 
-    function render(){
-      return html2canvas(card, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
-    }
     function show(t, ok){ msg.textContent = t; msg.style.color = ok ? '#1a6b3a' : '#c0392b'; }
+
+    function gerar(){
+      return html2canvas(fonte, { scale: 2, backgroundColor: null, useCORS: true, logging: false }).then(function(canvas){
+        url = canvas.toDataURL('image/png');
+        img.src = url;
+        return new Promise(function(res){ canvas.toBlob(function(b){ blob = b; res(b); }, 'image/png'); });
+      });
+    }
+
+    // gera a imagem assim que a página abre — assim o botão direito "Copiar imagem"
+    // já funciona em qualquer navegador (inclusive DuckDuckGo/WebKit)
+    gerar().then(function(){
+      show('Imagem pronta. Clique com o botão direito → "Copiar imagem", ou use os botões acima.', true);
+    }).catch(function(){ show('Erro ao gerar a imagem.', false); });
 
     document.getElementById('btn-copiar').addEventListener('click', function(){
       if(!(navigator.clipboard && window.ClipboardItem)){
-        show('Cópia de imagem não suportada aqui — use "Baixar PNG".', false); return;
+        show('Este navegador não copia via botão — clique com o botão direito na imagem → "Copiar imagem".', false); return;
       }
-      show('Gerando imagem…', true);
-      // ClipboardItem aceita uma Promise<Blob>; chamamos write() ainda dentro do
-      // gesto do clique, o que evita o bloqueio "navegador não permitiu".
-      var blobPromise = render().then(function(canvas){
-        return new Promise(function(res, rej){
-          canvas.toBlob(function(b){ b ? res(b) : rej(new Error('blob nulo')); }, 'image/png');
-        });
-      });
-      navigator.clipboard.write([ new ClipboardItem({ 'image/png': blobPromise }) ])
+      var p = blob ? Promise.resolve(blob) : gerar().then(function(){ return blob; });
+      navigator.clipboard.write([ new ClipboardItem({ 'image/png': p }) ])
         .then(function(){ show('Imagem copiada! Cole no prontuário (Ctrl+V).', true); })
-        .catch(function(err){ show('Não foi possível copiar (' + (err && err.message || 'bloqueado') + ') — use "Baixar PNG".', false); });
+        .catch(function(){ show('Bloqueado pelo navegador — clique com o botão direito na imagem → "Copiar imagem".', false); });
     });
 
     document.getElementById('btn-baixar').addEventListener('click', function(){
-      show('Gerando imagem…', true);
-      render().then(function(canvas){
-        var a = document.createElement('a');
-        a.download = 'parecer_' + nomeArq + '.png';
-        a.href = canvas.toDataURL('image/png');
-        a.click();
-        show('PNG baixado.', true);
-      }).catch(function(){ show('Erro ao gerar a imagem.', false); });
+      if(!url){ show('Aguarde a imagem gerar…', false); return; }
+      var a = document.createElement('a');
+      a.download = 'parecer_' + nomeArq + '.png';
+      a.href = url; a.click();
+      show('PNG baixado.', true);
     });
   })();
   </script>

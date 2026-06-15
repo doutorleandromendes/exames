@@ -136,7 +136,8 @@ function paginaParecerImagem(f, s) {
 </style></head>
 <body>
   <div class="toolbar">
-    <button class="prim" id="btn-copiar">📋 Copiar imagem</button>
+    <button id="btn-pront">1️⃣ Copiar prontuário</button>
+    <button class="prim" id="btn-copiar">2️⃣ Copiar imagem</button>
     <button id="btn-baixar">⬇ Baixar PNG</button>
     <button onclick="window.close()">Fechar</button>
     <span class="msg" id="msg"></span>
@@ -154,8 +155,20 @@ function paginaParecerImagem(f, s) {
     var msg = document.getElementById('msg');
     var nomeArq = ${JSON.stringify((f.paciente_nome || f.paciente_nome_raw || 'parecer').toString().replace(/[^a-zA-Z0-9]+/g, '_'))};
     var blob = null, url = null;
+    var pront = ${JSON.stringify(String(f.prontuario || ''))};
 
     function show(t, ok){ msg.textContent = t; msg.style.color = ok ? '#1a6b3a' : '#c0392b'; }
+
+    document.getElementById('btn-pront').addEventListener('click', function(){
+      if(!pront){ show('Esta ficha não tem prontuário.', false); return; }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(pront)
+          .then(function(){ show('Prontuário ' + pront + ' copiado. Cole no EMR p/ localizar o paciente; depois copie a imagem (botão direito → Copiar imagem).', true); })
+          .catch(function(){ show('Não foi possível copiar o prontuário.', false); });
+      } else {
+        show('Cópia de texto não suportada aqui.', false);
+      }
+    });
 
     function gerar(){
       return html2canvas(fonte, { scale: 2, backgroundColor: null, useCORS: true, logging: false }).then(function(canvas){

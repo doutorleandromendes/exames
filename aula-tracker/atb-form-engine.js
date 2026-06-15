@@ -406,39 +406,89 @@
     );
   }
 
-  // ── SOFA (bloco especial — cálculo de gravidade) ──────────────────────────
-  // Placeholder funcional do bloco 3. Por ora soma simples de 6 sistemas (0–4).
-  var SOFA_SISTEMAS = [
-    { key: 'resp', label: 'Respiratório (PaO₂/FiO₂)' },
-    { key: 'coag', label: 'Coagulação (plaquetas)' },
-    { key: 'hep', label: 'Hepático (bilirrubina)' },
-    { key: 'cardio', label: 'Cardiovascular (PAM/aminas)' },
-    { key: 'neuro', label: 'Neurológico (Glasgow)' },
-    { key: 'renal', label: 'Renal (creatinina/diurese)' }
-  ];
+  // ── SOFA (bloco especial — fiel ao formulário JotForm) ────────────────────
+  // Grava nas chaves planas que o parser (atb-parser.js) já espera: sofa_suporte,
+  // sofa_spo2_aa, sofa_spo2_o2, sofa_pf, sofa_pam, sofa_plaq, sofa_bili,
+  // sofa_glasgow, sofa_creat, sofa_diurese. O total exibido espelha o parser.
+  var SOFA_RESP_SUPORTE = ['Ar ambiente', 'Oxigênio suplementar (cateter/máscara)', 'VNI ou Ventilação Mecânica (VM)'];
+  var SOFA_OPC = {
+    spo2_aa: ['≥ 97%', '95–96%', '92–94%', '< 92%'],
+    spo2_o2: ['≥ 95%', '92–94%', '< 92%'],
+    pf:      ['≥ 400', '300–399', '200–299', '100–199', '< 100'],
+    pam:     ['PAM > 70 (sem DVA)', 'PAM < 70 (sem DVA)', 'Em uso de Dopamina ≤ 5 µg/kg/min ou qualquer dose de Dobutamina', 'Em uso de Dopamina > 5 ou Noradrenalina ≤ 0,1 µg/kg/min', 'Em uso de Dopamina > 15 ou Noradrenalina > 0,1 µg/kg/min'],
+    plaq:    ['≥ 150 mil', '100–149 mil', '50–99 mil', '20–49 mil', '< 20 mil', 'Não disponível'],
+    bili:    ['< 1,2', '1,2–1,9', '2,0–5,9', '6,0–11,9', '≥ 12,0', 'Não disponível'],
+    glasgow: ['15', '13-14', '10-12', '6-9', '< 6', 'Não avaliado'],
+    creat:   ['< 1,2', '1,2–1,9', '2,0–3,4', '3,5–4,9', '≥ 5,0', 'Não disponível'],
+    diurese: ['> 500ml', '< 500ml', '< 200ml', 'Não mensurada']
+  };
+  var SOFA_SC = {
+    spo2_aa: [0, 1, 2, 3],
+    spo2_o2: [1, 2, 3],
+    pf:      [0, 1, 2, 3, 4],
+    pam:     [0, 1, 2, 3, 4],
+    plaq:    [0, 1, 2, 3, 4, 0],
+    bili:    [0, 1, 2, 3, 4, 0],
+    glasgow: [0, 1, 2, 3, 4, 0],
+    creat:   [0, 1, 2, 3, 4, 0],
+    diurese: [0, 1, 2, 0]
+  };
+  function sofaScore(key, val) {
+    var i = SOFA_OPC[key].indexOf(val);
+    return (i >= 0 && SOFA_SC[key][i] != null) ? SOFA_SC[key][i] : 0;
+  }
   function CampoSofa(p) {
-    var f = p.campo;
-    var val = (p.valor && typeof p.valor === 'object') ? p.valor : {};
-    function setSis(k, v) {
-      var nv = Object.assign({}, val); nv[k] = v; p.set(f.key, nv);
+    var V = p.valores || {};
+    var grpStyle = { fontWeight: 600, color: '#0c447c', margin: '14px 0 6px', fontSize: '13px' };
+    function selSofa(key, label) {
+      return e('div', { key: key, className: 'sofa-item' },
+        e('span', { className: 'mini' }, label),
+        e('div', { className: 'sel-wrap' },
+          e('select', {
+            value: V['sofa_' + key] || '',
+            onChange: function (ev) { p.set('sofa_' + key, ev.target.value); }
+          },
+            e('option', { value: '' }, '— selecione —'),
+            SOFA_OPC[key].map(function (o, i) {
+              return e('option', { key: o, value: o }, o + ' (+' + (SOFA_SC[key][i] || 0) + ')');
+            })),
+          e('span', { className: 'seta' }, '▼'))
+      );
     }
-    var total = SOFA_SISTEMAS.reduce(function (s, sis) {
-      return s + (parseInt(val[sis.key], 10) || 0);
-    }, 0);
+    var suporte = V['sofa_suporte'] || '';
+    var respSub = null, resp_sc = 0;
+    if (suporte === 'Ar ambiente') { respSub = selSofa('spo2_aa', 'SpO₂ em ar ambiente'); resp_sc = sofaScore('spo2_aa', V['sofa_spo2_aa']); }
+    else if (suporte === 'Oxigênio suplementar (cateter/máscara)') { respSub = selSofa('spo2_o2', 'SpO₂ com O₂ suplementar'); resp_sc = sofaScore('spo2_o2', V['sofa_spo2_o2']); }
+    else if (suporte === 'VNI ou Ventilação Mecânica (VM)') { respSub = selSofa('pf', 'Relação PaO₂/FiO₂'); resp_sc = sofaScore('pf', V['sofa_pf']); }
+
+    var renal_sc = Math.max(sofaScore('creat', V['sofa_creat']), sofaScore('diurese', V['sofa_diurese']));
+    var total = resp_sc + sofaScore('pam', V['sofa_pam']) + sofaScore('plaq', V['sofa_plaq'])
+      + sofaScore('bili', V['sofa_bili']) + sofaScore('glasgow', V['sofa_glasgow']) + renal_sc;
+
     return e('div', { className: 'campo' },
-      SOFA_SISTEMAS.map(function (sis) {
-        return e('div', { key: sis.key, className: 'sofa-item' },
-          e('span', { className: 'mini' }, sis.label),
-          e('div', { className: 'sel-wrap' },
-            e('select', {
-              value: val[sis.key] || '',
-              onChange: function (ev) { setSis(sis.key, ev.target.value); }
-            },
-              e('option', { value: '' }, '— pontos —'),
-              [0, 1, 2, 3, 4].map(function (n) { return e('option', { key: n, value: n }, n + ' pontos'); })),
-            e('span', { className: 'seta' }, '▼'))
-        );
-      }),
+      e('div', { style: grpStyle }, 'Respiratório'),
+      e('div', { className: 'sofa-item' },
+        e('span', { className: 'mini' }, 'Suporte respiratório'),
+        e('div', { className: 'sel-wrap' },
+          e('select', {
+            value: suporte,
+            onChange: function (ev) { p.set('sofa_suporte', ev.target.value); }
+          },
+            e('option', { value: '' }, '— selecione —'),
+            SOFA_RESP_SUPORTE.map(function (o) { return e('option', { key: o, value: o }, o); })),
+          e('span', { className: 'seta' }, '▼'))),
+      respSub,
+      e('div', { style: grpStyle }, 'Cardiovascular (PAM / drogas vasoativas)'),
+      selSofa('pam', 'Pressão arterial / DVA'),
+      e('div', { style: grpStyle }, 'Coagulação'),
+      selSofa('plaq', 'Plaquetas (/mm³)'),
+      e('div', { style: grpStyle }, 'Hepático'),
+      selSofa('bili', 'Bilirrubina (mg/dL)'),
+      e('div', { style: grpStyle }, 'Neurológico'),
+      selSofa('glasgow', 'Escala de coma de Glasgow'),
+      e('div', { style: grpStyle }, 'Renal'),
+      selSofa('creat', 'Creatinina (mg/dL)'),
+      selSofa('diurese', 'Diurese (24h)'),
       e('div', { className: 'sofa-total' }, 'SOFA total: ' + total + ' pontos')
     );
   }

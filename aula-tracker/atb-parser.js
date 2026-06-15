@@ -258,7 +258,7 @@ export function parseFormPayload(d) {
   const SPO2_O2 = ['≥ 95%','92–94%','< 92%'];
   const PF      = ['≥ 400','300–399','200–299','100–199','< 100'];
 
-  const gl_sc  = [0,1,2,3,6,0][GLASGOW.indexOf(d.sofa_glasgow)]  ?? 0;
+  const gl_sc  = [0,1,2,3,4,0][GLASGOW.indexOf(d.sofa_glasgow)]  ?? 0;
   const pam_sc = [0,1,2,3,4][PAM_OPTS.indexOf(d.sofa_pam)]       ?? 0;
   const plq_sc = [0,1,2,3,4,0][PLAQ.indexOf(d.sofa_plaq)]        ?? 0;
   const bil_sc = [0,1,2,3,4,0][BILI.indexOf(d.sofa_bili)]        ?? 0;

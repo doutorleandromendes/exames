@@ -726,6 +726,9 @@ app.get('/', (req,res)=>{
         <form id="loginForm" class="mt2">
           <label>E-mail</label><input name="email" type="email" required>
           <label>Senha</label><input name="password" type="password" required>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin-top:10px">
+            <input type="checkbox" name="remember" style="width:auto"> Manter-me conectado neste dispositivo
+          </label>
           <button class="mt">Entrar</button>
         </form>
       </div>
@@ -741,7 +744,7 @@ app.get('/', (req,res)=>{
       document.getElementById('loginForm').addEventListener('submit', async (e)=>{
         e.preventDefault(); const f = new FormData(e.target);
         try{
-          await postJSON('/api/login',{ email:f.get('email'), password:f.get('password') });
+          await postJSON('/api/login',{ email:f.get('email'), password:f.get('password'), remember:f.get('remember')==='on' });
           location.href='/inicio';
         }catch(err){ alert(err.message); }
       });
@@ -4426,7 +4429,7 @@ app.get('/admin/relatorios.csv', authRequired, adminRequired, async (req, res) =
 // ====== APIs ======
 app.post('/api/login', async (req,res)=>{
   try{
-    let { email, password } = req.body || {};
+    let { email, password, remember } = req.body || {};
     if(!email || !password) return res.status(400).json({error:'Dados obrigatórios'});
 
     const e = String(email).trim().toLowerCase();
@@ -4442,7 +4445,8 @@ app.post('/api/login', async (req,res)=>{
     if(!ok) return res.status(401).json({error:'Credenciais inválidas'});
 
     res.clearCookie('adm'); // reset admin a cada login
-    res.cookie('uid', row.id, { httpOnly:true, sameSite:'lax', secure:true, maxAge: 1000*60*60*24*30 });
+    const maxAge = remember ? 1000*60*60*24*365 : 1000*60*60*24*30; // 365d se "manter conectado", senão 30d
+    res.cookie('uid', row.id, { httpOnly:true, sameSite:'lax', secure:true, maxAge });
     res.json({ok:true});
   }catch(err){
     console.error('LOGIN ERROR', err);

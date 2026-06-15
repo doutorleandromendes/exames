@@ -19,6 +19,7 @@ import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
 import { registerConsultaRoutes } from './atb-consulta-routes.js';
+import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +49,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   ensureAnexosSchema(pool).catch(e => console.error('[atb] falha ao preparar anexos:', e.message));
   ensureRetroSchema(pool).catch(e => console.error('[atb] ensureRetroSchema:', e.message));
   ensureAdesaoSchema(pool).catch(e => console.error('[atb] ensureAdesaoSchema:', e.message));
+  ensureScihAcessoSchema(pool).catch(e => console.error('[atb] ensureScihAcessoSchema:', e.message));
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -60,6 +62,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   registerFichaRetroRoutes(app, pool, adminRequired);
   registerAdesaoRoutes(app, pool, adminRequired);
   registerConsultaRoutes(app, pool);
+  registerScihAcessoRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

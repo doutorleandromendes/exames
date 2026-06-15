@@ -14,18 +14,47 @@
 
   // ── Avaliação de condicionais ─────────────────────────────────────────────
   // cond = { campo, op, valor }. Retorna true se o campo deve aparecer.
+  function _normTxt(s) {
+    return String(s == null ? '' : s).toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // tira acentos
+  }
+  function _filled(v) {
+    if (v == null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    return String(v).trim() !== '';
+  }
+  // texto contém algum token (sem caixa/acento; tokens de até 3 letras exigem limite de palavra)
+  function _textContainsAny(v, tokens) {
+    var hay = _normTxt(v);
+    if (!hay || !Array.isArray(tokens)) return false;
+    return tokens.some(function (t) {
+      var nt = _normTxt(t);
+      if (!nt) return false;
+      if (nt.length <= 3) {
+        var esc = nt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp('(^|[^a-z0-9])' + esc + '([^a-z0-9]|$)').test(hay);
+      }
+      return hay.indexOf(nt) !== -1;
+    });
+  }
   function avaliaCond(cond, valores) {
     if (!cond) return true;
+    if (cond.all) return cond.all.every(function (c) { return avaliaCond(c, valores); });
+    if (cond.any) return cond.any.some(function (c) { return avaliaCond(c, valores); });
     var v = valores[cond.campo];
     switch (cond.op) {
       case 'eq':  return v === cond.valor;
       case 'neq': return v !== cond.valor;
       case 'in':  return Array.isArray(cond.valor) && cond.valor.indexOf(v) !== -1;
+      case 'filled':     return _filled(v);
+      case 'not_filled': return !_filled(v);
       case 'contains': // v é array (checkbox); contém o valor?
         return Array.isArray(v) && v.indexOf(cond.valor) !== -1;
       case 'contains_any': // v é array; contém algum dos valores?
         return Array.isArray(v) && Array.isArray(cond.valor) &&
                cond.valor.some(function (x) { return v.indexOf(x) !== -1; });
+      case 'text_contains_any': // v é texto livre; casa algum token (robusto a abreviações)
+        return _textContainsAny(v, cond.valor);
       default: return true;
     }
   }
@@ -489,7 +518,8 @@
       e('div', { style: grpStyle }, 'Renal'),
       selSofa('creat', 'Creatinina (mg/dL)'),
       selSofa('diurese', 'Diurese (24h)'),
-      e('div', { className: 'sofa-total' }, 'SOFA total: ' + total + ' pontos')
+      e('div', { className: 'sofa-total' }, 'SOFA total: ' + total + ' pontos'),
+      p.erro ? e('div', { className: 'erro-msg', style: { color: '#8a1414', marginTop: '8px', fontSize: '13px' } }, p.erro) : null
     );
   }
 
@@ -586,7 +616,15 @@
             }
           } else if (c.validate === 'nome_completo') {
             var msg = validaNomeCompleto(v); if (msg) novos[c.key] = msg;
-          } else if (c.required) {
+          } else if (c.type === 'sofa' && c.required) {
+            var sup = valores['sofa_suporte'];
+            var falta = !sup || !valores['sofa_pam'] || !valores['sofa_plaq']
+              || !valores['sofa_bili'] || !valores['sofa_glasgow'] || !valores['sofa_creat'];
+            if (sup === 'Ar ambiente' && !valores['sofa_spo2_aa']) falta = true;
+            else if (sup === 'Oxigênio suplementar (cateter/máscara)' && !valores['sofa_spo2_o2']) falta = true;
+            else if (sup === 'VNI ou Ventilação Mecânica (VM)' && !valores['sofa_pf']) falta = true;
+            if (falta) novos[c.key] = 'Preencha todos os sistemas do SOFA';
+          } else if (c.required || (c.requiredCond && avaliaCond(c.requiredCond, valores))) {
             var vazio = Array.isArray(v) ? v.length === 0 : (v === undefined || v === '' || v === null);
             if (vazio) novos[c.key] = 'Campo obrigatório';
           }

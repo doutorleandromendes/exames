@@ -828,6 +828,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
       if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
       else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras <> ''`);
       else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);
+      if (req.query.parecer === 'sem') where.push(`(f.recomendacao_scih IS NULL OR (jsonb_typeof(f.recomendacao_scih)='array' AND jsonb_array_length(f.recomendacao_scih)=0))`);
       applyGridFilters(req.query, where, params);
       const whereSql = where.join(' AND ');
 
@@ -841,6 +842,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           COUNT(*) FILTER (WHERE a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras<>'') AS confirmadas,
           COUNT(*) FILTER (WHERE a.iras = 'Descartado') AS descartadas,
           COUNT(*) FILTER (WHERE a.iras IS NULL OR a.iras = '') AS pendentes,
+          COUNT(*) FILTER (WHERE f.recomendacao_scih IS NULL OR (jsonb_typeof(f.recomendacao_scih)='array' AND jsonb_array_length(f.recomendacao_scih)=0)) AS sem_parecer,
           COUNT(*) FILTER (WHERE a.desfecho_iras IN ('Obito_R','Obito_NR')) AS obitos
         FROM atb_fichas f
         LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
@@ -870,7 +872,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
         const irasVal = (f.iras||'').split(/\n+/)[0];
         const anexos = (f.n_pdf>0?`<a href="/atb/admin/fichas/${f.id}" title="${f.n_pdf} PDF" style="text-decoration:none">📄${f.n_pdf}</a>`:'') +
                        (f.n_img>0?` <span title="${f.n_img} imagem" style="color:#9aa0a6">📷${f.n_img}</span>`:'');
-        return `<tr data-ficha="${f.id}">
+        const temParecer = Array.isArray(f.recomendacao_scih) ? f.recomendacao_scih.length>0 : !!f.recomendacao_scih;
+        return `<tr data-ficha="${f.id}"${temParecer?' class="com-parecer"':''}>
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
             <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>
@@ -904,12 +907,15 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
         ['','Todas',total],['pendente','A classificar',vig.pendentes],
         ['confirmada','IrAS confirmadas',vig.confirmadas],['descartado','Descartadas',vig.descartadas],
       ].map(([val,label,count])=>{
-        const active = iras===val;
-        const u = new URLSearchParams({...req.query,iras:val,page:'1'});
+        const active = iras===val && req.query.parecer!=='sem';
+        const u = new URLSearchParams({...req.query,iras:val,parecer:'',page:'1'});
         const cor = val==='confirmada'?'#e85d5d':val==='pendente'?'#5a9bf0':val==='descartado'?'#74c47d':'#888';
         return `<a href="/atb/admin/grid?${u}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:18px;font-size:13px;text-decoration:none;font-weight:${active?600:400};background:${active?cor:'#eef0f2'};color:${active?'#fff':'#5f6368'}">${label} <span style="font-size:11px;opacity:.85">${count}</span></a>`;
       }).join('');
 
+      const semAtivo = req.query.parecer === 'sem';
+      const uSem = new URLSearchParams({...req.query, parecer:'sem', iras:'', page:'1'});
+      const tabSem = `<a href="/atb/admin/grid?${uSem}" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:18px;font-size:13px;text-decoration:none;font-weight:${semAtivo?600:400};background:${semAtivo?'#d98a3d':'#eef0f2'};color:${semAtivo?'#fff':'#5f6368'}">Sem parecer <span style="font-size:11px;opacity:.85">${vig.sem_parecer}</span></a>`;
       const meses=['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
       const mesOpts = meses.map((m,idx)=> idx===0?`<option value="">Todos os meses</option>`:`<option value="${idx}" ${String(idx)===mes?'selected':''}>${m}</option>`).join('');
       const mkUrl = p => `/atb/admin/grid?${new URLSearchParams({...req.query,page:p})}`;
@@ -934,7 +940,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           <div class="metric" style="border-left-color:#74c47d"><div class="mv" style="color:#3a8a4a">${vig.descartadas}</div><div class="ml">Descartadas</div></div>
           <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${vig.obitos}</div><div class="ml">Óbitos no recorte</div></div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}${tabSem}</div>
         ${gridControlsUI(req.query, pager)}
         <div class="grid-wrap">
           <table class="atb-grid">
@@ -967,6 +973,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
           table.atb-grid th.grp{background:#f3faf6;color:#1a8a5a}
           table.atb-grid td{padding:8px 12px;border-bottom:1px solid #f0f1f3;border-right:1px solid #f6f7f8;white-space:nowrap;vertical-align:middle;color:#202124}
           table.atb-grid tbody tr:hover td{background:#fafbfc}
+          table.atb-grid tbody tr.com-parecer{opacity:.45}
+          table.atb-grid tbody tr.com-parecer:hover{opacity:1}
           table.atb-grid tbody tr:hover td.sticky-col{background:#f5f7f9}
           .atb-light .rownum{color:#bdc1c6;font-size:12px;text-align:center;width:34px}
           .atb-light .sticky-col{position:sticky;left:0;z-index:4;background:#fff;box-shadow:1px 0 0 #e8eaed;min-width:175px;max-width:175px}

@@ -16,6 +16,7 @@ import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
 import { applyGridFilters, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
+import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   ensureParecerSchema(pool).catch(e => console.error('[atb] falha ao preparar parecer:', e.message));
   ensureComplementoSchema(pool).catch(e => console.error('[atb] falha ao preparar complemento:', e.message));
   ensureAnexosSchema(pool).catch(e => console.error('[atb] falha ao preparar anexos:', e.message));
+  ensureRetroSchema(pool).catch(e => console.error('[atb] ensureRetroSchema:', e.message));
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -52,6 +54,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   registerFichaViewRoutes(app, pool, adminRequired);
   registerAnexosRoutes(app, pool, adminRequired);
   registerParecerImagemRoutes(app, pool, adminRequired);
+  registerFichaRetroRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -850,7 +853,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
 
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
-               f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,
+               f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,f.retrospectiva,
                f.link_exames, f.link_labs, f.data_referencia, f.jotform_created_at, f.created_at,
                i.sigla AS instituicao,
                a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data,
@@ -876,7 +879,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
         return `<tr data-ficha="${f.id}"${temParecer?' class="com-parecer"':''}>
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
-            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>
+            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}
             <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>
@@ -932,7 +935,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
             <h1 style="margin:0;color:#202124">Controle ATB</h1>
             <span style="color:#80868b;font-size:13px">Vigilância · avaliação · stewardship</span>
           </div>
-          <div style="display:flex;gap:14px"><a href="/atb/admin">Resumo</a><a href="/atb/admin/config">Configurar</a></div>
+          <div style="display:flex;gap:14px"><a href="/atb/admin/ficha-retrospectiva" style="background:#e6eef8;color:#00469e;padding:4px 12px;border-radius:8px;text-decoration:none;font-weight:600">+ Ficha retrospectiva</a><a href="/atb/admin">Resumo</a><a href="/atb/admin/config">Configurar</a></div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${vig.confirmadas}</div><div class="ml">IrAS confirmadas</div></div>

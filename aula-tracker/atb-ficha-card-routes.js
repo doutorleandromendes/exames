@@ -249,6 +249,7 @@ export function fichaCardAssets() {
     #fc-modal .fc-btn{font-size:13px;padding:9px 16px;border-radius:8px;cursor:pointer;text-decoration:none;
       border:1px solid #d8dee6;background:#fff;color:#0c447c;font-weight:500}
     #fc-modal .fc-btn.prim{background:#00469e;border-color:#00469e;color:#fff;font-weight:600}
+    #fc-modal .fc-btn.fc-ico{padding:8px 11px;font-size:15px;line-height:1}
     #fc-modal .fc-btn:hover{filter:brightness(.97)}
   </style>`;
 
@@ -261,12 +262,14 @@ export function fichaCardAssets() {
       </div>
       <div class="fc-body" id="fc-content"><div class="fc-loading">Carregando…</div></div>
       <div class="fc-foot">
+        <button type="button" class="fc-btn fc-ico" id="fc-pront" title="Copiar prontuário">📋🔢</button>
+        <a class="fc-btn fc-ico" id="fc-imagem" href="#" title="Copiar imagem do parecer">📋🖼️</a>
         <a class="fc-btn" id="fc-completa" href="#">Ver ficha completa</a>
         <a class="fc-btn prim" id="fc-parecer" href="#">✎ Emitir / editar parecer</a>
-        <a class="fc-btn" id="fc-imagem" href="#" onclick="window.open(this.href,'parecer','width=1060,height=940');return false;">🖼️ Imagem</a>
       </div>
     </div>
-  </div>`;
+  </div>
+  <div id="fc-img-fonte" style="position:fixed;left:-99999px;top:0;pointer-events:none"></div>`;
 
   const js = `
   <script>
@@ -278,12 +281,32 @@ export function fichaCardAssets() {
     var contentEl = document.getElementById('fc-content');
     var btnCompleta = document.getElementById('fc-completa');
     var btnParecer = document.getElementById('fc-parecer');
+    var btnImagem = document.getElementById('fc-imagem');
+    var btnPront = document.getElementById('fc-pront');
+    var prontAtual = '';
+    var idAtual = null;
+
+    var _h2c = null;
+    function carregarH2C(){
+      if(window.html2canvas) return Promise.resolve();
+      if(_h2c) return _h2c;
+      _h2c = new Promise(function(res, rej){
+        var sc = document.createElement('script');
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        sc.onload = res; sc.onerror = rej;
+        document.head.appendChild(sc);
+      });
+      return _h2c;
+    }
 
     function fechar(){ ov.style.display='none'; }
     function abrir(id){
+      idAtual = id;
       btnCompleta.href = '/atb/admin/ficha/' + id;
-      document.getElementById('fc-imagem').href = '/atb/admin/parecer/' + id + '/imagem';
       btnParecer.href  = '/atb/admin/parecer/' + id;
+      btnImagem.href   = '/atb/admin/parecer/' + id + '/imagem';
+      prontAtual = '';
+      carregarH2C().catch(function(){});  // pré-carrega p/ a cópia de imagem ser rápida
       nomeEl.textContent = '—'; metaEl.textContent = '';
       contentEl.innerHTML = '<div class="fc-loading">Carregando…</div>';
       ov.style.display = 'flex';
@@ -293,10 +316,45 @@ export function fichaCardAssets() {
           if(!j || !j.ok){ contentEl.innerHTML = '<div class="fc-loading">Não foi possível carregar.</div>'; return; }
           nomeEl.textContent = j.nome || '—';
           metaEl.textContent = j.meta || '';
+          prontAtual = j.prontuario || '';
           contentEl.innerHTML = j.html || '<div class="fc-loading">Sem dados.</div>';
         })
         .catch(function(){ contentEl.innerHTML = '<div class="fc-loading">Erro de rede.</div>'; });
     }
+
+    btnPront.addEventListener('click', function(){
+      if(!prontAtual){ btnPront.title = 'Sem prontuário'; return; }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(prontAtual).then(function(){
+          var antes = btnPront.textContent; btnPront.textContent = '✓';
+          setTimeout(function(){ btnPront.textContent = antes; }, 1200);
+        }).catch(function(){});
+      }
+    });
+
+    btnImagem.addEventListener('click', function(ev){
+      ev.preventDefault();
+      if(!idAtual) return;
+      var orig = btnImagem.textContent;
+      var abrirPopup = function(){ window.open(btnImagem.href, 'parecer', 'width=1060,height=940'); btnImagem.textContent = orig; };
+      if(!(navigator.clipboard && window.ClipboardItem)){ abrirPopup(); return; }
+      btnImagem.textContent = '⏳';
+      // gera a tabela do parecer (oculta) e copia o PNG; passa Promise<Blob> ao ClipboardItem
+      var blobPromise = carregarH2C()
+        .then(function(){ return fetch('/atb/admin/parecer/' + idAtual + '/imagem.json'); })
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if(!j || !j.ok) throw new Error('fragmento');
+          var fonte = document.getElementById('fc-img-fonte');
+          fonte.innerHTML = '<style>' + j.css + '</style>' + j.html;
+          var card = fonte.querySelector('.parecer-card');
+          return window.html2canvas(card, { scale: 2, backgroundColor: null, useCORS: true, logging: false });
+        })
+        .then(function(canvas){ return new Promise(function(res, rej){ canvas.toBlob(function(b){ b ? res(b) : rej(new Error('blob')); }, 'image/png'); }); });
+      navigator.clipboard.write([ new ClipboardItem({ 'image/png': blobPromise }) ])
+        .then(function(){ btnImagem.textContent = '✓'; setTimeout(function(){ btnImagem.textContent = orig; }, 1200); })
+        .catch(function(){ abrirPopup(); });
+    });
 
     // intercepta o clique no nome do paciente (mantém href como fallback)
     document.querySelectorAll('tr[data-ficha] .pac-link').forEach(function(a){
@@ -361,6 +419,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         ok: true,
         nome: _safe(nome),
         meta: _safe(metaParts.join(' · ')),
+        prontuario: f.prontuario || '',
         html: renderCardBody(f, evol, _safe),
       });
     } catch (e) {

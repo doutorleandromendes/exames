@@ -171,7 +171,7 @@ export function renderExtraCells(row, cols, safe) {
     else if (t === 'bool') out = (v === true ? 'Sim' : v === false ? 'Não' : '—');
     else if (t === 'num') out = String(v);
     else if (t === 'date') out = new Date(v).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-    else if (t === 'datetime') out = new Date(v).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+    else if (t === 'datetime') out = new Date(v).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
     else if (t === 'arr') out = s(_fmtArr(v));
     else out = s(String(v));
     const align = (t === 'num') ? ' style="text-align:center"' : '';

@@ -22,6 +22,7 @@ import { registerConsultaRoutes } from './atb-consulta-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
+import { registerRegrasRoutes } from './atb-regras-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +68,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerAdesaoRoutes(app, pool, adminRequired);
   registerConsultaRoutes(app, pool);
   registerScihAcessoRoutes(app, pool, adminRequired);
+  registerRegrasRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

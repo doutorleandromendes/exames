@@ -147,8 +147,8 @@ async function upsertFicha(pool, submissionId, parsed, instituicaoId, payloadRaw
       $57,$58,$59,$60,$61,$62,$63,now()
     )
     ON CONFLICT (jotform_submission_id) DO UPDATE SET
-      paciente_nome               = EXCLUDED.paciente_nome,
-      paciente_nome_raw           = EXCLUDED.paciente_nome_raw,
+      paciente_nome               = CASE WHEN atb_fichas.editado_em IS NOT NULL THEN atb_fichas.paciente_nome     ELSE EXCLUDED.paciente_nome     END,
+      paciente_nome_raw           = CASE WHEN atb_fichas.editado_em IS NOT NULL THEN atb_fichas.paciente_nome_raw ELSE EXCLUDED.paciente_nome_raw END,
       -- Campos do SCIH: o PULL só preenche se ainda estiver VAZIO no nosso sistema.
       -- Se você já escreveu aqui (parecer/complemento), o pull NÃO sobrescreve.
       recomendacao_scih = CASE

@@ -115,6 +115,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <div class="hub">
           ${card('/atb/admin/scih', '👥', 'Aprovar acessos do SCIH')}
           ${card('/atb/admin/regras', '🧠', 'Regras de triagem')}
+          ${card('/atb/admin/form', '🧩', 'Editar opções do formulário')}
           ${card('/scih/solicitar', '✉️', 'Página de solicitação')}
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
         </div>

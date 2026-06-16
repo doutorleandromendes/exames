@@ -13,6 +13,7 @@
 //    // em registerAtbRoutes:  registerComplementoRoutes(app, pool, adminRequired);
 // ════════════════════════════════════════════════════════════════════════════
 import { anexosManagerWidget } from './atb-anexos-routes.js';
+import { espelharEdicao, CAMPOS_COMPLEMENTO } from './atb-jotform-mirror.js';
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 
 const GRUPOS = {
@@ -109,6 +110,7 @@ export function registerComplementoRoutes(app, pool, adminRequired) {
       if (complementoScih !== null) {
         await pool.query(`UPDATE atb_fichas SET complemento_scih=$2, updated_at=now() WHERE id=$1`,
           [id, complementoScih]);
+        espelharEdicao(pool, id, CAMPOS_COMPLEMENTO);   // espelho JotForm (qid 99), fire-and-forget
       }
 
       res.json({ ok: true });

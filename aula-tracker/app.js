@@ -150,7 +150,7 @@ const authRequired = async (req,res,next)=>{
   const uid = req.cookies?.uid;
   if(!uid) return res.redirect('/');
   try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin FROM users WHERE id=$1',[uid]);
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
     const user = rows[0];
     if(!user) return res.redirect('/');
     const exp = parseISO(user.expires_at);
@@ -171,7 +171,7 @@ const scihRequired = async (req,res,next)=>{
     return res.redirect('/');
   }
   try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin FROM users WHERE id=$1',[uid]);
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
     const user = rows[0];
     if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
     const exp = parseISO(user.expires_at);
@@ -179,6 +179,23 @@ const scihRequired = async (req,res,next)=>{
     req.user = user;
     if(user.scih || user.super_admin || adm) return next();
     return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao SCIH</h1><p class="mut">Sua conta não tem permissão para esta área. Fale com a coordenação.</p><a href="/inicio">Início</a></div>`));
+  }catch{ return res.redirect('/'); }
+};
+
+// Grade ATB: SCIH, super_admin OU coordenação de microbiologia (micro); adm é break-glass
+const gridRequired = async (req,res,next)=>{
+  const adm = isAdmin(req);
+  const uid = req.cookies?.uid;
+  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+  try{
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
+    const user = rows[0];
+    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    const exp = parseISO(user.expires_at);
+    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+    req.user = user;
+    if(user.scih || user.super_admin || user.micro || adm) return next();
+    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito</h1><p class="mut">Sua conta não tem permissão para a grade.</p><a href="/inicio">Início</a></div>`));
   }catch{ return res.redirect('/'); }
 };
 
@@ -195,6 +212,7 @@ async function migrate(){
     );`);
   await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS scih BOOLEAN DEFAULT false`);
   await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS super_admin BOOLEAN DEFAULT false`);
+  await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS micro BOOLEAN DEFAULT false`);
 
   await migratorPool.query(`
     CREATE TABLE IF NOT EXISTS courses(
@@ -837,9 +855,10 @@ app.get('/inicio', async (req,res)=>{
   const adm = isAdmin(req);
   const uid = req.cookies?.uid;
   let user = null;
-  if(uid){ try{ const { rows } = await pool.query('SELECT id,full_name,scih,super_admin FROM users WHERE id=$1',[uid]); user = rows[0]||null; }catch{} }
+  if(uid){ try{ const { rows } = await pool.query('SELECT id,full_name,scih,super_admin,micro FROM users WHERE id=$1',[uid]); user = rows[0]||null; }catch{} }
   if(!user && !adm) return res.redirect('/');
   const ehScih = adm || (user && (user.scih || user.super_admin));
+  if (user && user.micro && !ehScih) return res.redirect('/atb/admin/grid');
   if(!ehScih) return res.redirect('/aulas');
   const nome = user?.full_name || 'Admin (break-glass)';
   const html = `<div class="card"><h1>Início</h1><p class="mut">Olá, ${nome}.</p>
@@ -4471,7 +4490,7 @@ app.post('/track', async (req,res)=>{
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED REJECTION', reason));
 process.on('uncaughtException',  (err)    => console.error('UNCAUGHT EXCEPTION', err));
 registerLabRoutes(app, pool, adminRequired, renderShell); // ← ADICIONAR
-registerAtbRoutes(app, pool, scihRequired, renderShell);
+registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired);
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

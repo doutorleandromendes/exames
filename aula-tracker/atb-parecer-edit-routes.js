@@ -25,7 +25,7 @@
 //    // na grade (célula):     ${renderParecerCell(f, safe)}      // troca o <td> do veredito
 //    // na grade (1x no html): ${parecerGridAssets()}             // CSS + popover + JS
 // ════════════════════════════════════════════════════════════════════════════
-
+import { espelharEdicao, CAMPOS_PARECER } from './atb-jotform-mirror.js';
 // ── Fonte ÚNICA de verdade das opções ───────────────────────────────────────
 
 // Veredito (qid 30). Single-select. Mesma lista que a paleta REC_CORES reconhece.
@@ -484,6 +484,7 @@ export function registerParecerEditRoutes(app, pool, adminRequired) {
       const r = await pool.query(
         `UPDATE atb_fichas SET ${sets.join(', ')} WHERE id = $${i}`, vals);
       if (!r.rowCount) return res.status(404).json({ ok: false, error: 'ficha não encontrada' });
+      espelharEdicao(pool, id, CAMPOS_PARECER);   // espelho JotForm (parecer), fire-and-forget
       res.json({ ok: true });
     } catch (e) {
       console.error('[atb] save parecer error:', e.message);

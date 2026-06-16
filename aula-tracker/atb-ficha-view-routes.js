@@ -162,6 +162,7 @@ function paginaFichaView(f, anexos, s, podeEditar) {
     ['Inserção do cateter', _dt(f.data_insercao_cateter)],
     ['Em diálise', _bool(f.dialise)],
     ['Acesso para diálise', s(f.acesso_dialise)],
+    ['Sinais de infecção no acesso', s(f.sinais_dialise)],
     ['Peso ao nascimento', f.peso_nascimento != null ? s(f.peso_nascimento) + ' g' : null],
     ['Acesso vascular (Neo)', _arr(f.acesso_vascular_neo)],
   ], s));

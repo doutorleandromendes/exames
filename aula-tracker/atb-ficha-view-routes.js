@@ -280,13 +280,17 @@ function paginaFichaView(f, anexos, s, podeEditar) {
       <div class="nome">${s(nome)} ${f.obito ? '<span class="obito">✝ óbito' + (f.data_obito ? ' ' + _dt(f.data_obito) : '') + '</span>' : ''}</div>
       <div class="meta">${meta}</div>
     </div>
-    <div style="display:flex;gap:14px">
+   <div style="display:flex;gap:14px">
       <a href="/atb/admin/complementar/${f.id}">+ Complementar</a>
       ${podeEditar ? `<a href="/atb/admin/ficha/${f.id}/editar">✏️ Editar dados</a>` : ''}
+      ${podeEditar ? (f.deletado_em
+        ? `<a href="#" onclick="restaurarFicha(${f.id});return false" style="color:#1a8a5a">↩️ Restaurar</a>`
+        : `<a href="#" onclick="apagarFicha(${f.id});return false" style="color:#c0392b">🗑️ Apagar</a>`) : ''}
       <a href="/atb/admin/grid">← Grade</a>
     </div>
   </div>
   <div class="wrap">
+    ${f.deletado_em ? `<div class="full" style="background:#fff4f4;border:1px solid #f3c2c2;color:#a4282b;border-radius:10px;padding:12px 16px;font-size:13px">🗑️ Esta ficha está <b>apagada</b> (fora da grade). Use "↩️ Restaurar" no topo para trazê-la de volta.</div>` : ''}
     ${parecerBloco}
     ${secoes.filter(Boolean).join('')}
     ${seriesHtml ? `<div class="bloco full"><h3>Séries evolutivas (D-3 → D+3)</h3>${seriesHtml}</div>` : ''}
@@ -294,6 +298,21 @@ function paginaFichaView(f, anexos, s, podeEditar) {
     ${anexosHtml ? `<div class="full">${anexosHtml}</div>` : ''}
     ${acessosHtml ? `<div class="full">${acessosHtml}</div>` : ''}
   </div>
+  <script>
+    function apagarFicha(id){
+      if(!confirm('Apagar esta ficha? Ela sai da grade, mas é recuperável (você pode restaurar depois).')) return;
+      fetch('/atb/admin/api/ficha/'+id+'/apagar',{method:'POST'})
+        .then(function(r){ return r.json().then(function(d){ return {ok:r.ok,d:d}; }); })
+        .then(function(res){ if(res.ok) location.href='/atb/admin/grid'; else alert('Erro: '+(res.d.error||'tente de novo')); })
+        .catch(function(e){ alert('Erro de conexão: '+e.message); });
+    }
+    function restaurarFicha(id){
+      fetch('/atb/admin/api/ficha/'+id+'/restaurar',{method:'POST'})
+        .then(function(r){ return r.json().then(function(d){ return {ok:r.ok,d:d}; }); })
+        .then(function(res){ if(res.ok) location.reload(); else alert('Erro: '+(res.d.error||'tente de novo')); })
+        .catch(function(e){ alert('Erro de conexão: '+e.message); });
+    }
+  </script>
 </body></html>`;
 }
 

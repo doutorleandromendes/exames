@@ -195,7 +195,11 @@ function _sel(name, value, opcoes, placeholder) {
 export function gridControlsUI(query, pager) {
   const q = query || {};
   const val = k => _safe(q[k] || '');
-  const colsAtivas = (q.cols || '').split(',').filter(Boolean);
+  const colsAtivas = []
+    .concat(q.cols || [])
+    .flatMap(c => String(c).split(','))
+    .map(c => c.trim())
+    .filter(Boolean);
 
   // contagem de filtros ativos (exceto q/inst que ficam visíveis na barra)
   const filtroKeys = ['setor','data_de','data_ate','sub_de','sub_ate','iras_sn','iras_classe','etiol','tipo_terapia','veredito','acesso_dialise','sofa_min','sofa_max','sepse'];
@@ -275,9 +279,10 @@ export function gridControlsUI(query, pager) {
     .gf-acoes{display:flex;gap:12px;align-items:center;margin-top:14px}
     .gf-ok{background:#3b6fd4;color:#fff;border:none;border-radius:7px;padding:9px 18px;font-size:13px;font-weight:600;cursor:pointer}
     .gf-limpar{color:#80868b;font-size:13px}
-    .gf-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px}
+    .gf-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px 18px}
     .gf-colgrp-t{font-size:11px;font-weight:700;color:#3b6fd4;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
-    .gf-chk{display:flex;align-items:center;gap:6px;font-size:13px;color:#3c4043;padding:2px 0;cursor:pointer}
+    .gf-chk{display:flex;align-items:flex-start;gap:7px;font-size:13px;color:#3c4043;padding:2px 0;cursor:pointer;line-height:1.35}
+    .gf-chk input{flex:0 0 auto;margin:2px 0 0;width:15px;height:15px}
     .gx-cell{color:#3c4043;font-size:13px;white-space:nowrap}
   </style>
   <div class="gf-bar">

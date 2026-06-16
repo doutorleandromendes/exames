@@ -163,13 +163,12 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   app.post('/atb/api/fichas', async (req, res) => {
     try {
       const body = req.body || {};
-      const d    = body.dados || body;                  // o engine envia { instituicao, dados }
+      const d    = body.dados || body;
       const inst = body.instituicao || d.instituicao || 'HUSF';
       if (!d.pac_nome || !d.prontuario || !d.crm) {
         return res.status(400).json({ error: 'Campos obrigatórios em falta' });
       }
       const parsed = parseFormPayload(d);
-      const inst   = d.instituicao || 'HUSF';
       const { rows: [instRow] } = await pool.query(
         'SELECT id FROM atb_instituicoes WHERE sigla = $1', [inst]
       );

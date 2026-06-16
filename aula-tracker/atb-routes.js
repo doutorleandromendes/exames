@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
-import { applyGridFilters, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
+import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
@@ -858,20 +858,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       const pageSize = 80;
       const offset = (pageNum-1)*pageSize;
 
-      const where = ['f.deletado_em IS NULL'], params = [];
-      if (q.trim()) {
-        params.push(`%${q.toLowerCase()}%`);
-        where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length})`);
-      }
-      if (inst)  { params.push(inst);  where.push(`i.sigla = $${params.length}`); }
-      if (setor) { params.push(setor); where.push(`f.setor = $${params.length}`); }
-      if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)) = $${params.length}`); }
-      if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
-      else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras <> ''`);
-      else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);
-      if (req.query.parecer === 'sem') where.push(`(f.recomendacao_scih IS NULL OR (jsonb_typeof(f.recomendacao_scih)='array' AND jsonb_array_length(f.recomendacao_scih)=0))`);
-      applyGridFilters(req.query, where, params);
-      const whereSql = where.join(' AND ');
+      const { whereSql, params } = buildGridWhere(req.query);
 
       const { rows:[{total}] } = await pool.query(`
         SELECT COUNT(*) AS total FROM atb_fichas f

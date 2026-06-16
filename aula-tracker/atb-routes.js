@@ -24,6 +24,7 @@ import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
+import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1062,6 +1063,16 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     } catch (e) {
       console.error('[atb] grid error:', e);
       res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(e.message)}</p></div>`));
+    }
+  });
+
+  app.get('/atb/admin/grid/stats', adminRequired, async (req, res) => {
+    try {
+      const stats = await computeGridStats(pool, req.query);
+      res.send(renderStatsHTML(stats, req.query));
+    } catch (e) {
+      console.error('[atb] grid stats:', e);
+      res.status(500).send('Erro ao calcular estatísticas: ' + e.message);
     }
   });
 

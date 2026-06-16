@@ -168,6 +168,11 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       if (!d.pac_nome || !d.prontuario || !d.crm) {
         return res.status(400).json({ error: 'Campos obrigatórios em falta' });
       }
+      const _tt = String(d.tipo_terapia || '').trim();
+      const _hc = String(d.historia_clinica || '').trim();
+      if (_tt !== 'Profilaxia cirúrgica' && _hc.length < 15) {
+        return res.status(400).json({ error: 'História clínica obrigatória: descreva a justificativa de uso (mín. 15 caracteres).' });
+      }
       const parsed = parseFormPayload(d);
       const { rows: [instRow] } = await pool.query(
         'SELECT id FROM atb_instituicoes WHERE sigla = $1', [inst]

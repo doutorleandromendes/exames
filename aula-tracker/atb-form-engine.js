@@ -644,7 +644,7 @@
             var vazio = Array.isArray(v) ? v.length === 0 : sv === '';
             if (vazio) novos[c.key] = 'Campo obrigatório';
             else if (c.minChars && !Array.isArray(v) && sv.length < c.minChars)
-              novos[c.key] = 'Muito curto — descreva melhor (mín. ' + c.minChars + ' caracteres)';
+              novos[c.key] = c.minMsg || 'Descreva a histórica clínica com mais detalhes';
           }
         });
       });

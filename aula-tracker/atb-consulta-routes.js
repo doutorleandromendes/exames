@@ -106,12 +106,20 @@ function _layout(titulo, miolo) {
 <body>${miolo}</body></html>`;
 }
 
-function paginaRestrito() {
+function paginaRestrito(req) {
+  const ip  = req ? normIp(req.ip) : '';
+  const xff = req ? (req.headers['x-forwarded-for'] || '') : '';
+  const temCfg = !!(process.env.HOSPITAL_IPS || '').trim();
   return _layout('Consulta de fichas', `
     <div class="gate">
       <h2>Acesso restrito</h2>
       <p>Esta consulta está disponível <b>dentro da rede do hospital</b>. Parece que você está acessando de fora da rede.</p>
       <p>Se você é do SCIH, entre como administrador em <a href="/admin" style="color:var(--azul)">/admin</a> e recarregue esta página.</p>
+      <p style="font-size:12px;color:var(--mut);margin-top:14px;border-top:1px solid var(--borda);padding-top:10px">
+        Diagnóstico — IP detectado: <b>${_safe(ip)}</b><br>
+        X-Forwarded-For: ${_safe(xff)}<br>
+        HOSPITAL_IPS definido: <b>${temCfg ? 'sim' : 'NÃO'}</b>
+      </p>
     </div>`);
 }
 
@@ -172,7 +180,7 @@ export function registerConsultaRoutes(app, pool) {
 
   app.get('/consulta', async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    if (!temAcesso(req)) return res.send(paginaRestrito());
+    if (!temAcesso(req)) return res.send(paginaRestrito(req));
     try {
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,

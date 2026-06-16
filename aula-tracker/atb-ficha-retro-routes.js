@@ -19,6 +19,9 @@
 //  Botão na grade (admin): <a href="/atb/admin/ficha-retrospectiva">+ Ficha retrospectiva</a>
 // ════════════════════════════════════════════════════════════════════════════
 
+import { aplicarRegras } from './atb-triagem-regras.js';
+import { espelharNovaFicha } from './atb-jotform-mirror.js';
+
 const SETOR_OPCOES = ['Hemodiálise','PS','EPM','Cuidados Intermediários','Psiquiatria','Apartamento','Oncologia','Clínica Cirúrgica','Semi','Pediatria','UTI','UTI Neo / Infantil','UTI C','Ginecologia/Obstetrícia','Clínica Médica'];
 const ACESSO_DIALISE = ['FAV','CDL (Shilley)','Perm-cath','PTFE'];
 
@@ -193,6 +196,9 @@ export function registerFichaRetroRoutes(app, pool, adminRequired) {
         [instId, setor, nome, prontuario, (b.atendimento || '').trim() || null,
          data, JSON.stringify(atb ? [atb] : []), acesso, observacao,
          JSON.stringify(payloadRaw), req.user?.id || null]);
+
+      await aplicarRegras(pool, nova.id);    // triagem por regras (1º)
+      espelharNovaFicha(pool, nova.id);      // espelho JotForm (soft launch, 2º)
 
       // o cliente (JS) envia os anexos com o id retornado e então redireciona
       if (wantsJson) return res.json({ ok: true, id: nova.id });

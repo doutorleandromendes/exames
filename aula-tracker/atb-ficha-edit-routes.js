@@ -107,6 +107,8 @@ const COLS  = FLAT.map(([c]) => c);
 export async function ensureFichaEditSchema(pool) {
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS editado_por INTEGER REFERENCES users(id)`);
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS editado_em  TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS deletado_em  TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS deletado_por INTEGER`);
 }
 
 const souSuper = req => !!((req.user && req.user.super_admin) || (req.cookies && req.cookies.adm === '1'));
@@ -162,6 +164,29 @@ export function registerFichaEditRoutes(app, pool, adminRequired) {
       console.error('[atb] editar ficha:', e.message);
       res.status(500).json({ ok:false, error: e.message });
     }
+  });
+
+  // apagar (soft delete) — super-admin
+  app.post('/atb/admin/api/ficha/:id/apagar', adminRequired, async (req, res) => {
+    if (!souSuper(req)) return res.status(403).json({ ok:false, error:'apenas super-admin' });
+    try {
+      const r = await pool.query(
+        `UPDATE atb_fichas SET deletado_em=now(), deletado_por=$1, updated_at=now()
+           WHERE id=$2 AND deletado_em IS NULL`,
+        [req.user?.id || null, parseInt(req.params.id, 10)]);
+      res.json({ ok:true, apagada: r.rowCount });
+    } catch (e) { console.error('[atb] apagar ficha:', e.message); res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // restaurar — super-admin
+  app.post('/atb/admin/api/ficha/:id/restaurar', adminRequired, async (req, res) => {
+    if (!souSuper(req)) return res.status(403).json({ ok:false, error:'apenas super-admin' });
+    try {
+      const r = await pool.query(
+        `UPDATE atb_fichas SET deletado_em=NULL, deletado_por=NULL, updated_at=now() WHERE id=$1`,
+        [parseInt(req.params.id, 10)]);
+      res.json({ ok:true, restaurada: r.rowCount });
+    } catch (e) { console.error('[atb] restaurar ficha:', e.message); res.status(500).json({ ok:false, error:e.message }); }
   });
 
   // ── Página de edição (super-admin) ──────────────────────────────────────────

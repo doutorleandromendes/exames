@@ -81,11 +81,13 @@ function renderCardBody(f, evol, s) {
   const blocos = [];
 
   // sinais_dialise não tem coluna — vem do payload_raw (só fichas nativas)
-  let sinaisDialise = null;
-  try {
-    const pr = typeof f.payload_raw === 'string' ? JSON.parse(f.payload_raw) : (f.payload_raw || {});
-    sinaisDialise = pr.sinais_dialise || (pr.dados && pr.dados.sinais_dialise) || null;
-  } catch { /* ignore */ }
+  let sinaisDialise = f.sinais_dialise || null;
+  if (!sinaisDialise) {
+    try {
+      const pr = typeof f.payload_raw === 'string' ? JSON.parse(f.payload_raw) : (f.payload_raw || {});
+      sinaisDialise = pr.sinais_dialise || (pr.dados && pr.dados.sinais_dialise) || null;
+    } catch { /* ignore */ }
+  }
 
   // SEMPRE — ATB + clínica base
   const atb = _arr(f.atb_solicitado).join(', ');
@@ -128,8 +130,8 @@ function renderCardBody(f, evol, s) {
   }
 
   // Hemodiálise
-  if (setor === 'Hemodiálise') {
-    blocos.push(_bloco('Hemodiálise', [
+  if (setor === 'Hemodiálise' || f.dialise === true || f.acesso_dialise || sinaisDialise) {
+    blocos.push(_bloco(setor === 'Hemodiálise' ? 'Hemodiálise' : 'Diálise', [
       ['Acesso para diálise', f.acesso_dialise ? s(f.acesso_dialise) : ''],
       ['Sinais flogísticos no acesso', sinaisDialise ? s(sinaisDialise) : ''],
     ], s));

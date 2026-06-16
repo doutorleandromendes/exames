@@ -76,7 +76,8 @@ export const SEMENTE_HUSF = {
       cond:{ campo:'tipo_terapia', op:'neq', valor:'Profilaxia cirúrgica' },
       campos: [
         { key:'historia_clinica', type:'textarea', label:'História clínica da infecção', required:true,
-          hint:'Descrever detalhadamente a justificativa de uso do antimicrobiano.',bloquearColar: true },
+          minChars:15, bloquearColar:true,
+          hint:'Descrever detalhadamente a justificativa de uso do antimicrobiano.' },
         { key:'foco_infeccao', type:'select', label:'Foco de infecção',
           options:['Corrente sanguínea (bacteremia)','Pneumonia','Infecção do trato urinário','Infecção do sítio cirúrgico','Meningite/Encefalite','Abdominal','Osteoarticular','Pele/Partes moles','Neutropenia Febril'] },
         { key:'sepse', type:'radio', label:'Sepse?', options:['Sim','Não'], required:true,

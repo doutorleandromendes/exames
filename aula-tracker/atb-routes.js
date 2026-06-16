@@ -23,6 +23,7 @@ import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-ace
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
+import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +56,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureScihAcessoSchema(pool).catch(e => console.error('[atb] ensureScihAcessoSchema:', e.message));
   ensureMirrorSchema(pool).catch(e => console.error('[atb] ensureMirrorSchema:', e.message));
   ensureTriagemRegrasSchema(pool).catch(e => console.error('[atb] ensureTriagemRegrasSchema:', e.message));
+  ensureFichaEditSchema(pool).catch(() => {});
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -69,6 +71,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerConsultaRoutes(app, pool);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
+  registerFichaEditRoutes(app, pool, scihRequired);   // gate de super_admin é interno
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

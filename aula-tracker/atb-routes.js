@@ -171,7 +171,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       const _tt = String(d.tipo_terapia || '').trim();
       const _hc = String(d.historia_clinica || '').trim();
       if (_tt !== 'Profilaxia cirúrgica' && _hc.length < 15) {
-        return res.status(400).json({ error: 'História clínica obrigatória: descreva a justificativa de uso (mín. 15 caracteres).' });
+        return res.status(400).json({ error: 'História clínica obrigatória: descreva com detalhes a justificativa de uso.' });
       }
       const parsed = parseFormPayload(d);
       const { rows: [instRow] } = await pool.query(

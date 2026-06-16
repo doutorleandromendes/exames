@@ -21,6 +21,7 @@ import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js
 import { registerConsultaRoutes } from './atb-consulta-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
+import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -52,6 +53,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureAdesaoSchema(pool).catch(e => console.error('[atb] ensureAdesaoSchema:', e.message));
   ensureScihAcessoSchema(pool).catch(e => console.error('[atb] ensureScihAcessoSchema:', e.message));
   ensureMirrorSchema(pool).catch(e => console.error('[atb] ensureMirrorSchema:', e.message));
+  ensureTriagemRegrasSchema(pool).catch(e => console.error('[atb] ensureTriagemRegrasSchema:', e.message));
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -208,6 +210,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         parsed.crm, parsed.prescritor_nome, parsed.sofa, parsed.sofa_renal,
         JSON.stringify(d),
       ]);
+      
 
       // Triagem IA assíncrona
       rodarTriagemIA(parsed).then(async triagem => {
@@ -218,7 +221,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           ON CONFLICT (ficha_id) DO UPDATE SET triagem_ia=$2, triagem_ia_at=now()
         `, [ficha.id, JSON.stringify(triagem)]);
       }).catch(() => {});
-      espelharNovaFicha(pool, ficha.id);   // espelho JotForm (soft launch), fire-and-forget
+      await aplicarRegras(pool, ficha.id);   // triagem por regras (pode preencher parecer/IrAS)
+      espelharNovaFicha(pool, ficha.id);     // espelho já leva o parecer auto-preenchido
       res.json({ ok: true, id: ficha.id });
     } catch (e) {
       console.error('[atb] POST /fichas error:', e);

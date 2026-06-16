@@ -187,12 +187,12 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           insuficiencia_renal, clcr, peso, altura, faz_quimio, cateter_quimio,
           acesso_quimio, classificacao_fratura, atb_solicitado, posologia,
           tempo_previsto, oxacilina_associacao, crm, prescritor_nome,
-          sofa, sofa_renal, payload_raw, status
+          sofa, sofa_renal, payload_raw, status, sinais_dialise
         ) VALUES (
           $1,$2,now(),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
           $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
           $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,
-          $44,$45,$46,$47,$48,$49,$50,$51,'pendente'
+          $44,$45,$46,$47,$48,$49,$50,$51,'pendente',$52
         ) RETURNING id
       `, [
         instRow?.id, submissionId,
@@ -214,7 +214,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         JSON.stringify(parsed.atb_solicitado), JSON.stringify(parsed.posologia),
         parsed.tempo_previsto, parsed.oxacilina_associacao,
         parsed.crm, parsed.prescritor_nome, parsed.sofa, parsed.sofa_renal,
-        JSON.stringify(d),
+        JSON.stringify(d), parsed.sinais_dialise,
       ]);
       
 

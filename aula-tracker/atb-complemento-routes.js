@@ -221,7 +221,7 @@ function paginaComplemento(f) {
 </style></head>
 <body>
   <div class="cab"><h1>Complementação de dados evolutivos</h1>
-    <a href="/atb/admin/fichas/${f.id}">← Voltar à ficha</a></div>
+    <a href="/atb/admin/grid">← Voltar à grade</a></div>
   <div class="faixa">${safe(f.instituicao || 'HUSF')} · SCIH</div>
 
   <div id="toast" class="toast"></div>
@@ -282,5 +282,5 @@ function paginaErro(msg) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Erro</title></head>
   <body style="font-family:system-ui;padding:40px;color:#e12229">
     <h2>Erro</h2><p>${safe(msg)}</p>
-    <p><a href="/atb/admin/fichas" style="color:#00469e">← Voltar</a></p></body></html>`;
+    <p><a href="/atb/admin/grid" style="color:#00469e">← Voltar</a></p></body></html>`;
 }

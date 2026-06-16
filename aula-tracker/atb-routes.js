@@ -162,7 +162,9 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   // ── API: recebe submissão do formulário próprio ────────────────────────
   app.post('/atb/api/fichas', async (req, res) => {
     try {
-      const d = req.body;
+      const body = req.body || {};
+      const d    = body.dados || body;                  // o engine envia { instituicao, dados }
+      const inst = body.instituicao || d.instituicao || 'HUSF';
       if (!d.pac_nome || !d.prontuario || !d.crm) {
         return res.status(400).json({ error: 'Campos obrigatórios em falta' });
       }

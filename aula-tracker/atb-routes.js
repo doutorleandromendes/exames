@@ -843,7 +843,11 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     try {
       const soMicro = !!(req.user && req.user.micro && !req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
       const { q='', inst='', setor='', mes='', iras='', page='1' } = req.query;
-      const cols = (req.query.cols || '').split(',').filter(Boolean);
+      const cols = []
+        .concat(req.query.cols || [])
+        .flatMap(c => String(c).split(','))
+        .map(c => c.trim())
+        .filter(Boolean);
       const pageNum = Math.max(1, parseInt(page,10));
       const pageSize = 80;
       const offset = (pageNum-1)*pageSize;
@@ -926,6 +930,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
               ${DESFECHO_OPCOES.map(o=>`<option value="${o}" ${f.desfecho_iras===o?'selected':''}>${o||'—'}</option>`).join('')}
             </select></td>
           <td class="edit"><input data-field="desfecho_data" type="date" value="${dd}" style="width:120px"></td>
+          ${renderExtraCells(f, cols, safe)}
           <td style="text-align:center;white-space:nowrap">
             ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" title="Exames">🔗</a>`:''}
             ${f.link_labs?`<a href="${safe(f.link_labs)}" target="_blank" title="LIS" style="margin-left:3px">🔬</a>`:''}

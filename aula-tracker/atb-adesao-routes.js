@@ -29,15 +29,15 @@ export const ATB_TROCA = [
   'Amicacina', 'Amoxicilina/Clavulanato', 'Ampicilina', 'Ampicilina/Sulbactam',
   'Cefazolina', 'Cefepime', 'Ceftriaxone', 'Ciprofloxacina', 'Fosfomicina',
   'Gentamicina', 'Levofloxacina', 'Meropenem', 'Oxacilina', 'Piperacilina/Tazobactam',
-  'Teicoplanina', 'Vancomicina',
+  'Sulfametoxazol/Trimetoprim', 'Teicoplanina', 'Vancomicina',
 ];
 
 // Escala de espectro (amplitude) — usada para classificar descalonamento vs escalonamento.
 // Gram-positivos entram na mesma régua: Oxacilina(2) < Vanco/Teico/Dapto(3).
 const ESPECTRO = {
-  'Ampicilina': 1, 'Cefazolina': 1,
+  'Ampicilina': 1, 'Cefazolina': 1, 'Oxacilina': 1,
   'Amoxicilina/Clavulanato': 2, 'Ampicilina/Sulbactam': 2, 'Ciprofloxacina': 2,
-  'Levofloxacina': 2, 'Fosfomicina': 2, 'Gentamicina': 2, 'Oxacilina': 2,
+  'Levofloxacina': 2, 'Fosfomicina': 2, 'Gentamicina': 2, 'Sulfametoxazol/Trimetoprim': 2,
   'Ceftriaxone': 3, 'Vancomicina': 3, 'Teicoplanina': 3, 'Daptomicina': 3,
   'Cefepime': 4, 'Piperacilina/Tazobactam': 4,
   'Meropenem': 5, 'Amicacina': 5,

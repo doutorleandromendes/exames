@@ -48,7 +48,18 @@ function ipDoHospital(ipRaw) {
   return allow.some(e => matchEntry(ip, e));
 }
 // acesso = admin (cookie) OU dentro da rede do hospital (IP público de saída)
-function temAcesso(req) { return ehAdmin(req) || ipDoHospital(req.ip); }
+
+// IP real do cliente atrás de Cloudflare+Render: CF-Connecting-IP é o mais
+// confiável (a Cloudflare sobrescreve); senão o 1º IP do X-Forwarded-For.
+function ipCliente(req) {
+  const cf = req.headers['cf-connecting-ip'];
+  if (cf) return cf.trim();
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return xff.split(',')[0].trim();
+  return req.ip;
+}
+
+function temAcesso(req) { return ehAdmin(req) || ipDoHospital(ipCliente(req)); }
 
 function _safe(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -107,7 +118,7 @@ function _layout(titulo, miolo) {
 }
 
 function paginaRestrito(req) {
-  const ip  = req ? normIp(req.ip) : '';
+  const ip  = req ? normIp(ipCliente(req)) : '';
   const xff = req ? (req.headers['x-forwarded-for'] || '') : '';
   const temCfg = !!(process.env.HOSPITAL_IPS || '').trim();
   return _layout('Consulta de fichas', `

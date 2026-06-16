@@ -4489,8 +4489,10 @@ app.post('/track', async (req,res)=>{
 // ====== start ======
 process.on('unhandledRejection', (reason) => console.error('UNHANDLED REJECTION', reason));
 process.on('uncaughtException',  (err)    => console.error('UNCAUGHT EXCEPTION', err));
-registerLabRoutes(app, pool, adminRequired, renderShell); // ← ADICIONAR
-registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired);
+try { registerLabRoutes(app, pool, adminRequired, renderShell); }
+catch (e) { console.error('ERRO registerLabRoutes', e); }
+try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
+catch (e) { console.error('ERRO registerAtbRoutes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

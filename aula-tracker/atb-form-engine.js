@@ -639,9 +639,12 @@
             else if (sup === 'Oxigênio suplementar (cateter/máscara)' && !valores['sofa_spo2_o2']) falta = true;
             else if (sup === 'VNI ou Ventilação Mecânica (VM)' && !valores['sofa_pf']) falta = true;
             if (falta) novos[c.key] = 'Preencha todos os sistemas do SOFA';
-          } else if (c.required || (c.requiredCond && avaliaCond(c.requiredCond, valores))) {
-            var vazio = Array.isArray(v) ? v.length === 0 : (v === undefined || v === '' || v === null);
+         } else if (c.required || (c.requiredCond && avaliaCond(c.requiredCond, valores))) {
+            var sv = Array.isArray(v) ? v : (v == null ? '' : String(v).trim());
+            var vazio = Array.isArray(v) ? v.length === 0 : sv === '';
             if (vazio) novos[c.key] = 'Campo obrigatório';
+            else if (c.minChars && !Array.isArray(v) && sv.length < c.minChars)
+              novos[c.key] = 'Muito curto — descreva melhor (mín. ' + c.minChars + ' caracteres)';
           }
         });
       });

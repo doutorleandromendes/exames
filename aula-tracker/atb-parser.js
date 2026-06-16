@@ -316,6 +316,7 @@ export function parseFormPayload(d) {
     dispositivos_invasivos: d.dispositivos  || [],
     dialise:                toB(d.dialise),
     acesso_dialise:         d.acesso_dialise || null,
+    sinais_dialise:         d.sinais_dialise || null,
     data_insercao_cateter:  toD(d.data_cateter),
     sitio_cvc:              d.sitio_cvc     || [],
     sitio_cdl:              d.sitio_cdl     || [],

@@ -71,7 +71,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerConsultaRoutes(app, pool);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
-  registerFichaEditRoutes(app, pool, scihRequired);   // gate de super_admin é interno
+  registerFichaEditRoutes(app, pool, adminRequired);   // gate de super_admin é interno
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';

@@ -92,7 +92,7 @@ function culturas(obj, s) {
   return keys.map(k => o[k] === true ? s(k) : `${s(k)}: ${s(o[k])}`).join(', ');
 }
 
-function paginaFichaView(f, anexos, s, user) {
+function paginaFichaView(f, anexos, s, podeEditar) {
   const nome = f.paciente_nome || f.paciente_nome_raw || '—';
   const ver = _arr(f.recomendacao_scih);
   const pos = _arr(f.posologia).map(r => {
@@ -282,7 +282,7 @@ function paginaFichaView(f, anexos, s, user) {
     </div>
     <div style="display:flex;gap:14px">
       <a href="/atb/admin/complementar/${f.id}">+ Complementar</a>
-      ${user && user.super_admin ? `<a href="/atb/admin/ficha/${f.id}/editar">✏️ Editar dados</a>` : ''}
+      ${podeEditar ? `<a href="/atb/admin/ficha/${f.id}/editar">✏️ Editar dados</a>` : ''}
       <a href="/atb/admin/grid">← Grade</a>
     </div>
   </div>
@@ -314,7 +314,8 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
       const { rows: anexos } = await pool.query(
         `SELECT id, tipo, nome_original FROM atb_ficha_imagens WHERE ficha_id = $1 ORDER BY tipo, id`, [id]);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(paginaFichaView(f, anexos, _safe, req.user));
+      const podeEditar = (req.user && req.user.super_admin) || req.cookies?.adm === '1';
+      res.send(paginaFichaView(f, anexos, _safe, podeEditar));
     } catch (e) {
       console.error('[atb] ficha view error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

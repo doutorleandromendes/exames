@@ -115,13 +115,28 @@
 
   function CampoTextarea(p) {
     var f = p.campo;
+    var taProps = {
+      className: p.erro ? 'erro' : '', value: p.valor || '',
+      placeholder: f.placeholder || '',
+      onChange: function (ev) { p.set(f.key, ev.target.value); }
+    };
+    if (f.bloquearColar) {
+      var bloqueia = function (ev) {
+        ev.preventDefault();
+        var el = ev.currentTarget;
+        el.style.outline = '2px solid #d9534f';
+        el.title = 'Colar desativado neste campo — digite o texto.';
+        setTimeout(function () { el.style.outline = ''; }, 600);
+      };
+      taProps.onPaste = bloqueia;                                  // Ctrl+V, menu, clique-do-meio
+      taProps.onDrop = bloqueia;                                   // arrastar-soltar texto
+      taProps.onDragOver = function (ev) { ev.preventDefault(); };
+    }
     return e('div', { className: 'campo' },
       e(Rotulo, { texto: f.label, required: f.required }),
-      e('textarea', {
-        className: p.erro ? 'erro' : '', value: p.valor || '',
-        placeholder: f.placeholder || '',
-        onChange: function (ev) { p.set(f.key, ev.target.value); }
-      }),
+      e('textarea', taProps),
+      f.bloquearColar ? e('div', { className: 'dica' },
+        'Para garantir o registro real, este campo não aceita colar — digite a história clínica.') : null,
       p.erro ? e('div', { className: 'erro-msg' }, p.erro) : null,
       f.hint ? e('div', { className: 'dica' }, f.hint) : null
     );

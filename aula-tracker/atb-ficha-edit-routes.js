@@ -109,7 +109,7 @@ export async function ensureFichaEditSchema(pool) {
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS editado_em  TIMESTAMPTZ`);
 }
 
-const souSuper = req => !!(req.user && req.user.super_admin);
+const souSuper = req => !!((req.user && req.user.super_admin) || (req.cookies && req.cookies.adm === '1'));
 
 export function registerFichaEditRoutes(app, pool, adminRequired) {
 

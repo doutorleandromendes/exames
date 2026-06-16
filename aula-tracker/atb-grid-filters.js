@@ -133,7 +133,7 @@ const COLS = {
   insuficiencia_renal: { label: 'Insuf. renal', grupo: 'Listas',  expr: 'f.insuficiencia_renal', tipo: 'arr' },
   // texto livre
   etiol_iras:      { label: 'Etiologia',       grupo: 'Texto',    expr: 'a.etiol_iras',      tipo: 'txt' },
-  micro:           { label: 'Microrganismo',   grupo: 'Texto',    expr: 'a.micro',           tipo: 'txt' },
+  micro:           { label: 'Microbiologia',   grupo: 'Texto',    expr: 'a.micro',           tipo: 'txt' },
   prescritor_nome: { label: 'Prescritor',      grupo: 'Texto',    expr: 'f.prescritor_nome', tipo: 'txt' },
   crm:             { label: 'CRM',             grupo: 'Texto',    expr: 'f.crm',             tipo: 'txt' },
   recomendacoes_especificacao: { label: 'Especificação', grupo: 'Texto', expr: 'f.recomendacoes_especificacao', tipo: 'txt' },

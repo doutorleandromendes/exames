@@ -55,6 +55,7 @@ const GRUPOS = [
     ['uso_atb_7d',             'Uso de ATB nos últimos 7 dias','bool'],
     ['dialise',                'Em diálise',                  'bool'],
     ['acesso_dialise',         'Acesso para diálise',         'sel'],
+    ['sinais_dialise',         'Sinais de infecção no acesso','sel'],
     ['faz_quimio',             'Faz quimioterapia',           'bool'],
     ['cateter_quimio',         'Cateter de longa permanência','bool'],
     ['acesso_quimio',          'Tipo de acesso (quimio)',     'sel'],
@@ -91,6 +92,7 @@ const GRUPOS = [
 const COL2KEY = {
   setor:'setor', equipe_responsavel:'equipe', tipo_terapia:'tipo_terapia',
   foco_infeccao:'foco', acesso_dialise:'acesso_dialise', acesso_quimio:'acesso_quimio',
+  sinais_dialise:'sinais_dialise',
   classificacao_fratura:'classificacao_fratura', comorbidades:'comorbidades',
   dispositivos_invasivos:'dispositivos', atb_solicitado:'atb_solicitado',
   sitio_cvc:'sitio_cvc', sitio_cdl:'sitio_cdl', sitio_pai:'sitio_pai',
@@ -109,6 +111,8 @@ export async function ensureFichaEditSchema(pool) {
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS editado_em  TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS deletado_em  TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS deletado_por INTEGER`);
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS deletado_por INTEGER`);
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS sinais_dialise TEXT`);
 }
 
 const souSuper = req => !!((req.user && req.user.super_admin) || (req.cookies && req.cookies.adm === '1'));

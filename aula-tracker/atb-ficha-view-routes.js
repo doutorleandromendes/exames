@@ -92,7 +92,7 @@ function culturas(obj, s) {
   return keys.map(k => o[k] === true ? s(k) : `${s(k)}: ${s(o[k])}`).join(', ');
 }
 
-function paginaFichaView(f, anexos, s) {
+function paginaFichaView(f, anexos, s, user) {
   const nome = f.paciente_nome || f.paciente_nome_raw || '—';
   const ver = _arr(f.recomendacao_scih);
   const pos = _arr(f.posologia).map(r => {
@@ -282,6 +282,7 @@ function paginaFichaView(f, anexos, s) {
     </div>
     <div style="display:flex;gap:14px">
       <a href="/atb/admin/complementar/${f.id}">+ Complementar</a>
+      ${user && user.super_admin ? `<a href="/atb/admin/ficha/${f.id}/editar">✏️ Editar dados</a>` : ''}
       <a href="/atb/admin/grid">← Grade</a>
     </div>
   </div>
@@ -313,7 +314,7 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
       const { rows: anexos } = await pool.query(
         `SELECT id, tipo, nome_original FROM atb_ficha_imagens WHERE ficha_id = $1 ORDER BY tipo, id`, [id]);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(paginaFichaView(f, anexos, _safe));
+      res.send(paginaFichaView(f, anexos, _safe, req.user));
     } catch (e) {
       console.error('[atb] ficha view error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

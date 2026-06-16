@@ -115,6 +115,10 @@ return JSON.parse(clean);
 // ── Inserção/atualização de ficha no banco ────────────────────────────────
 
 async function upsertFicha(pool, submissionId, parsed, instituicaoId, payloadRaw, criadaEm) {
+  try {
+    const espelho = await pool.query('SELECT 1 FROM atb_fichas WHERE jotform_mirror_id = $1 LIMIT 1', [submissionId]);
+    if (espelho.rowCount) return { id: null, inserted: false };
+  } catch { /* coluna jotform_mirror_id pode não existir ainda; segue normal */ }
   const nomeFinal = await normalizarNome(parsed.paciente_nome_raw);
   const p = parsed;
 
@@ -145,15 +149,21 @@ async function upsertFicha(pool, submissionId, parsed, instituicaoId, payloadRaw
     ON CONFLICT (jotform_submission_id) DO UPDATE SET
       paciente_nome               = EXCLUDED.paciente_nome,
       paciente_nome_raw           = EXCLUDED.paciente_nome_raw,
-      recomendacao_scih           = EXCLUDED.recomendacao_scih,
-      recomendacoes_especificacao = EXCLUDED.recomendacoes_especificacao,
-      recomendacoes_adicionais    = EXCLUDED.recomendacoes_adicionais,
-      ha_esquema_sugerido         = EXCLUDED.ha_esquema_sugerido,
-      avaliador                   = EXCLUDED.avaliador,
-      complemento_scih            = EXCLUDED.complemento_scih,
-      parecer_evolutivo           = EXCLUDED.parecer_evolutivo,
-      obito                       = EXCLUDED.obito,
-      data_obito                  = EXCLUDED.data_obito,
+      -- Campos do SCIH: o PULL só preenche se ainda estiver VAZIO no nosso sistema.
+      -- Se você já escreveu aqui (parecer/complemento), o pull NÃO sobrescreve.
+      recomendacao_scih = CASE
+        WHEN atb_fichas.recomendacao_scih IS NULL OR atb_fichas.recomendacao_scih = '[]'::jsonb
+        THEN EXCLUDED.recomendacao_scih ELSE atb_fichas.recomendacao_scih END,
+      recomendacoes_especificacao = COALESCE(NULLIF(atb_fichas.recomendacoes_especificacao,''), EXCLUDED.recomendacoes_especificacao),
+      recomendacoes_adicionais    = COALESCE(NULLIF(atb_fichas.recomendacoes_adicionais,''), EXCLUDED.recomendacoes_adicionais),
+      ha_esquema_sugerido         = COALESCE(NULLIF(atb_fichas.ha_esquema_sugerido,''), EXCLUDED.ha_esquema_sugerido),
+      avaliador                   = COALESCE(NULLIF(atb_fichas.avaliador,''), EXCLUDED.avaliador),
+      complemento_scih            = COALESCE(NULLIF(atb_fichas.complemento_scih,''), EXCLUDED.complemento_scih),
+      parecer_evolutivo = CASE
+        WHEN atb_fichas.parecer_evolutivo IS NULL OR atb_fichas.parecer_evolutivo = '[]'::jsonb
+        THEN EXCLUDED.parecer_evolutivo ELSE atb_fichas.parecer_evolutivo END,
+      obito                       = (atb_fichas.obito OR EXCLUDED.obito),
+      data_obito                  = COALESCE(atb_fichas.data_obito, EXCLUDED.data_obito),
       payload_raw                 = EXCLUDED.payload_raw,
       synced_at                   = now(),
       updated_at                  = now()

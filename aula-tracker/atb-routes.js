@@ -29,7 +29,7 @@ function safe(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
+export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridRequired) {
 
   // ── Webhook (sem auth) ────────────────────────────────────────────────
   app.post('/atb/webhook', handleWebhook(pool));
@@ -604,7 +604,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
                     <input name="etiol_iras" value="${safe(f.etiol_iras||'')}">
                   </div>
                   <div>
-                    <label>Microrganismo</label>
+                    <label>Microbiologia</label>
                     <input name="micro" value="${safe(f.micro||'')}">
                   </div>
                   <div>
@@ -823,8 +823,9 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   const DESFECHO_OPCOES = ['','Sobrev_int','Sobrev_alta','Obito_R','Obito_NR','Alta'];
 
   // ── A GRADE: /atb/admin/grid ───────────────────────────────────────────
-  app.get('/atb/admin/grid', adminRequired, async (req, res) => {
+  app.get('/atb/admin/grid', gridRequired, async (req, res) => {
     try {
+      const soMicro = !!(req.user && req.user.micro && !req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
       const { q='', inst='', setor='', mes='', iras='', page='1' } = req.query;
       const cols = (req.query.cols || '').split(',').filter(Boolean);
       const pageNum = Math.max(1, parseInt(page,10));
@@ -962,7 +963,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
               <th class="rownum">#</th><th class="sticky-col">Paciente</th>
               <th>Pront.</th><th>Setor</th><th>ATB</th>
               <th style="text-align:center">SOFA</th><th>Parecer</th>
-              <th class="grp">IrAS</th><th class="grp">Etiol</th><th class="grp">Microrganismo</th>
+              <th class="grp">IrAS</th><th class="grp">Etiol</th><th class="grp">Microbiologia</th>
               <th class="grp">SAPS3</th><th class="grp">Desfecho</th><th class="grp">Dt. desf.</th>
               ${renderExtraHeaders(cols, safe)}
               <th style="text-align:center">Links</th><th></th>
@@ -1025,7 +1026,13 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
        </script>
         ${parecerGridAssets()}
         ${fichaCardAssets()}`;
-      res.send(renderShell('ATB · Controle', html));
+      const microLock = soMicro ? `<script>document.addEventListener('DOMContentLoaded',function(){
+        document.querySelectorAll('[data-field]').forEach(function(el){ if(el.getAttribute('data-field')!=='micro'){ el.disabled=true; el.style.opacity='.45'; el.style.pointerEvents='none'; } });
+        var n=document.createElement('div'); n.textContent='Perfil Microbiologia — você edita apenas a coluna Microbiologia.';
+        n.style.cssText='background:#e6f1fb;color:#0c447c;border:1px solid #b5d4f4;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px';
+        var w=document.querySelector('.wrap')||document.body; w.insertBefore(n,w.firstChild);
+      });</script>` : '';
+      res.send(renderShell('ATB · Controle', html + microLock));
     } catch (e) {
       console.error('[atb] grid error:', e);
       res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(e.message)}</p></div>`));
@@ -1033,11 +1040,13 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell) {
   });
 
   // ── Endpoint: grava célula de avaliação inline ─────────────────────────
-  app.post('/atb/admin/api/avaliacao/:id', adminRequired, async (req, res) => {
+  app.post('/atb/admin/api/avaliacao/:id', gridRequired, async (req, res) => {
     const id = parseInt(req.params.id,10);
     const { field, value } = req.body || {};
     const OK = ['iras','etiol_iras','micro','saps3','tempo_saps','desfecho_iras','desfecho_data'];
     if (!OK.includes(field)) return res.status(400).json({ ok:false, error:'campo inválido' });
+    const soMicro = !!(req.user && req.user.micro && !req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
+    if (soMicro && field !== 'micro') return res.status(403).json({ ok:false, error:'sem permissão para este campo' });
     try {
       let v = value === '' ? null : value;
       if ((field==='saps3'||field==='tempo_saps') && v!=null) v = parseFloat(v);

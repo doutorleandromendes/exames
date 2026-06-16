@@ -187,9 +187,15 @@ export const SEMENTE_HUSF = {
           options:['Cateter umbilical','PICC','Periférico','Flebotomia'], required:true,
           cond:{ campo:'setor', op:'eq', valor:'UTI Neo / Infantil' } },
         { key:'acesso_dialise', type:'select', label:'Acesso para diálise', options:['FAV','CDL (Shilley)','Perm-cath','PTFE'], required:true,
-          cond:{ campo:'setor', op:'eq', valor:'Hemodiálise' } },
+          cond:{ any:[
+            { campo:'setor',   op:'eq', valor:'Hemodiálise' },
+            { campo:'dialise', op:'eq', valor:'Sim' }
+          ] } },
         { key:'sinais_dialise', type:'radio', label:'Sinais de infecção local no acesso?', options:['Sim','Não'], required:true,
-          cond:{ campo:'setor', op:'eq', valor:'Hemodiálise' } },
+          cond:{ any:[
+            { campo:'setor',   op:'eq', valor:'Hemodiálise' },
+            { campo:'dialise', op:'eq', valor:'Sim' }
+          ] } },
       ]
     },
     {

@@ -848,7 +848,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       const pageSize = 80;
       const offset = (pageNum-1)*pageSize;
 
-      const where = ['1=1'], params = [];
+      const where = ['f.deletado_em IS NULL'], params = [];
       if (q.trim()) {
         params.push(`%${q.toLowerCase()}%`);
         where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length})`);

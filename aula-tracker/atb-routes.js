@@ -508,6 +508,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     }
   });
 
+  // página antiga de ficha → manda pra view nova (singular)
+  app.get('/atb/admin/fichas/:id', adminRequired, (req, res) =>
+    res.redirect(302, '/atb/admin/ficha/' + encodeURIComponent(req.params.id)));
+
   // ── Detalhe de ficha ──────────────────────────────────────────────────
   app.get('/atb/admin/fichas/:id', adminRequired, async (req, res) => {
     try {

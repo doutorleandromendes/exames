@@ -293,6 +293,7 @@ export function gridControlsUI(query, pager) {
     </form>
     <button type="button" class="gf-btn" onclick="var p=document.getElementById('gf-filtros');p.style.display=p.style.display==='none'?'block':'none';document.getElementById('gf-colunas').style.display='none'">🔍 Filtros${nAtivos ? `<span class="badge">${nAtivos}</span>` : ''}</button>
     <button type="button" class="gf-btn" onclick="var p=document.getElementById('gf-colunas');p.style.display=p.style.display==='none'?'block':'none';document.getElementById('gf-filtros').style.display='none'">▦ Colunas${colsAtivas.length ? `<span class="badge">${colsAtivas.length}</span>` : ''}</button>
+    <a class="gf-btn" href="/atb/admin/grid/stats?${_safe(Object.keys(q).filter(k => q[k] && k !== 'page').map(k => k + '=' + encodeURIComponent(q[k])).join('&'))}" target="_blank" style="text-decoration:none">📊 Estatísticas</a>
     <div style="margin-left:auto">${pager || ''}</div>
   </div>
   ${filtrosForm}

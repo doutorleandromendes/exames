@@ -28,6 +28,7 @@ const EXAMES = {
   ventilatorio: { titulo: 'Evento Ventilatório Agudo (EVA)', exames: ['PEEP', 'FiO2', 'Rel', 'ST', 'Data'] },
   hemodinamica: { titulo: 'Parâmetros Hemodinâmicos (DVA)', exames: ['Nora', 'Vaso', 'Dobu', 'Lactato', 'Data'] },
   labs:         { titulo: 'Laboratório', exames: ['Leuco', 'Bast', 'Seg', 'Linf', 'Eos', 'Plq', 'Lactato', 'PCR', 'Data'] },
+  acesso:       { titulo: 'Acesso Vascular Neo', exames: ['PICC', 'CUV', 'Flebo', 'CVC', 'Data'] },
 };
 
 function _safe(s) {
@@ -217,8 +218,9 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes) {
 
   // séries evolutivas completas
   let seriesHtml = '';
-  for (const key of ['ventilatorio', 'hemodinamica', 'labs']) {
-    seriesHtml += tabelaSerie(EXAMES[key], f[key], s);
+  const COL_SERIE = { ventilatorio: 'ventilatorio', hemodinamica: 'hemodinamica', labs: 'labs', acesso: 'acesso_vascular_neo_evol' };
+  for (const key of ['ventilatorio', 'hemodinamica', 'labs', 'acesso']) {
+    seriesHtml += tabelaSerie(EXAMES[key], f[COL_SERIE[key]], s);
   }
 
   // complementos SCIH

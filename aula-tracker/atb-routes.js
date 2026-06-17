@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
-import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI } from './atb-grid-filters.js';
+import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI, extraColExpr } from './atb-grid-filters.js';
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
@@ -870,14 +870,19 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       const dir  = String(req.query.dir || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc';
       const SORT_MAP = { paciente:'f.paciente_nome', pront:'f.prontuario', setor:'f.setor', sofa:'f.sofa',
         iras:'a.iras', etiol:'a.etiol_iras', micro:'a.micro', saps3:'a.saps3', desfecho:'a.desfecho_iras', dtdesf:'a.desfecho_data' };
+      cols.forEach(k => { const e = extraColExpr(k); if (e) SORT_MAP[k] = e; });
       const orderSql = SORT_MAP[sort]
         ? `${SORT_MAP[sort]} ${dir.toUpperCase()} NULLS LAST, COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`
         : `COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`;
       const sortLink = (label, key) => {
         const active = sort === key;
-        const u = new URLSearchParams({ ...req.query, sort:key, dir:(active && dir==='asc' ? 'desc' : 'asc'), page:'1' });
-        const arr = active ? (dir==='asc' ? '▲' : '▼') : '';
-        return `<a class="th-sort${active?' on':''}" href="/atb/admin/grid?${u}">${label}${arr?`<span class="arr"> ${arr}</span>`:''}</a>`;
+        const u = new URLSearchParams({ ...req.query, page:'1' });
+        let arr = '';
+        if (!active) { u.set('sort', key); u.set('dir', 'asc'); }
+        else if (dir === 'asc') { u.set('sort', key); u.set('dir', 'desc'); arr = '▲'; }
+        else { u.delete('sort'); u.delete('dir'); arr = '▼'; }   // 3º clique: remove ordenação → padrão (newest first)
+        const tt = !active ? 'Ordenar' : (dir === 'asc' ? 'Inverter (desc)' : 'Remover ordenação');
+        return `<a class="th-sort${active?' on':''}" href="/atb/admin/grid?${u}" title="${tt}">${label}${arr?`<span class="arr"> ${arr}</span>`:''}</a>`;
       };
 
       const { whereSql, params } = buildGridWhere(req.query);
@@ -1009,7 +1014,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
               <th class="grp" data-colkey="saps3">${sortLink('SAPS3','saps3')}</th>
               <th class="grp" data-colkey="desfecho">${sortLink('Desfecho','desfecho')}</th>
               <th class="grp" data-colkey="dtdesf">${sortLink('Dt. desf.','dtdesf')}</th>
-              ${renderExtraHeaders(cols, safe)}
+              ${renderExtraHeaders(cols, safe, sortLink)}
               <th style="text-align:center" data-colkey="links">Links</th><th data-colkey="end"></th>
             </tr></thead>
            <tbody>${linhas || `<tr><td colspan="${15 + cols.length}" style="padding:30px;text-align:center;color:#80868b">Nenhuma ficha no recorte.</td></tr>`}</tbody>

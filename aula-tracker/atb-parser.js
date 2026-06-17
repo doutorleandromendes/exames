@@ -288,8 +288,8 @@ export function parseFormPayload(d) {
     ? `https://doutorleandromendes.github.io/exames/autologin.html?user=p${pron}&pass=${dn.replace(/-/g,'').slice(6,8)+dn.replace(/-/g,'').slice(4,6)+dn.replace(/-/g,'').slice(0,4)}`
     : null;
   const link_labs = paciente_nome_raw
-    DE:    ? `http://localhost:3000/api/buscar?nome=${encodeURIComponent(paciente_nome_raw)}`
-PARA:  ? `http://localhost:3000/api/buscar?nome=${String(paciente_nome_raw).trim().replace(/\s+/g,"+")}`
+    ? `http://localhost:3000/api/buscar?nome=${String(paciente_nome_raw).trim().replace(/\s+/g,"+")}`
+    : null;
 
   return {
     paciente_nome:          paciente_nome_raw,

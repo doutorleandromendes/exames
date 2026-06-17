@@ -149,10 +149,20 @@ export function extraSelectSql(cols) {
 }
 
 // ── cabeçalhos extras ────────────────────────────────────────────────────────
-export function renderExtraHeaders(cols, safe) {
+// expr ordenável de uma coluna extra (null se não-ordenável, ex.: arrays)
+export function extraColExpr(key) {
+  const c = COLS[key];
+  return (c && c.tipo !== 'arr') ? c.expr : null;
+}
+
+export function renderExtraHeaders(cols, safe, sortLink) {
   const s = safe || _safe;
   return (cols || []).filter(k => COLS[k])
-    .map(k => `<th class="grp">${s(COLS[k].label)}</th>`).join('');
+    .map(k => {
+      const ordenavel = COLS[k].tipo !== 'arr';
+      const inner = (ordenavel && typeof sortLink === 'function') ? sortLink(COLS[k].label, k) : s(COLS[k].label);
+      return `<th class="grp" data-colkey="${s(k)}">${inner}</th>`;
+    }).join('');
 }
 
 // ── células extras (read-only, formatadas por tipo) ──────────────────────────

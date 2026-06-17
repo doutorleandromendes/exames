@@ -21,6 +21,8 @@
 //  Sem schema novo — só leitura.
 // ════════════════════════════════════════════════════════════════════════════
 
+import { getFormSchema } from './atb-form-schema.js';
+
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 const EXAMES = {
   ventilatorio: { titulo: 'Evento Ventilatório Agudo (EVA)', exames: ['PEEP', 'FiO2', 'Rel', 'ST', 'Data'] },
@@ -92,14 +94,43 @@ function culturas(obj, s) {
   return keys.map(k => o[k] === true ? s(k) : `${s(k)}: ${s(o[k])}`).join(', ');
 }
 
-function paginaFichaView(f, anexos, s, podeEditar) {
+// defs das matrizes do schema: { key: { label, colunas, linhasFixas, linhaLabel } }
+function extrairMatrizes(schema) {
+  const out = {};
+  for (const sec of (schema && schema.secoes ? schema.secoes : []))
+    for (const c of (sec.campos || []))
+      if (c.type === 'matrix' && c.key)
+        out[c.key] = { label: c.label || c.key, colunas: c.colunas || [], linhasFixas: c.linhasFixas || null, linhaLabel: c.linhaLabel || '' };
+  return out;
+}
+function _fmtCel(v, type, s) {
+  if (type === 'check') return v === true ? '✓' : '—';
+  if (type === 'date')  return v ? _dt(v) : '—';
+  return (v != null && String(v).trim() !== '') ? s(v) : '—';
+}
+// matriz (array de linhas) → tabela; '' se nada preenchido
+function tabelaMatriz(titulo, def, dados, s) {
+  if (!def || !Array.isArray(def.colunas) || !def.colunas.length) return '';
+  const linhas = Array.isArray(dados) ? dados : [];
+  const cheia = row => def.colunas.some(c => { const v = row && row[c.key]; return c.type === 'check' ? v === true : (v != null && String(v).trim() !== ''); });
+  const corpo = [];
+  if (def.linhasFixas) {
+    def.linhasFixas.forEach((nome, i) => { const row = linhas[i] || {}; if (cheia(row)) corpo.push({ rotulo: nome, row }); });
+  } else {
+    linhas.forEach(row => { if (cheia(row)) corpo.push({ rotulo: null, row }); });
+  }
+  if (!corpo.length) return '';
+  const temRot = !!def.linhasFixas;
+  const head = (temRot ? `<th>${s(def.linhaLabel || '')}</th>` : '') + def.colunas.map(c => `<th>${s(c.label || c.key)}</th>`).join('');
+  const body = corpo.map(({ rotulo, row }) =>
+    `<tr>${temRot ? `<th class="rot">${s(rotulo)}</th>` : ''}${def.colunas.map(c => `<td>${_fmtCel(row[c.key], c.type, s)}</td>`).join('')}</tr>`).join('');
+  return `<div class="bloco"><h3>${s(titulo)}</h3><div class="serie-scroll"><table class="mtab"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+
+function paginaFichaView(f, anexos, s, podeEditar, matrizes) {
+  matrizes = matrizes || {};
   const nome = f.paciente_nome || f.paciente_nome_raw || '—';
   const ver = _arr(f.recomendacao_scih);
-  const pos = _arr(f.posologia).map(r => {
-    const d = r.droga || r.Droga || '', dose = r.dose || r.Dose || '', iv = r.intervalo || r.Intervalo || '';
-    return [d, dose, iv].filter(Boolean).map(s).join(' · ');
-  }).filter(Boolean);
-
   // seções
   const secoes = [];
 
@@ -146,13 +177,11 @@ function paginaFichaView(f, anexos, s, podeEditar) {
 
   secoes.push(bloco('Antimicrobianos prévios (7 dias)', [
     ['Usou ATB nos últimos 7 dias', _bool(f.uso_atb_7d)],
-    ['ATB prévios', _arr(f.atb_previos)],
   ], s));
+  secoes.push(tabelaMatriz('Antimicrobianos usados', matrizes.atb_previos, f.atb_previos, s));
 
-  secoes.push(bloco('Culturas', [
-    ['Culturas colhidas', culturas(f.culturas_colhidas, s)],
-    ['Culturas prévias', _arr(f.culturas_previas)],
-  ], s));
+  secoes.push(tabelaMatriz('Culturas colhidas', matrizes.culturas_colhidas, f.culturas_colhidas, s));
+  secoes.push(tabelaMatriz('Culturas prévias', matrizes.culturas_previas, f.culturas_previas, s));
 
   secoes.push(bloco('Dispositivos invasivos', [
     ['Dispositivos', _arr(f.dispositivos_invasivos)],
@@ -176,10 +205,10 @@ function paginaFichaView(f, anexos, s, podeEditar) {
 
   secoes.push(bloco('Antimicrobiano solicitado', [
     ['ATB', _arr(f.atb_solicitado)],
-    ['Posologia', pos.length ? pos.map(p => `<div>${p}</div>`).join('') : null],
     ['Tempo previsto', f.tempo_previsto != null ? s(f.tempo_previsto) + ' dias' : null],
     ['Associação com oxacilina', _bool(f.oxacilina_associacao)],
   ], s));
+  secoes.push(tabelaMatriz('Posologia', matrizes.posologia, f.posologia, s));
 
   secoes.push(bloco('Prescritor', [
     ['Nome', s(f.prescritor_nome)],
@@ -266,6 +295,10 @@ function paginaFichaView(f, anexos, s, podeEditar) {
   .serie-tab th,.serie-tab td{border:1px solid #eef1f5;padding:5px 8px;text-align:center}
   .serie-tab thead th{background:#eef4fc;color:var(--azul-texto);font-weight:600}
   .serie-tab th.ex{text-align:left;background:#fafbfc;color:var(--tinta-suave);font-weight:500}
+  .mtab{border-collapse:collapse;width:100%;font-size:13px;min-width:420px}
+  .mtab th,.mtab td{border:1px solid #eef1f5;padding:6px 9px;text-align:left}
+  .mtab thead th{background:#eef4fc;color:var(--azul-texto);font-weight:600;font-size:12px}
+  .mtab th.rot{background:#fafbfc;color:var(--tinta-suave);font-weight:500;white-space:nowrap}
   .anexo-pdfs{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
   .anexo-pdf{font-size:13px;color:var(--azul);text-decoration:none}
   .anexo-imgs{display:flex;flex-wrap:wrap;gap:8px}
@@ -335,7 +368,10 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
         `SELECT id, tipo, nome_original FROM atb_ficha_imagens WHERE ficha_id = $1 ORDER BY tipo, id`, [id]);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       const podeEditar = (req.user && req.user.super_admin) || req.cookies?.adm === '1';
-      res.send(paginaFichaView(f, anexos, _safe, podeEditar));
+      let matrizes = {};
+      try { matrizes = extrairMatrizes(await getFormSchema(pool, f.instituicao || 'HUSF')); }
+      catch (e) { console.error('[atb] matrizes schema:', e.message); }
+      res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes));
     } catch (e) {
       console.error('[atb] ficha view error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

@@ -147,19 +147,48 @@ function valorTxt(v) {
 }
 function descreverCond(cond, campos) {
   if (!cond) return '<span class="mut">(sempre)</span>';
-  if (cond.all) return cond.all.map(c => descreverCond(c, campos)).join(' <b>E</b> ');
-  if (cond.any) return cond.any.map(c => descreverCond(c, campos)).join(' <b>OU</b> ');
+  const parte = c => { const t = descreverCond(c, campos); return (c && (c.all || c.any)) ? '(' + t + ')' : t; };
+  if (cond.all) return cond.all.map(parte).join(' <b>E</b> ');
+  if (cond.any) return cond.any.map(parte).join(' <b>OU</b> ');
   const lbl = esc(rotuloCampo(campos, cond.campo));
   const op  = esc(OP_LABEL[cond.op] || cond.op);
   const vt  = esc(valorTxt(cond.valor));
   return `${lbl} <i>${op}</i>${vt ? ' ' + vt : ''}`;
 }
+function ehFolha(c) { return !!(c && c.campo && !c.all && !c.any); }
+function flatRepresentavel(cond) {
+  if (!cond) return true;
+  if (cond.all) return cond.all.every(ehFolha);
+  if (cond.any) return cond.any.every(ehFolha);
+  return !!cond.campo;
+}
 function extrairRegra(cond) {
-  if (!cond) return { juncao: 'all', conds: [] };
-  if (cond.all) return { juncao: 'all', conds: cond.all.filter(c => c.campo) };
-  if (cond.any) return { juncao: 'any', conds: cond.any.filter(c => c.campo) };
-  if (cond.campo) return { juncao: 'all', conds: [cond] };
-  return { juncao: 'all', conds: [] };
+  if (!cond) return { complexo: false, juncao: 'all', conds: [] };
+  if (!flatRepresentavel(cond)) return { complexo: true, raw: cond, juncao: 'all', conds: [] };
+  if (cond.all) return { complexo: false, juncao: 'all', conds: cond.all };
+  if (cond.any) return { complexo: false, juncao: 'any', conds: cond.any };
+  if (cond.campo) return { complexo: false, juncao: 'all', conds: [cond] };
+  return { complexo: false, juncao: 'all', conds: [] };
+}
+
+// editor avançado (regra aninhada) — preserva a estrutura via JSON
+function paginaEditorAvancado(schema, { alvo, tipo, raw, campos }) {
+  return shell('Editar regra (avançada)', `
+    <a class="voltar" href="/atb/admin/regras-form">← Regras</a>
+    <h1>Regra avançada</h1>
+    <p class="sub">Esta regra combina <b>E/OU em níveis</b> (condições aninhadas). O construtor visual não a representa sem perder a estrutura, então a edição aqui é pelo JSON. <b>Cancele para mantê-la intacta.</b></p>
+    <div class="card"><div class="sec" style="margin-top:0">Condição atual</div><p>${descreverCond(raw, campos)}</p></div>
+    <form method="post" action="/atb/admin/regras-form/salvar" class="card">
+      <input type="hidden" name="alvo" value="${esc(alvo)}">
+      <input type="hidden" name="tipo" value="${esc(tipo)}">
+      <input type="hidden" name="modo" value="json">
+      <label class="f">Estrutura (JSON) — edite com cuidado</label>
+      <textarea name="cond_json" rows="16" style="width:100%;font:13px/1.5 ui-monospace,Menlo,monospace">${esc(JSON.stringify(raw, null, 2))}</textarea>
+      <div style="margin-top:14px">
+        <button class="btn pri" type="submit">Salvar (avançado)</button>
+        <a class="btn" href="/atb/admin/regras-form">Cancelar</a>
+      </div>
+    </form>`);
 }
 
 const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade' };
@@ -254,8 +283,9 @@ function paginaLista(schema) {
     </div>`);
 }
 
-function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds }) {
+function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds, complexo, raw }) {
   const campos = listarCampos(schema);
+  if (complexo) return paginaEditorAvancado(schema, { alvo, tipo, raw, campos });
   const optsAlvo = [
     `<optgroup label="Seções (visibilidade)">` +
       (schema.secoes || []).map(s => { const v = 'secao:' + secaoId(s); return `<option value="${esc(v)}" ${v === alvo ? 'selected' : ''}>Seção: ${esc(secaoTitulo(s))}</option>`; }).join('') +
@@ -290,6 +320,7 @@ function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds }) {
     <h1>${alvo ? 'Editar regra' : 'Nova regra'}</h1>
     <p class="sub">Para uma <b>seção</b>, defina quando ela aparece (a obrigatoriedade dos campos dela depende disso). Para um <b>campo</b>, defina visibilidade ou obrigatoriedade condicional. Campos "sempre obrigatórios" são geridos na lista.</p>
     <form method="post" action="/atb/admin/regras-form/salvar" class="card">
+      <input type="hidden" name="modo" value="builder">
       <div class="row">
         <div><label class="f">Alvo</label><select name="alvo" id="alvo" class="campo" onchange="syncTipo()">${optsAlvo}</select></div>
         <div><label class="f">Tipo de regra</label><select name="tipo" id="tipo">${optsTipo}</select></div>
@@ -365,15 +396,15 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const schema = await getFormSchema(pool, inst);
       const alvo = req.query.alvo ? String(req.query.alvo) : '';
       let tipo = req.query.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
-      let juncao = 'all', conds = [], escopo = 'campo';
+      let juncao = 'all', conds = [], escopo = 'campo', complexo = false, raw = null;
       if (alvo) {
         const r = resolverAlvo(schema, alvo);
         escopo = r.escopo;
         if (escopo === 'secao') tipo = 'cond';
         const ex = extrairRegra(r.obj ? r.obj[tipo] : null);
-        juncao = ex.juncao; conds = ex.conds;
+        juncao = ex.juncao; conds = ex.conds; complexo = !!ex.complexo; raw = ex.raw || null;
       }
-      res.send(paginaEditor(schema, { alvo, escopo, tipo, juncao, conds }));
+      res.send(paginaEditor(schema, { alvo, escopo, tipo, juncao, conds, complexo, raw }));
     } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
   });
 
@@ -386,8 +417,19 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       if (!r.obj) return res.status(400).send('Alvo não encontrado: ' + esc(b.alvo));
       let tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
       if (r.escopo === 'secao') tipo = 'cond'; // seção só tem visibilidade
-      const cond = montarCond(b);
-      if (cond) r.obj[tipo] = cond; else delete r.obj[tipo];
+      if (b.modo === 'json') {
+        const txt = String(b.cond_json || '').trim();
+        if (!txt) { delete r.obj[tipo]; }
+        else {
+          let parsed;
+          try { parsed = JSON.parse(txt); }
+          catch (e2) { return res.status(400).send('JSON inválido: ' + esc(e2.message) + ' — <a href="javascript:history.back()">voltar</a>'); }
+          if (parsed && typeof parsed === 'object') r.obj[tipo] = parsed; else delete r.obj[tipo];
+        }
+      } else {
+        const cond = montarCond(b);
+        if (cond) r.obj[tipo] = cond; else delete r.obj[tipo];
+      }
       await saveFormSchema(pool, inst, schema, req.user?.id || null);
       res.redirect('/atb/admin/regras-form');
     } catch (e) { res.status(500).send('Erro ao salvar: ' + esc(e.message)); }

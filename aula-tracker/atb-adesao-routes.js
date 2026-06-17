@@ -149,7 +149,7 @@ function paginaAdesao(rows, mes, somentePendentes) {
       ? `<td>${_selDesfecho(f.id, f.adesao_desfecho || '')}</td><td>${_selTroca(f.id, f.adesao_troca_atb || '', ehTroca)}</td>`
       : `<td colspan="2" class="aguard">aguardando 72h</td>`;
 
-    return `<tr data-id="${f.id}">
+    return `<tr data-id="${f.id}"${f.adesao_desfecho ? ' class="resolvida"' : ''}>
       <td class="dt">${dt(f.data_parecer)}</td>
       <td><a href="/atb/admin/ficha/${f.id}" class="nome">${_safe(nome)}</a></td>
       <td>${_safe(f.prontuario || '')}</td>
@@ -196,6 +196,8 @@ function paginaAdesao(rows, mes, somentePendentes) {
   td.acao a{text-decoration:none;font-size:15px}
   .vazio{padding:30px;text-align:center;color:var(--mut)}
   .saved{outline:2px solid #1a8a5a55}
+  tr.resolvida{opacity:.45;transition:opacity .12s}
+  tr.resolvida:hover{opacity:1}
 </style></head>
 <body>
   <div class="cab">
@@ -231,7 +233,7 @@ function paginaAdesao(rows, mes, somentePendentes) {
       fetch('/atb/admin/api/adesao/' + id, {
         method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: body.toString()
       }).then(function(r){ return r.json(); }).then(function(j){
-        if(j && j.ok){ tr.classList.add('saved'); setTimeout(function(){ tr.classList.remove('saved'); }, 700); }
+        if(j && j.ok){ tr.classList.toggle('resolvida', !!desf.value); tr.classList.add('saved'); setTimeout(function(){ tr.classList.remove('saved'); }, 700); }
       }).catch(function(){});
     }
     document.querySelector('tbody').addEventListener('change', function(ev){

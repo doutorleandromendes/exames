@@ -260,10 +260,14 @@ export function gridControlsUI(query, pager) {
   // ── painel de COLUNAS ──────────────────────────────────────────────────────
   const grupos = {};
   Object.keys(COLS).forEach(k => { (grupos[COLS[k].grupo] = grupos[COLS[k].grupo] || []).push(k); });
+  const GRADE_COLS = [['pront','Pront.'],['sofa','SOFA'],['parecer','Parecer'],['iras','IrAS'],['etiol','Etiol'],['micro','Microbiologia'],['saps3','SAPS3'],['desfecho','Desfecho'],['dtdesf','Dt. desf.'],['links','Links']];
   const colunasForm = `
     <form method="GET" action="/atb/admin/grid" class="gf-panel" id="gf-colunas" style="display:none">
       ${hidden(['cols'])}
       <div class="gf-cols">
+        <div class="gf-colgrp"><div class="gf-colgrp-t">Colunas da grade</div>
+          ${GRADE_COLS.map(c => `<label class="gf-chk"><input type="checkbox" class="gradecol-chk" data-col="${c[0]}" checked> ${_safe(c[1])}</label>`).join('')}
+        </div>
         ${Object.keys(grupos).map(g => `
           <div class="gf-colgrp"><div class="gf-colgrp-t">${_safe(g)}</div>
             ${grupos[g].map(k => `<label class="gf-chk"><input type="checkbox" name="cols" value="${k}" ${colsAtivas.includes(k) ? 'checked' : ''}> ${_safe(COLS[k].label)}</label>`).join('')}

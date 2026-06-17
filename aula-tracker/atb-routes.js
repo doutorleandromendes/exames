@@ -865,6 +865,21 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       const pageSize = 80;
       const offset = (pageNum-1)*pageSize;
 
+      // ── Ordenação (server-side; whitelist de colunas) ──
+      const sort = String(req.query.sort || '');
+      const dir  = String(req.query.dir || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc';
+      const SORT_MAP = { paciente:'f.paciente_nome', pront:'f.prontuario', setor:'f.setor', sofa:'f.sofa',
+        iras:'a.iras', etiol:'a.etiol_iras', micro:'a.micro', saps3:'a.saps3', desfecho:'a.desfecho_iras', dtdesf:'a.desfecho_data' };
+      const orderSql = SORT_MAP[sort]
+        ? `${SORT_MAP[sort]} ${dir.toUpperCase()} NULLS LAST, COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`
+        : `COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`;
+      const sortLink = (label, key) => {
+        const active = sort === key;
+        const u = new URLSearchParams({ ...req.query, sort:key, dir:(active && dir==='asc' ? 'desc' : 'asc'), page:'1' });
+        const arr = active ? (dir==='asc' ? '▲' : '▼') : '';
+        return `<a class="th-sort${active?' on':''}" href="/atb/admin/grid?${u}">${label}${arr?`<span class="arr"> ${arr}</span>`:''}</a>`;
+      };
+
       const { whereSql, params } = buildGridWhere(req.query);
 
       const { rows:[{total}] } = await pool.query(`
@@ -895,7 +910,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
         LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
         WHERE ${whereSql}
-        ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC
+        ORDER BY ${orderSql}
         LIMIT $${params.length+1} OFFSET $${params.length+2}`, [...params, pageSize, offset]);
 
       const totalPages = Math.max(1, Math.ceil(parseInt(total,10)/pageSize));
@@ -981,13 +996,21 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         <div class="grid-wrap">
           <table class="atb-grid">
             <thead><tr>
-              <th class="rownum">#</th><th class="sticky-col">Paciente</th>
-              <th>Pront.</th><th>Setor</th><th>ATB</th>
-              <th style="text-align:center">SOFA</th><th>Parecer</th>
-              <th class="grp">IrAS</th><th class="grp">Etiol</th><th class="grp">Microbiologia</th>
-              <th class="grp">SAPS3</th><th class="grp">Desfecho</th><th class="grp">Dt. desf.</th>
+              <th class="rownum" data-colkey="rownum">#</th>
+              <th class="sticky-col" data-colkey="paciente">${sortLink('Paciente','paciente')}</th>
+              <th data-colkey="pront">${sortLink('Pront.','pront')}</th>
+              <th data-colkey="setor">${sortLink('Setor','setor')}</th>
+              <th data-colkey="atb">ATB</th>
+              <th style="text-align:center" data-colkey="sofa">${sortLink('SOFA','sofa')}</th>
+              <th data-colkey="parecer">Parecer</th>
+              <th class="grp" data-colkey="iras">${sortLink('IrAS','iras')}</th>
+              <th class="grp" data-colkey="etiol">${sortLink('Etiol','etiol')}</th>
+              <th class="grp" data-colkey="micro">${sortLink('Microbiologia','micro')}</th>
+              <th class="grp" data-colkey="saps3">${sortLink('SAPS3','saps3')}</th>
+              <th class="grp" data-colkey="desfecho">${sortLink('Desfecho','desfecho')}</th>
+              <th class="grp" data-colkey="dtdesf">${sortLink('Dt. desf.','dtdesf')}</th>
               ${renderExtraHeaders(cols, safe)}
-              <th style="text-align:center">Links</th><th></th>
+              <th style="text-align:center" data-colkey="links">Links</th><th data-colkey="end"></th>
             </tr></thead>
            <tbody>${linhas || `<tr><td colspan="${15 + cols.length}" style="padding:30px;text-align:center;color:#80868b">Nenhuma ficha no recorte.</td></tr>`}</tbody>
           </table>
@@ -1024,13 +1047,16 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           .atb-light .saved{opacity:0;color:#2bb673;font-size:13px;transition:opacity .3s}
           /* — redimensionamento de colunas — */
           table.atb-grid.resizable th,table.atb-grid.resizable td{overflow:hidden;text-overflow:ellipsis}
-          .atb-light .col-grip{position:absolute;top:0;right:-3px;width:9px;height:100%;cursor:col-resize;z-index:8}
+          .atb-light .col-grip{position:absolute;top:0;right:0;width:9px;height:100%;cursor:col-resize;z-index:8}
           .atb-light .col-grip::after{content:"";position:absolute;top:28%;right:4px;width:2px;height:44%;background:transparent;border-radius:2px}
           .atb-light .col-grip:hover::after{background:#2bb673}
           body.col-resizing,body.col-resizing *{cursor:col-resize!important;user-select:none!important}
           .atb-light .grid-toolbar{text-align:right;margin:0 0 6px}
           .atb-light .grid-reset{font-size:12px;color:#5f6368;cursor:pointer;background:none;border:0;padding:3px 6px}
           .atb-light .grid-reset:hover{color:#2bb673}
+          .atb-light .th-sort{color:inherit;text-decoration:none;cursor:pointer}
+          .atb-light .th-sort:hover,.atb-light .th-sort.on{color:#2bb673}
+          .atb-light .th-sort .arr{font-size:9px}
         </style>
         <script>
         (function(){
@@ -1059,7 +1085,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           var TABLE=document.querySelector('table.atb-grid'); if(!TABLE||!TABLE.tHead||!TABLE.tHead.rows[0]) return;
           var PFX='atbgridcol:';
           var ths=Array.prototype.slice.call(TABLE.tHead.rows[0].cells);
-          function keyOf(th,i){ return PFX+(((th.textContent||'').trim())||('i'+i)); }
+          function keyOf(th,i){ return PFX+(th.getAttribute('data-colkey')||((th.textContent||'').trim())||('i'+i)); }
           function getW(k){ try{var v=localStorage.getItem(k);return v?parseInt(v,10):null;}catch(e){return null;} }
           function setW(k,v){ try{localStorage.setItem(k,String(v));}catch(e){} }
           function delW(k){ try{localStorage.removeItem(k);}catch(e){} }

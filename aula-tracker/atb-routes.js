@@ -23,9 +23,11 @@ import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-ace
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
+import { registerRegrasFormRoutes, validarObrigatoriosServidor } from './atb-regras-form-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,6 +77,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerConsultaRoutes(app, pool);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
+  registerRegrasFormRoutes(app, pool, adminRequired);
   registerFichaEditRoutes(app, pool, adminRequired);   // gate de super_admin é interno
   registerParecerFrasesRoutes(app, pool, adminRequired);
 
@@ -173,10 +176,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       if (!d.pac_nome || !d.prontuario || !d.crm) {
         return res.status(400).json({ error: 'Campos obrigatórios em falta' });
       }
-      const _tt = String(d.tipo_terapia || '').trim();
-      const _hc = String(d.historia_clinica || '').trim();
-      if (_tt !== 'Profilaxia cirúrgica' && _hc.length < 15) {
-        return res.status(400).json({ error: 'História clínica obrigatória: descreva com detalhes a justificativa de uso.' });
+      const _schemaVal = await getFormSchema(pool, inst);
+      const _faltas = validarObrigatoriosServidor(_schemaVal, d);
+      if (_faltas.length) {
+        return res.status(400).json({ error: _faltas[0].msg, campos: _faltas.map(f => f.key) });
       }
       const parsed = parseFormPayload(d);
       const { rows: [instRow] } = await pool.query(

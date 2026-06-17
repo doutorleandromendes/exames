@@ -1022,6 +1022,15 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           .atb-light .edit input::placeholder{color:#bdc1c6}
           .atb-light .iras-cell .iras-select{margin-top:3px;width:140px;display:block}
           .atb-light .saved{opacity:0;color:#2bb673;font-size:13px;transition:opacity .3s}
+          /* — redimensionamento de colunas — */
+          table.atb-grid.resizable th,table.atb-grid.resizable td{overflow:hidden;text-overflow:ellipsis}
+          .atb-light .col-grip{position:absolute;top:0;right:-3px;width:9px;height:100%;cursor:col-resize;z-index:8}
+          .atb-light .col-grip::after{content:"";position:absolute;top:28%;right:4px;width:2px;height:44%;background:transparent;border-radius:2px}
+          .atb-light .col-grip:hover::after{background:#2bb673}
+          body.col-resizing,body.col-resizing *{cursor:col-resize!important;user-select:none!important}
+          .atb-light .grid-toolbar{text-align:right;margin:0 0 6px}
+          .atb-light .grid-reset{font-size:12px;color:#5f6368;cursor:pointer;background:none;border:0;padding:3px 6px}
+          .atb-light .grid-reset:hover{color:#2bb673}
         </style>
         <script>
         (function(){
@@ -1045,6 +1054,44 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           });
         })();
        </script>
+        <script>
+        (function(){
+          var TABLE=document.querySelector('table.atb-grid'); if(!TABLE||!TABLE.tHead||!TABLE.tHead.rows[0]) return;
+          var PFX='atbgridcol:';
+          var ths=Array.prototype.slice.call(TABLE.tHead.rows[0].cells);
+          function keyOf(th,i){ return PFX+(((th.textContent||'').trim())||('i'+i)); }
+          function getW(k){ try{var v=localStorage.getItem(k);return v?parseInt(v,10):null;}catch(e){return null;} }
+          function setW(k,v){ try{localStorage.setItem(k,String(v));}catch(e){} }
+          function delW(k){ try{localStorage.removeItem(k);}catch(e){} }
+          var medidas=ths.map(function(th){return Math.round(th.getBoundingClientRect().width);});
+          var total=0;
+          ths.forEach(function(th,i){ var k=keyOf(th,i),w=getW(k); if(w==null)w=medidas[i];
+            th.style.width=w+'px'; th.style.minWidth='0'; th.style.maxWidth='none'; total+=w; });
+          TABLE.style.tableLayout='fixed'; TABLE.style.width=total+'px'; TABLE.classList.add('resizable');
+          function syncTotal(){ var t=0; ths.forEach(function(th){t+=th.getBoundingClientRect().width;}); TABLE.style.width=Math.round(t)+'px'; }
+          ths.forEach(function(th,i){
+            var grip=document.createElement('span'); grip.className='col-grip'; th.appendChild(grip);
+            grip.addEventListener('mousedown',function(e){
+              var sx=e.pageX, sw=th.getBoundingClientRect().width; document.body.classList.add('col-resizing');
+              function mv(ev){ th.style.width=Math.max(40,Math.round(sw+(ev.pageX-sx)))+'px'; syncTotal(); }
+              function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up);
+                document.body.classList.remove('col-resizing'); setW(keyOf(th,i),Math.round(th.getBoundingClientRect().width)); }
+              document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
+              e.preventDefault(); e.stopPropagation();
+            });
+            grip.addEventListener('dblclick',function(e){ e.preventDefault(); e.stopPropagation();
+              delW(keyOf(th,i)); th.style.width=medidas[i]+'px'; syncTotal(); });
+          });
+          var wrap=TABLE.closest('.grid-wrap');
+          if(wrap&&wrap.parentNode){
+            var bar=document.createElement('div'); bar.className='grid-toolbar';
+            var b=document.createElement('button'); b.type='button'; b.className='grid-reset';
+            b.textContent='↔ redefinir larguras das colunas';
+            b.addEventListener('click',function(){ ths.forEach(function(th,i){ delW(keyOf(th,i)); }); location.reload(); });
+            bar.appendChild(b); wrap.parentNode.insertBefore(bar,wrap);
+          }
+        })();
+        </script>
         ${parecerGridAssets((await getParecerFrases(pool)).map(r => r.texto))}
         ${fichaCardAssets()}`;
       const microLock = soMicro ? `<script>document.addEventListener('DOMContentLoaded',function(){

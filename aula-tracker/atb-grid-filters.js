@@ -61,9 +61,9 @@ export function applyGridFilters(query, where, params) {
 
   // IrAS Sim/Não (derivado)
   if (q.iras_sn === 'sim') {
-    where.push(`(a.iras IS NOT NULL AND a.iras <> '' AND a.iras NOT IN ('Descartado','Repetida','Sem dados'))`);
+    where.push(`(a.iras IS NOT NULL AND a.iras <> '' AND a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post'))`);
   } else if (q.iras_sn === 'nao') {
-    where.push(`(a.iras IS NULL OR a.iras = '' OR a.iras IN ('Descartado','Repetida','Sem dados'))`);
+    where.push(`(a.iras IS NULL OR a.iras = '' OR a.iras IN ('Descartado','Repetida','Sem dados','Audit_post'))`);
   }
 
   // Tipo de IrAS (classe específica; ILIKE p/ pegar classificações duplas)
@@ -237,6 +237,7 @@ export function gridControlsUI(query, pager) {
         <label class="gf-sub">Submission de <input type="date" name="sub_de" id="gf-sub-de" value="${val('sub_de')}" class="gf-in"></label>
         <label class="gf-sub">até <input type="date" name="sub_ate" id="gf-sub-ate" value="${val('sub_ate')}" class="gf-in"></label>
         <div class="gf-atalhos">
+          <button type="button" data-range="mes_atual">Este mês</button>
           <button type="button" data-range="mes">Último mês</button>
           <button type="button" data-range="sem">Último semestre</button>
           <button type="button" data-range="ano">Este ano</button>
@@ -315,7 +316,10 @@ export function gridControlsUI(query, pager) {
       b.addEventListener('click', function(){
         var hoje = new Date(), de, ate;
         var r = b.getAttribute('data-range');
-        if(r === 'mes'){ // mês calendário anterior
+        if(r === 'mes_atual'){ // mês calendário atual
+          de = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+          ate = hoje;
+        } else if(r === 'mes'){ // mês calendário anterior
           de = new Date(hoje.getFullYear(), hoje.getMonth()-1, 1);
           ate = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
         } else if(r === 'sem'){ // 6 meses anteriores
@@ -346,7 +350,7 @@ export function buildGridWhere(query) {
   if (setor) { params.push(setor); where.push(`f.setor = $${params.length}`); }
   if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)) = $${params.length}`); }
   if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
-  else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras <> ''`);
+  else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post') AND a.iras IS NOT NULL AND a.iras <> ''`);
   else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);
   if (Q.parecer === 'sem') where.push(`(f.recomendacao_scih IS NULL OR (jsonb_typeof(f.recomendacao_scih)='array' AND jsonb_array_length(f.recomendacao_scih)=0))`);
   applyGridFilters(Q, where, params);

@@ -1136,6 +1136,24 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
           applyFreeze(getFreeze());
 
+          // ── ocultar colunas (client-side; checkboxes .gradecol-chk no painel "Colunas") ──
+          var HKEY=PFX+'__hidden__';
+          function rawKey(th,i){ return th.getAttribute('data-colkey')||('i'+i); }
+          function getHidden(){ try{var v=localStorage.getItem(HKEY); return v?v.split(','):[];}catch(e){return [];} }
+          function setHidden(a){ try{localStorage.setItem(HKEY,a.join(','));}catch(e){} }
+          function applyHidden(a){
+            linhas().forEach(function(cs){ ths.forEach(function(th,i){ if(cs[i]) cs[i].style.display=(a.indexOf(rawKey(th,i))!==-1)?'none':''; }); });
+          }
+          var hidArr=getHidden(); applyHidden(hidArr); syncTotal(); applyFreeze(getFreeze());
+          Array.prototype.forEach.call(document.querySelectorAll('.gradecol-chk'),function(chk){
+            var key=chk.getAttribute('data-col'); chk.checked = hidArr.indexOf(key)===-1;
+            chk.addEventListener('change',function(){
+              var cur=getHidden(), idx=cur.indexOf(key);
+              if(chk.checked){ if(idx!==-1) cur.splice(idx,1); } else if(idx===-1) cur.push(key);
+              setHidden(cur); applyHidden(cur); syncTotal(); applyFreeze(getFreeze());
+            });
+          });
+
           var wrap=TABLE.closest('.grid-wrap');
           if(wrap&&wrap.parentNode){
             var bar=document.createElement('div'); bar.className='grid-toolbar';
@@ -1147,7 +1165,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
             fl.appendChild(fs); bar.appendChild(fl);
             var b=document.createElement('button'); b.type='button'; b.className='grid-reset';
             b.textContent='↔ redefinir colunas';
-            b.addEventListener('click',function(){ ths.forEach(function(th,i){ delW(keyOf(th,i)); }); delW(FKEY); location.reload(); });
+            b.addEventListener('click',function(){ ths.forEach(function(th,i){ delW(keyOf(th,i)); }); delW(FKEY); delW(HKEY); location.reload(); });
             bar.appendChild(b); wrap.parentNode.insertBefore(bar,wrap);
           }
         })();

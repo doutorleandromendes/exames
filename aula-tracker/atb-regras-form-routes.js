@@ -87,14 +87,14 @@ export function validarObrigatoriosServidor(schema, dados) {
 
 // ── Catálogo de operadores ───────────────────────────────────────────────────
 const OPS = [
-  { op: 'eq',               label: 'é igual a',            valor: 'um' },
-  { op: 'neq',              label: 'é diferente de',       valor: 'um' },
-  { op: 'contains',         label: 'contém (lista)',       valor: 'um' },
-  { op: 'contains_any',     label: 'contém algum de (lista)', valor: 'varios' },
-  { op: 'in',               label: 'está entre',           valor: 'varios' },
-  { op: 'text_contains_any',label: 'texto contém algum de',valor: 'varios' },
-  { op: 'filled',           label: 'está preenchido',      valor: 'nenhum' },
-  { op: 'not_filled',       label: 'está vazio',           valor: 'nenhum' },
+  { op: 'eq',                label: 'é igual a',               valor: 'um' },
+  { op: 'neq',               label: 'é diferente de',          valor: 'um' },
+  { op: 'contains',          label: 'contém (lista)',          valor: 'um' },
+  { op: 'contains_any',      label: 'contém algum de (lista)', valor: 'varios' },
+  { op: 'in',                label: 'está entre',              valor: 'varios' },
+  { op: 'text_contains_any', label: 'texto contém algum de',   valor: 'varios' },
+  { op: 'filled',            label: 'está preenchido',         valor: 'nenhum' },
+  { op: 'not_filled',        label: 'está vazio',              valor: 'nenhum' },
 ];
 const OP_LABEL = Object.fromEntries(OPS.map(o => [o.op, o.label]));
 const OP_VALOR = Object.fromEntries(OPS.map(o => [o.op, o.valor])); // 'um' | 'varios' | 'nenhum'
@@ -105,7 +105,7 @@ function esc(v) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// lista plana de campos do schema (key, label, options)
+// lista plana de campos (key, label, options) para dropdowns
 function listarCampos(schema) {
   const out = [];
   for (const sec of (schema.secoes || []))
@@ -119,12 +119,27 @@ function acharCampo(schema, key) {
       if (c.key === key) return c;
   return null;
 }
+function acharSecao(schema, id) {
+  return (schema.secoes || []).find(s => (s.id || s.titulo) === id) || null;
+}
+function secaoId(sec) { return sec.id || sec.titulo || ''; }
+function secaoTitulo(sec) { return sec.titulo || sec.id || '(seção)'; }
 function rotuloCampo(campos, key) {
   const f = campos.find(c => c.key === key);
   return f ? f.label : key;
 }
 
-// ── Descrição legível de uma cond ────────────────────────────────────────────
+// resolve um alvo "escopo:id" → { escopo, id, obj }
+function resolverAlvo(schema, alvo) {
+  const s = String(alvo || '');
+  const i = s.indexOf(':');
+  const escopo = i >= 0 ? s.slice(0, i) : 'campo';
+  const id = i >= 0 ? s.slice(i + 1) : s;
+  const obj = escopo === 'secao' ? acharSecao(schema, id) : acharCampo(schema, id);
+  return { escopo, id, obj };
+}
+
+// ── Descrição legível ─────────────────────────────────────────────────────────
 function valorTxt(v) {
   if (Array.isArray(v)) return v.map(x => `"${x}"`).join(', ');
   if (v == null || v === '') return '';
@@ -139,10 +154,8 @@ function descreverCond(cond, campos) {
   const vt  = esc(valorTxt(cond.valor));
   return `${lbl} <i>${op}</i>${vt ? ' ' + vt : ''}`;
 }
-
-// extrai as condições-folha de uma cond (assume um nível de all/any) p/ prefill
 function extrairRegra(cond) {
-  if (!cond) return { juncao: "all", conds: [] };
+  if (!cond) return { juncao: 'all', conds: [] };
   if (cond.all) return { juncao: 'all', conds: cond.all.filter(c => c.campo) };
   if (cond.any) return { juncao: 'any', conds: cond.any.filter(c => c.campo) };
   if (cond.campo) return { juncao: 'all', conds: [cond] };
@@ -151,9 +164,6 @@ function extrairRegra(cond) {
 
 const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade' };
 
-// ════════════════════════════════════════════════════════════════════════════
-//  Páginas
-// ════════════════════════════════════════════════════════════════════════════
 function shell(titulo, body) {
   return `<!DOCTYPE html><html lang="pt-BR"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -161,16 +171,16 @@ function shell(titulo, body) {
 <style>
   :root{ --pri:#0c447c; --bg:#f4f6f9; --line:#e3e7ee; --mut:#5f6368; }
   *{box-sizing:border-box} body{margin:0;background:var(--bg);font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1f2733}
-  .wrap{max-width:980px;margin:0 auto;padding:24px 18px 70px}
+  .wrap{max-width:1000px;margin:0 auto;padding:24px 18px 70px}
   h1{font-size:22px;margin:0 0 2px} .sub{color:var(--mut);margin:0 0 18px;font-size:14px}
   a.voltar{color:var(--pri);text-decoration:none;font-size:14px}
   .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
   .sec{font-weight:600;color:var(--pri);margin:6px 0 10px;font-size:14px}
   table{width:100%;border-collapse:collapse} td,th{border-top:1px solid var(--line);padding:9px 8px;vertical-align:top;text-align:left}
   th{border-top:0;color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
-  .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:8px;background:#eef2f8;color:var(--pri);font-weight:600}
-  .tag.ob{background:#fdeee6;color:#a85b1b}
-  .acoes{white-space:nowrap;width:1%}
+  .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:8px;background:#eef2f8;color:var(--pri);font-weight:600;white-space:nowrap}
+  .tag.ob{background:#fdeee6;color:#a85b1b} .tag.se{background:#e9f6ee;color:#1c7a43} .tag.sempre{background:#fbe9ee;color:#9c2447}
+  .acoes{white-space:nowrap;width:1%} .mut{color:var(--mut)} .nota{color:var(--mut);font-size:12px}
   .btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;color:#1f2733;text-decoration:none;display:inline-block}
   .btn.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
   .btn.del{color:#b3261e;border-color:#f0c9c5}
@@ -180,57 +190,82 @@ function shell(titulo, body) {
   select{min-width:150px}
   .row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
   .row .campo{min-width:230px} .row .op{min-width:180px} .row .val{min-width:200px;flex:1}
-  .inl{display:inline} .nota{color:var(--mut);font-size:12px}
+  .inl{display:inline}
 </style></head><body><div class="wrap">${body}</div></body></html>`;
 }
 
 function paginaLista(schema) {
   const campos = listarCampos(schema);
   const linhas = [];
+  const linhaRegra = (alvoVal, alvoLabel, tipoTag, tagCls, descHtml, podeExcluir) => `
+    <tr>
+      <td>${alvoLabel}</td>
+      <td><span class="tag ${tagCls}">${tipoTag}</span></td>
+      <td>${descHtml}</td>
+      <td class="acoes">
+        <a class="btn sm" href="/atb/admin/regras-form/editar?alvo=${encodeURIComponent(alvoVal.alvo)}&tipo=${alvoVal.tipo}">Editar</a>
+        ${podeExcluir ? `<form class="inl" method="post" action="/atb/admin/regras-form/excluir" onsubmit="return confirm('Remover esta regra?')">
+          <input type="hidden" name="alvo" value="${esc(alvoVal.alvo)}"><input type="hidden" name="tipo" value="${alvoVal.tipo}">
+          <button class="btn sm del" type="submit">Excluir</button></form>` : ''}
+      </td>`;
+
   for (const sec of (schema.secoes || [])) {
+    const sid = secaoId(sec);
+    // visibilidade da SEÇÃO
+    if (sec.cond) {
+      linhas.push('<tr>' + linhaRegra(
+        { alvo: 'secao:' + sid, tipo: 'cond' },
+        `<strong>Seção: ${esc(secaoTitulo(sec))}</strong>`,
+        'Visibilidade (seção)', 'se', descreverCond(sec.cond, campos), true) + '</tr>');
+    }
     for (const c of (sec.campos || [])) {
       if (!c.key) continue;
-      const add = (tipo, cond) => linhas.push(`
-        <tr>
-          <td><strong>${esc(c.label || c.key)}</strong><br><span class="nota">${esc(c.key)}</span></td>
-          <td><span class="tag ${tipo === 'requiredCond' ? 'ob' : ''}">${TIPOS[tipo]}</span></td>
-          <td>${descreverCond(cond, campos)}</td>
-          <td class="acoes">
-            <a class="btn sm" href="/atb/admin/regras-form/editar?campo=${encodeURIComponent(c.key)}&tipo=${tipo}">Editar</a>
-            <form class="inl" method="post" action="/atb/admin/regras-form/excluir" onsubmit="return confirm('Remover esta regra?')">
-              <input type="hidden" name="campo" value="${esc(c.key)}"><input type="hidden" name="tipo" value="${tipo}">
-              <button class="btn sm del" type="submit">Excluir</button>
-            </form>
-          </td>
-        </tr>`);
-      if (c.cond) add('cond', c.cond);
-      if (c.requiredCond) add('requiredCond', c.requiredCond);
+      const alvoLabel = `<strong>${esc(c.label || c.key)}</strong><br><span class="nota">${esc(c.key)} · seção: ${esc(secaoTitulo(sec))}</span>`;
+      if (c.cond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'cond' }, alvoLabel, 'Visibilidade', '', descreverCond(c.cond, campos), true) + '</tr>');
+      if (c.requiredCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'requiredCond' }, alvoLabel, 'Obrigatoriedade', 'ob', descreverCond(c.requiredCond, campos), true) + '</tr>');
+      if (c.required === true) {
+        const nota = c.minChars ? `mínimo de ${c.minChars} caracteres` : 'preenchimento exigido';
+        linhas.push(`
+          <tr>
+            <td>${alvoLabel}</td>
+            <td><span class="tag sempre">Sempre obrigatório</span></td>
+            <td><span class="mut">${esc(nota)}${sec.cond ? ' — quando a seção está visível' : ''}</span></td>
+            <td class="acoes">
+              <form class="inl" method="post" action="/atb/admin/regras-form/required-off" onsubmit="return confirm('Tornar este campo OPCIONAL? Ele deixará de ser exigido.')">
+                <input type="hidden" name="campo" value="${esc(c.key)}">
+                <button class="btn sm del" type="submit">Tornar opcional</button>
+              </form>
+            </td>
+          </tr>`);
+      }
     }
   }
+
   return shell('Regras condicionais', `
     <a class="voltar" href="/scih">← Portal SCIH</a>
     <h1>Regras condicionais do formulário</h1>
-    <p class="sub">Visibilidade (quando um campo aparece) e obrigatoriedade (quando um campo é exigido). As regras valem na hora no formulário; a checagem também roda no servidor ao salvar a ficha.</p>
-    <div class="card">
-      <a class="btn pri" href="/atb/admin/regras-form/editar">+ Nova regra</a>
-    </div>
+    <p class="sub">Visibilidade de seções e campos, obrigatoriedade condicional e campos sempre obrigatórios. Tudo vale na hora no formulário e também é checado no servidor ao salvar a ficha.</p>
+    <div class="card"><a class="btn pri" href="/atb/admin/regras-form/editar">+ Nova regra</a></div>
     <div class="card">
       <table>
-        <thead><tr><th>Campo</th><th>Tipo</th><th>Condição</th><th></th></tr></thead>
-        <tbody>${linhas.join('') || '<tr><td colspan="4" class="nota">Nenhuma regra condicional definida.</td></tr>'}</tbody>
+        <thead><tr><th>Alvo</th><th>Tipo</th><th>Condição</th><th></th></tr></thead>
+        <tbody>${linhas.join('') || '<tr><td colspan="4" class="nota">Nenhuma regra definida.</td></tr>'}</tbody>
       </table>
     </div>`);
 }
 
-function paginaEditor(schema, { campoAlvo, tipo, juncao, conds }) {
+function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds }) {
   const campos = listarCampos(schema);
-  const optsCampoAlvo = campos.map(c =>
-    `<option value="${esc(c.key)}" ${c.key === campoAlvo ? 'selected' : ''}>${esc(c.label)} (${esc(c.key)})</option>`).join('');
-  const optsTipo = Object.entries(TIPOS).map(([k, v]) =>
-    `<option value="${k}" ${k === tipo ? 'selected' : ''}>${v}</option>`).join('');
-  const optsJuncao = [['all', 'TODAS as condições (E)'], ['any', 'QUALQUER condição (OU)']].map(([k, v]) =>
-    `<option value="${k}" ${k === juncao ? 'selected' : ''}>${v}</option>`).join('');
-  const optsOp = OPS.map(o => `<option value="${o.op}">${esc(o.label)}</option>`).join('');
+  const optsAlvo = [
+    `<optgroup label="Seções (visibilidade)">` +
+      (schema.secoes || []).map(s => { const v = 'secao:' + secaoId(s); return `<option value="${esc(v)}" ${v === alvo ? 'selected' : ''}>Seção: ${esc(secaoTitulo(s))}</option>`; }).join('') +
+    `</optgroup>`,
+    `<optgroup label="Campos">` +
+      campos.map(c => { const v = 'campo:' + c.key; return `<option value="${esc(v)}" ${v === alvo ? 'selected' : ''}>${esc(c.label)} (${esc(c.key)})</option>`; }).join('') +
+    `</optgroup>`,
+  ].join('');
+  const optsTipo = Object.entries(TIPOS).map(([k, v]) => `<option value="${k}" ${k === tipo ? 'selected' : ''}>${v}</option>`).join('');
+  const optsJuncao = [['all', 'TODAS as condições (E)'], ['any', 'QUALQUER condição (OU)']].map(([k, v]) => `<option value="${k}" ${k === juncao ? 'selected' : ''}>${v}</option>`).join('');
 
   const rows = [];
   for (let i = 0; i < MAX_COND; i++) {
@@ -247,22 +282,21 @@ function paginaEditor(schema, { campoAlvo, tipo, juncao, conds }) {
         <datalist id="dl_${i}"></datalist>
       </div>`);
   }
-
   const CAMPOS_JSON = JSON.stringify(campos.reduce((m, c) => (m[c.key] = c.options, m), {}));
   const OPVALOR_JSON = JSON.stringify(OP_VALOR);
 
   return shell('Editar regra', `
     <a class="voltar" href="/atb/admin/regras-form">← Regras</a>
-    <h1>${campoAlvo ? 'Editar regra' : 'Nova regra'}</h1>
-    <p class="sub">Defina quando o campo-alvo deve <b>aparecer</b> (visibilidade) ou ser <b>exigido</b> (obrigatoriedade), com base no valor de outros campos.</p>
+    <h1>${alvo ? 'Editar regra' : 'Nova regra'}</h1>
+    <p class="sub">Para uma <b>seção</b>, defina quando ela aparece (a obrigatoriedade dos campos dela depende disso). Para um <b>campo</b>, defina visibilidade ou obrigatoriedade condicional. Campos "sempre obrigatórios" são geridos na lista.</p>
     <form method="post" action="/atb/admin/regras-form/salvar" class="card">
       <div class="row">
-        <div><label class="f">Campo-alvo</label><select name="campo" class="campo">${optsCampoAlvo}</select></div>
-        <div><label class="f">Tipo de regra</label><select name="tipo">${optsTipo}</select></div>
+        <div><label class="f">Alvo</label><select name="alvo" id="alvo" class="campo" onchange="syncTipo()">${optsAlvo}</select></div>
+        <div><label class="f">Tipo de regra</label><select name="tipo" id="tipo">${optsTipo}</select></div>
         <div><label class="f">Satisfazer</label><select name="juncao">${optsJuncao}</select></div>
       </div>
       <div class="sec" style="margin-top:14px">Condições</div>
-      <p class="nota">Deixe linhas em branco para ignorá-las. Para "preenchido"/"vazio", o valor é ignorado.</p>
+      <p class="nota">Linhas em branco são ignoradas. Para "preenchido"/"vazio", o valor é ignorado.</p>
       ${rows.join('')}
       <div style="margin-top:14px">
         <button class="btn pri" type="submit">Salvar regra</button>
@@ -272,24 +306,27 @@ function paginaEditor(schema, { campoAlvo, tipo, juncao, conds }) {
     <script>
       var CAMPOS = ${CAMPOS_JSON}, OPVALOR = ${OPVALOR_JSON};
       function syncVal(i){
-        var row = document.querySelector('[data-row="'+i+'"]'); if(!row) return;
-        var campo = row.querySelector('.campo').value;
-        var op = row.querySelector('.op').value;
-        var val = row.querySelector('.val');
-        var dl = document.getElementById('dl_'+i);
-        // opções do campo escolhido viram sugestões
-        var ops = CAMPOS[campo] || [];
-        dl.innerHTML = ops.map(function(o){ return '<option value="'+String(o).replace(/"/g,'&quot;')+'">'; }).join('');
-        // operadores sem valor desabilitam o input
-        var modo = OPVALOR[op] || 'um';
-        if(modo === 'nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
-        else { val.disabled=false; val.placeholder = (modo==='varios') ? 'vários: separe por vírgula' : 'valor'; }
+        var row=document.querySelector('[data-row="'+i+'"]'); if(!row) return;
+        var campo=row.querySelector('.campo').value, op=row.querySelector('.op').value;
+        var val=row.querySelector('.val'), dl=document.getElementById('dl_'+i);
+        var ops=CAMPOS[campo]||[];
+        dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');
+        var modo=OPVALOR[op]||'um';
+        if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
+        else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+      }
+      function syncTipo(){
+        // seção só tem visibilidade
+        var alvo=document.getElementById('alvo').value, tipo=document.getElementById('tipo');
+        var ehSecao=alvo.indexOf('secao:')===0;
+        tipo.value = ehSecao ? 'cond' : tipo.value;
+        tipo.disabled = ehSecao;
       }
       for(var i=0;i<${MAX_COND};i++) syncVal(i);
+      syncTipo();
     </script>`);
 }
 
-// constrói a cond a partir das linhas do formulário
 function montarCond(body) {
   const juncao = body.juncao === 'any' ? 'any' : 'all';
   const conds = [];
@@ -302,8 +339,7 @@ function montarCond(body) {
     const c = { campo, op };
     if (modo === 'varios') c.valor = raw.split(',').map(s => s.trim()).filter(Boolean);
     else if (modo === 'um') c.valor = raw;
-    // 'nenhum' (filled/not_filled): sem valor
-    if (modo !== 'nenhum' && (c.valor === '' || (Array.isArray(c.valor) && c.valor.length === 0))) continue; // valor exigido mas vazio → ignora linha
+    if (modo !== 'nenhum' && (c.valor === '' || (Array.isArray(c.valor) && c.valor.length === 0))) continue;
     conds.push(c);
   }
   if (conds.length === 0) return null;
@@ -320,38 +356,38 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
   }];
 
   app.get('/atb/admin/regras-form', soSuper, async (req, res) => {
-    try {
-      const schema = await getFormSchema(pool, inst);
-      res.send(paginaLista(schema));
-    } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
+    try { res.send(paginaLista(await getFormSchema(pool, inst))); }
+    catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
   });
 
   app.get('/atb/admin/regras-form/editar', soSuper, async (req, res) => {
     try {
       const schema = await getFormSchema(pool, inst);
-      const campoAlvo = req.query.campo ? String(req.query.campo) : '';
-      const tipo = req.query.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
-      let juncao = 'all', conds = [];
-      if (campoAlvo) {
-        const f = acharCampo(schema, campoAlvo);
-        const r = extrairRegra(f ? f[tipo] : null);
-        juncao = r.juncao; conds = r.conds;
+      const alvo = req.query.alvo ? String(req.query.alvo) : '';
+      let tipo = req.query.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
+      let juncao = 'all', conds = [], escopo = 'campo';
+      if (alvo) {
+        const r = resolverAlvo(schema, alvo);
+        escopo = r.escopo;
+        if (escopo === 'secao') tipo = 'cond';
+        const ex = extrairRegra(r.obj ? r.obj[tipo] : null);
+        juncao = ex.juncao; conds = ex.conds;
       }
-      res.send(paginaEditor(schema, { campoAlvo, tipo, juncao, conds }));
+      res.send(paginaEditor(schema, { alvo, escopo, tipo, juncao, conds }));
     } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
   });
 
   app.post('/atb/admin/regras-form/salvar', soSuper, async (req, res) => {
     try {
       const b = req.body || {};
-      const campoAlvo = String(b.campo || '').trim();
-      const tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
-      if (!campoAlvo) return res.redirect('/atb/admin/regras-form');
+      if (!b.alvo) return res.redirect('/atb/admin/regras-form');
       const schema = await getFormSchema(pool, inst);
-      const f = acharCampo(schema, campoAlvo);
-      if (!f) return res.status(400).send('Campo-alvo não encontrado: ' + esc(campoAlvo));
+      const r = resolverAlvo(schema, b.alvo);
+      if (!r.obj) return res.status(400).send('Alvo não encontrado: ' + esc(b.alvo));
+      let tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
+      if (r.escopo === 'secao') tipo = 'cond'; // seção só tem visibilidade
       const cond = montarCond(b);
-      if (cond) f[tipo] = cond; else delete f[tipo];
+      if (cond) r.obj[tipo] = cond; else delete r.obj[tipo];
       await saveFormSchema(pool, inst, schema, req.user?.id || null);
       res.redirect('/atb/admin/regras-form');
     } catch (e) { res.status(500).send('Erro ao salvar: ' + esc(e.message)); }
@@ -360,12 +396,23 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
   app.post('/atb/admin/regras-form/excluir', soSuper, async (req, res) => {
     try {
       const b = req.body || {};
-      const campoAlvo = String(b.campo || '').trim();
-      const tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
       const schema = await getFormSchema(pool, inst);
-      const f = acharCampo(schema, campoAlvo);
-      if (f) { delete f[tipo]; await saveFormSchema(pool, inst, schema, req.user?.id || null); }
+      const r = resolverAlvo(schema, b.alvo);
+      let tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
+      if (r.escopo === 'secao') tipo = 'cond';
+      if (r.obj) { delete r.obj[tipo]; await saveFormSchema(pool, inst, schema, req.user?.id || null); }
       res.redirect('/atb/admin/regras-form');
     } catch (e) { res.status(500).send('Erro ao excluir: ' + esc(e.message)); }
+  });
+
+  // torna um campo "sempre obrigatório" opcional (remove required:true)
+  app.post('/atb/admin/regras-form/required-off', soSuper, async (req, res) => {
+    try {
+      const key = String((req.body || {}).campo || '').trim();
+      const schema = await getFormSchema(pool, inst);
+      const f = acharCampo(schema, key);
+      if (f && f.required === true) { delete f.required; await saveFormSchema(pool, inst, schema, req.user?.id || null); }
+      res.redirect('/atb/admin/regras-form');
+    } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
   });
 }

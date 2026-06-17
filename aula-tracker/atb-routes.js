@@ -577,7 +577,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
       const atbs = Array.isArray(f.atb_solicitado) ? f.atb_solicitado.join(', ') : '—';
       const disp = Array.isArray(f.dispositivos_invasivos) ? f.dispositivos_invasivos.join(', ') : '—';
-      const IRAS_OPC = ['','PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC','CDI','Onco_Bact','Sem dados','Descartado','Repetida'];
+      const IRAS_OPC = ['','PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC','CDI','Onco_Bact','Sem dados','Descartado','Repetida','Audit_post'];
       const DESF_OPC = ['','Sobrev_int','Sobrev_alta','Obito_R','Obito_NR','Alta'];
 
       const html = `
@@ -848,7 +848,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     const items = Array.isArray(arr) ? arr : (arr ? [arr] : []);
     return items.map(v => _pill(mapa, v)).join(' ');
   };
-  const IRAS_OPCOES = ['','PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC','CDI','Onco_Bact','Sem dados','Descartado','Repetida'];
+  const IRAS_OPCOES = ['','PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC','CDI','Onco_Bact','Sem dados','Descartado','Repetida','Audit_post'];
   const DESFECHO_OPCOES = ['','Sobrev_int','Sobrev_alta','Obito_R','Obito_NR','Alta'];
 
   // ── A GRADE: /atb/admin/grid ───────────────────────────────────────────
@@ -894,7 +894,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
       const { rows:[vig] } = await pool.query(`
         SELECT
-          COUNT(*) FILTER (WHERE a.iras NOT IN ('Descartado','Repetida','Sem dados') AND a.iras IS NOT NULL AND a.iras<>'') AS confirmadas,
+          COUNT(*) FILTER (WHERE a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post') AND a.iras IS NOT NULL AND a.iras<>'') AS confirmadas,
           COUNT(*) FILTER (WHERE a.iras = 'Descartado') AS descartadas,
           COUNT(*) FILTER (WHERE a.iras IS NULL OR a.iras = '') AS pendentes,
           COUNT(*) FILTER (WHERE f.recomendacao_scih IS NULL OR (jsonb_typeof(f.recomendacao_scih)='array' AND jsonb_array_length(f.recomendacao_scih)=0)) AS sem_parecer,

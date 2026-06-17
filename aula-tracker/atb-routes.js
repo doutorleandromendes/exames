@@ -25,6 +25,7 @@ import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.j
 import { registerRegrasRoutes } from './atb-regras-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
+import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,6 +51,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
   // ── Complementação: cria a coluna de rastreabilidade no boot ──────────
   ensureParecerSchema(pool).catch(e => console.error('[atb] falha ao preparar parecer:', e.message));
+  ensureParecerFrasesTable(pool).catch(e => console.error('[atb] ensureParecerFrasesTable:', e.message));
   ensureComplementoSchema(pool).catch(e => console.error('[atb] falha ao preparar complemento:', e.message));
   ensureAnexosSchema(pool).catch(e => console.error('[atb] falha ao preparar anexos:', e.message));
   ensureRetroSchema(pool).catch(e => console.error('[atb] ensureRetroSchema:', e.message));
@@ -58,6 +60,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureMirrorSchema(pool).catch(e => console.error('[atb] ensureMirrorSchema:', e.message));
   ensureTriagemRegrasSchema(pool).catch(e => console.error('[atb] ensureTriagemRegrasSchema:', e.message));
   ensureFichaEditSchema(pool).catch(() => {});
+  
   
   registerParecerEditRoutes(app, pool, adminRequired);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
@@ -73,6 +76,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
   registerFichaEditRoutes(app, pool, adminRequired);   // gate de super_admin é interno
+  registerParecerFrasesRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -1038,7 +1042,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           });
         })();
        </script>
-        ${parecerGridAssets()}
+        ${parecerGridAssets((await getParecerFrases(pool)).map(r => r.texto))}
         ${fichaCardAssets()}`;
       const microLock = soMicro ? `<script>document.addEventListener('DOMContentLoaded',function(){
         document.querySelectorAll('[data-field]').forEach(function(el){ if(el.getAttribute('data-field')!=='micro'){ el.disabled=true; el.style.opacity='.45'; el.style.pointerEvents='none'; } });

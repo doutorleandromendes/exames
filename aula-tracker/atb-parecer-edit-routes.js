@@ -26,6 +26,7 @@
 //    // na grade (1x no html): ${parecerGridAssets()}             // CSS + popover + JS
 // ════════════════════════════════════════════════════════════════════════════
 import { espelharEdicao, CAMPOS_PARECER } from './atb-jotform-mirror.js';
+import { getParecerFrases, PARECER_ESPECIFICACOES_SEED } from './atb-parecer-frases.js';
 // ── Fonte ÚNICA de verdade das opções ───────────────────────────────────────
 
 // Veredito (qid 30). Single-select. Mesma lista que a paleta REC_CORES reconhece.
@@ -40,37 +41,7 @@ export const PARECER_VEREDITOS = [
 ];
 
 // Especificação (qid 88). As 29 frases pré-configuradas do JotForm, na ordem original.
-export const PARECER_ESPECIFICACOES = [
-  '3d (rever com resultado de urocultura)',
-  '3 doses (rever com resultado de hemoculturas)',
-  '3d (rever com resultado de cultura de secreção traqueal e parcial de hemoculturas)',
-  '3d (rever com resultado parcial de culturas e definição diagnóstica)',
-  '2d (rever com resultado parcial de culturas e definição diagnóstica)',
-  '3d (rever com definição diagnóstica)',
-  '2d (rever com resultado final de hemoculturas)',
-  '5d (rever com resultado de culturas)',
-  'Sugiro rever indicação.',
-  'Sugiro rever indicação/preenchimento.',
-  'Sugiro rever esquema prescrito.',
-  'NOTA: Em caso de contingenciamento de estoque da droga, ressalto a possibilidade de uso de gentamicina.',
-  'Tempo máximo = 5 dias',
-  'Sugiro fosfomicina e rever com resultado de urocultura.',
-  'Sugiro diagnóstico etiológico e terapia guiada.',
-  'Sugiro [(ciprofloxacina ou gentamicina) + metronidazol].',
-  'Sugiro rever esquema prescrito considerando potencial antagonismo, risco de falha clínica/microbiológica e eventos adversos.',
-  'Sugiro associação de glicopeptídeo, revendo com resultado parcial de culturas e definição diagnóstica.',
-  'Sugiro rever esquema prescrito. Ceftriaxone não é indicado para nenhum esquema de profilaxia cirúrgica na instituição.',
-  'Sugiro rever esquema prescrito por espectro antimicrobiano inadequado de acordo com os dados clínicos informados.',
-  'Sugiro rever esquema prescrito por penetração tecidual inadequada conforme dados clínicos informados.',
-  'Sugiro rever esquema prescrito por risco de eventos adversos e sequelas de longo prazo conforme dados informados.',
-  'Sugiro [cefazolina +/- metronidazol] por, no máximo, 3 dias.',
-  'Sugiro rever dados inconsistentes na solicitação considerando potenciais implicações éticas e jurídicas da discrepância.',
-  'Sugiro prosseguir investigação diagnóstica',
-  'Não há evidências que embasem o uso de antibioticoterapia empírica na ausência de sepse considerando o contexto descrito na ficha. Sugiro prosseguir investigação diagnóstica.',
-  'Não há evidências que embasem o uso do esquema de antibioticoterapia profilática ou preemptiva prescrito conforme a ecologia local. Sugiro profilaxia/terapia preemptiva conforme protocolo institucional.',
-  'Sugiro prosseguir investigação diagnóstica/etiológica e tratamento guiado',
-  'Dados inconsistentes, favor rever preenchimento.',
-];
+export const PARECER_ESPECIFICACOES = PARECER_ESPECIFICACOES_SEED; // fonte viva = banco (getParecerFrases); esta é só fallback/semente
 
 // Cores do veredito na coluna "Parecer" — fiéis ao JotForm Tables (paleta clara _C).
 export const PARECER_VEREDITO_CORES = {
@@ -135,8 +106,8 @@ export function renderParecerCell(f, safe) {
 // ════════════════════════════════════════════════════════════════════════════
 //  ASSETS DA GRADE  — CSS + popover + JS (inserir UMA vez no html do grid)
 // ════════════════════════════════════════════════════════════════════════════
-export function parecerGridAssets() {
-  const FRASES = JSON.stringify(PARECER_ESPECIFICACOES);
+export function parecerGridAssets(frases) {
+  const FRASES = JSON.stringify((frases && frases.length) ? frases : PARECER_ESPECIFICACOES);
   const CORES = JSON.stringify(PARECER_VEREDITO_CORES);
 
   // CSS pensado p/ a grade clara (.atb-light). Cores alinhadas à Complementação.
@@ -307,7 +278,7 @@ export function parecerGridAssets() {
 // ════════════════════════════════════════════════════════════════════════════
 //  PÁGINA DEDICADA  — /atb/admin/parecer/:id  (linguagem clara da Complementação)
 // ════════════════════════════════════════════════════════════════════════════
-function paginaParecer(f, safe) {
+function paginaParecer(f, safe, frases) {
   const s = safe || _safe;
   const nome = s(f.paciente_nome || f.paciente_nome_raw || '—');
   const atb = Array.isArray(f.atb_solicitado) ? f.atb_solicitado.join(', ')
@@ -323,10 +294,10 @@ function paginaParecer(f, safe) {
     .join('');
 
   const especOpts = ['<option value="">— inserir frase pré-configurada —</option>']
-    .concat(PARECER_ESPECIFICACOES.map((v, i) => `<option value="${i}">${s(v)}</option>`))
+    .concat(((frases && frases.length) ? frases : PARECER_ESPECIFICACOES).map((v, i) => `<option value="${i}">${s(v)}</option>`))
     .join('');
 
-  const FRASES = JSON.stringify(PARECER_ESPECIFICACOES);
+  const FRASES = JSON.stringify((frases && frases.length) ? frases : PARECER_ESPECIFICACOES);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR"><head>
@@ -506,7 +477,8 @@ export function registerParecerEditRoutes(app, pool, adminRequired) {
       `, [id]);
       if (!f) return res.status(404).send('Ficha não encontrada');
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(paginaParecer(f, _safe));
+      const frases = (await getParecerFrases(pool)).map(r => r.texto);
+      res.send(paginaParecer(f, _safe, frases));
     } catch (e) {
       console.error('[atb] parecer page error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

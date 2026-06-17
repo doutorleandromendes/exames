@@ -19,47 +19,81 @@
 
 import { PARECER_VEREDITOS } from './atb-parecer-edit-routes.js';
 import { avaliaCond, contextoFicha } from './atb-triagem-regras.js';
+import { getFormSchema } from './atb-form-schema.js';
 
 const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
   '(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC',
   'CDI','Onco_Bact','Sem dados','Descartado','Repetida'];
 
-// Catálogo de campos (chave = COLUNA DO BANCO). tipo: select|multi|bool|numero|texto
-const CAMPOS = [
-  { key:'setor', label:'Setor', tipo:'select', opcoes:['PS','EPM','Cuidados Intermediários','Psiquiatria','Apartamento','Oncologia','Clínica Cirúrgica','Semi','Hemodiálise','Pediatria','UTI','UTI Neo / Infantil','UTI C','Ginecologia/Obstetrícia','Clínica Médica'] },
-  { key:'tipo_terapia', label:'Tipo de uso', tipo:'select', opcoes:['Empírica','Guiada por cultura','Profilaxia cirúrgica'] },
-  { key:'foco_infeccao', label:'Foco de infecção', tipo:'select', opcoes:['Corrente sanguínea (bacteremia)','Pneumonia','Infecção do trato urinário','Infecção do sítio cirúrgico','Meningite/Encefalite','Abdominal','Osteoarticular','Pele/Partes moles','Neutropenia Febril'] },
-  { key:'equipe_responsavel', label:'Equipe responsável', tipo:'select', opcoes:['Cx Geral','Proctologia','Urologia','Ortopedia','Ginecologia / Obstetricia','Otorrino','NCR','Clínica Médica','Nefrologia','Cardiologia','Pediatria'] },
-  { key:'atb_solicitado', label:'ATB solicitado', tipo:'multi', opcoes:['Cefepime','Ceftriaxone','Fosfomicina','Anfotericina B','Daptomicina','Tigeciclina','Micafungina','Meropenem','Piperacilina/Tazobactam','Vancomicina','Teicoplanina','Polimixina B','Polimixina E (colestimetato)','Amicacina','Gentamicina','NÃO PADRONIZADO'] },
-  { key:'comorbidades', label:'Comorbidades', tipo:'multi', opcoes:['DM','Cancer','IRC','Insuficiência cardíaca','DPOC','Cirrose','Institucionalizado','Uso crônico de imunossupressor (corticosteróides, por ex)','HIV/AIDS'] },
-  { key:'dispositivos_invasivos', label:'Dispositivos invasivos', tipo:'multi', opcoes:[] },
-  { key:'sepse', label:'Sepse', tipo:'bool' },
-  { key:'gestante', label:'Gestante', tipo:'bool' },
-  { key:'lactante', label:'Lactante', tipo:'bool' },
-  { key:'dialise', label:'Diálise', tipo:'bool' },
-  { key:'faz_quimio', label:'Faz quimioterapia', tipo:'bool' },
-  { key:'cateter_quimio', label:'Cateter de longa permanência', tipo:'bool' },
-  { key:'uso_atb_7d', label:'Uso de ATB nos últimos 7d', tipo:'bool' },
-  { key:'oxacilina_associacao', label:'Oxacilina em associação', tipo:'bool' },
-  { key:'historia_clinica', label:'História clínica (texto livre)', tipo:'texto' },
-  { key:'cirurgia', label:'Cirurgia (texto livre)', tipo:'texto' },
+// ── Catálogo de campos DERIVADO DO SCHEMA do formulário ─────────────────
+// Antes era uma lista fixa que sempre atrasava em relação ao formulário. Agora
+// TODO campo do schema vira condição automaticamente. O catálogo fala a LÍNGUA
+// DO BANCO (colunas que a aplicarRegras enxerga): chaves do schema que diferem
+// da coluna são renomeadas, Sim/Não que viram boolean entram como 'bool', e os
+// calculados (SOFA/idade) entram como extras.
+
+// chave do schema → coluna real (quando diferem; ver atb-parser.js)
+const COLUNA_DE = {
+  pac_nome: 'paciente_nome', pac_dn: 'paciente_dn',
+  equipe: 'equipe_responsavel', data_uti: 'data_admissao_uti',
+};
+// Sim/Não gravados como BOOLEAN no banco (parser toB) → tipo 'bool'.
+// (sinais_dialise NÃO entra aqui: é TEXT 'Sim'/'Não' → vira 'select'.)
+const BOOL_KEYS = new Set(['sepse','gestante','lactante','uso_atb_7d','dialise',
+  'faz_quimio','cateter_quimio','oxacilina_associacao']);
+// Calculados/derivados (não existem no schema). idade_* são computados em
+// contextoFicha; sofa/sofa_renal são colunas reais preenchidas pelo parser.
+const EXTRAS = [
+  { key:'sofa', label:'SOFA', tipo:'numero' },
+  { key:'sofa_renal', label:'SOFA renal', tipo:'numero' },
   { key:'idade_dias', label:'Idade (dias)', tipo:'numero' },
   { key:'idade_meses', label:'Idade (meses)', tipo:'numero' },
   { key:'idade_anos', label:'Idade (anos)', tipo:'numero' },
-  { key:'peso', label:'Peso (kg)', tipo:'numero' },
-  { key:'peso_nascimento', label:'Peso ao nascer (g)', tipo:'numero' },
-  { key:'altura', label:'Altura (cm)', tipo:'numero' },
-  { key:'clcr', label:'ClCr (mL/min)', tipo:'numero' },
-  { key:'sofa', label:'SOFA', tipo:'numero' },
-  { key:'sofa_renal', label:'SOFA renal', tipo:'numero' },
-  { key:'tempo_previsto', label:'Tempo previsto (dias)', tipo:'numero' },
-  { key:'acesso_dialise', label:'Acesso p/ diálise', tipo:'texto' },
-  { key:'acesso_quimio', label:'Acesso p/ quimio', tipo:'select', opcoes:['PICC','Portocath','Permcath/Hickman'] },
-  { key:'classificacao_fratura', label:'Classificação de fratura', tipo:'texto' },
 ];
 
-// Colunas reais (sem os calculados) — usadas no SELECT do dry-run
-const COLS_BANCO = CAMPOS.map(c => c.key).filter(k => !/^idade_/.test(k));
+function tipoTriagemCampo(c){
+  switch(c.type){
+    case 'number': return 'numero';
+    case 'checkbox': return 'multi';
+    case 'radio': case 'select': return BOOL_KEYS.has(c.key) ? 'bool' : 'select';
+    case 'text': case 'textarea': case 'crm': case 'date': return 'texto';
+    default: return null; // matrix, sofa(_bloco), check — não viram condição
+  }
+}
+function construirCampos(schema){
+  const out = [], vis = new Set();
+  for(const sec of (schema?.secoes || [])){
+    for(const c of (sec.campos || [])){
+      if(!c || !c.key || c.key.charAt(0) === '_') continue;   // pula _sofa_bloco
+      const tipo = tipoTriagemCampo(c); if(!tipo) continue;    // pula matriz/sofa/check
+      const key = COLUNA_DE[c.key] || c.key;
+      if(vis.has(key)) continue; vis.add(key);
+      const item = { key, label: c.label || key, tipo };
+      if((tipo === 'select' || tipo === 'multi') && Array.isArray(c.options) && c.options.length)
+        item.opcoes = c.options.slice();
+      out.push(item);
+    }
+  }
+  for(const e of EXTRAS) if(!vis.has(e.key)){ out.push(e); vis.add(e.key); }
+  return out;
+}
+
+// Colunas reais de atb_fichas (cache por processo) — blinda contra chaves do
+// schema sem coluna correspondente, que quebrariam o SELECT do dry-run.
+let _colsCache = null;
+async function colunasReais(pool){
+  if(_colsCache) return _colsCache;
+  const r = await pool.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_name='atb_fichas'`);
+  _colsCache = new Set(r.rows.map(x => x.column_name));
+  return _colsCache;
+}
+// Catálogo final por-request: schema vivo ∩ colunas reais (+ idade_* calculados).
+async function catalogoCampos(pool, inst='HUSF'){
+  const schema = await getFormSchema(pool, inst);
+  const cols = await colunasReais(pool);
+  return construirCampos(schema).filter(c => cols.has(c.key) || /^idade_/.test(c.key));
+}
 
 const OPERADORES = {
   select: [['eq','é igual a'],['neq','é diferente de'],['in','é um de'],['filled','está preenchido'],['not_filled','está vazio']],
@@ -151,6 +185,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
 
   // ── Editor (nova / editar) ────────────────────────────────────────────────
   async function editor(req,res,regra){
+    const CAMPOS = await catalogoCampos(pool);
     const dados = JSON.stringify({ campos:CAMPOS, ops:OPERADORES, iras:IRAS_VALORES, vereditos:PARECER_VEREDITOS, regra });
     res.send(page(regra?'Editar regra':'Nova regra',`
       <div class="card"><h1>${regra?'Editar regra':'Nova regra'}</h1>
@@ -297,11 +332,11 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       </script>`));
   }
 
-  app.get('/atb/admin/regras/nova', soSuper, (req,res)=> editor(req,res,null));
+  app.get('/atb/admin/regras/nova', soSuper, (req,res)=> editor(req,res,null).catch(e=>{ console.error('[regras] editor:',e.message); res.status(500).send(page('Erro','<div class="card"><h1>Falha ao abrir o editor</h1></div>')); }));
   app.get('/atb/admin/regras/:id', soSuper, async (req,res)=>{
     const r=(await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1',[parseInt(req.params.id,10)])).rows[0];
     if(!r) return res.status(404).send(page('Não encontrada','<div class="card"><h1>Regra não encontrada</h1><a href="/atb/admin/regras">Voltar</a></div>'));
-    editor(req,res,r);
+    editor(req,res,r).catch(e=>{ console.error('[regras] editor:',e.message); res.status(500).send(page('Erro','<div class="card"><h1>Falha ao abrir o editor</h1></div>')); });
   });
 
   // ── Salvar ─────────────────────────────────────────────────────────────────
@@ -342,6 +377,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const cond = req.body?.condicoes;
       const irasRegra = req.body?.acoes?.iras || null;
       if(!cond || (!cond.all && !cond.any)) return res.json({ok:true, total:0, casam:0, ja_iras:0, vazias:0, divergentes:null});
+      const COLS_BANCO = (await catalogoCampos(pool)).map(c => c.key).filter(k => !/^idade_/.test(k));
       const cols = ['id','paciente_dn','data_referencia','jotform_created_at','created_at', ...COLS_BANCO]
         .filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
       const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id`);

@@ -1059,6 +1059,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           .atb-light .grid-toolbar{text-align:right;margin:0 0 6px}
           .atb-light .grid-reset{font-size:12px;color:#5f6368;cursor:pointer;background:none;border:0;padding:3px 6px}
           .atb-light .grid-reset:hover{color:#2bb673}
+          .atb-light table.atb-grid th.frozen{z-index:8}
+          .atb-light table.atb-grid td.frozen{z-index:2;background:#fff}
+          .atb-light .grid-freeze{font-size:12px;color:#5f6368;margin-right:14px}
+          .atb-light .grid-freeze select{font:inherit;font-size:12px;padding:2px 6px;border:1px solid #dadce0;border-radius:6px;margin-left:4px}
           .atb-light .th-sort{color:inherit;text-decoration:none;cursor:pointer}
           .atb-light .th-sort:hover,.atb-light .th-sort.on{color:#2bb673}
           .atb-light .th-sort .arr{font-size:9px}
@@ -1088,7 +1092,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         <script>
         (function(){
           var TABLE=document.querySelector('table.atb-grid'); if(!TABLE||!TABLE.tHead||!TABLE.tHead.rows[0]) return;
-          var PFX='atbgridcol:';
+          var PFX='atbgridcol:', FKEY=PFX+'__freeze__';
           var ths=Array.prototype.slice.call(TABLE.tHead.rows[0].cells);
           function keyOf(th,i){ return PFX+(th.getAttribute('data-colkey')||((th.textContent||'').trim())||('i'+i)); }
           function getW(k){ try{var v=localStorage.getItem(k);return v?parseInt(v,10):null;}catch(e){return null;} }
@@ -1100,25 +1104,50 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
             th.style.width=w+'px'; th.style.minWidth='0'; th.style.maxWidth='none'; total+=w; });
           TABLE.style.tableLayout='fixed'; TABLE.style.width=total+'px'; TABLE.classList.add('resizable');
           function syncTotal(){ var t=0; ths.forEach(function(th){t+=th.getBoundingClientRect().width;}); TABLE.style.width=Math.round(t)+'px'; }
+
+          // ── congelar (freeze) as N primeiras colunas ──
+          function getFreeze(){ var v=getW(FKEY); return v==null?2:Math.max(0,Math.min(ths.length,v)); }
+          function linhas(){ var out=[ths], tb=TABLE.tBodies[0];
+            if(tb) Array.prototype.forEach.call(tb.rows,function(r){ out.push(Array.prototype.slice.call(r.cells)); }); return out; }
+          function applyFreeze(n){
+            var offs=[], acc=0, j;
+            for(j=0;j<ths.length;j++){ offs[j]=acc; acc+=Math.round(ths[j].getBoundingClientRect().width); }
+            linhas().forEach(function(cs){ cs.forEach(function(c,k){ if(!c) return;
+              if(k<n){ c.classList.add('frozen'); c.style.position='sticky'; c.style.left=offs[k]+'px';
+                       c.style.boxShadow=(k===n-1)?'2px 0 0 #e0e2e6':''; }
+              else { c.classList.remove('frozen'); c.style.left=''; c.style.boxShadow='';
+                     c.style.position = c.classList.contains('sticky-col') ? 'static' : ''; }
+            }); });
+          }
+
           ths.forEach(function(th,i){
             var grip=document.createElement('span'); grip.className='col-grip'; th.appendChild(grip);
             grip.addEventListener('mousedown',function(e){
               var sx=e.pageX, sw=th.getBoundingClientRect().width; document.body.classList.add('col-resizing');
               function mv(ev){ th.style.width=Math.max(40,Math.round(sw+(ev.pageX-sx)))+'px'; syncTotal(); }
               function up(){ document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up);
-                document.body.classList.remove('col-resizing'); setW(keyOf(th,i),Math.round(th.getBoundingClientRect().width)); }
+                document.body.classList.remove('col-resizing'); setW(keyOf(th,i),Math.round(th.getBoundingClientRect().width)); applyFreeze(getFreeze()); }
               document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
               e.preventDefault(); e.stopPropagation();
             });
             grip.addEventListener('dblclick',function(e){ e.preventDefault(); e.stopPropagation();
-              delW(keyOf(th,i)); th.style.width=medidas[i]+'px'; syncTotal(); });
+              delW(keyOf(th,i)); th.style.width=medidas[i]+'px'; syncTotal(); applyFreeze(getFreeze()); });
           });
+
+          applyFreeze(getFreeze());
+
           var wrap=TABLE.closest('.grid-wrap');
           if(wrap&&wrap.parentNode){
             var bar=document.createElement('div'); bar.className='grid-toolbar';
+            var fl=document.createElement('label'); fl.className='grid-freeze'; fl.appendChild(document.createTextNode('❄️ Congelar: '));
+            var fs=document.createElement('select'); var maxF=Math.min(ths.length,6), n;
+            for(n=0;n<=maxF;n++){ var o=document.createElement('option'); o.value=String(n); o.textContent=String(n); fs.appendChild(o); }
+            fs.value=String(getFreeze());
+            fs.addEventListener('change',function(){ var v=parseInt(fs.value,10)||0; setW(FKEY,v); applyFreeze(v); });
+            fl.appendChild(fs); bar.appendChild(fl);
             var b=document.createElement('button'); b.type='button'; b.className='grid-reset';
-            b.textContent='↔ redefinir larguras das colunas';
-            b.addEventListener('click',function(){ ths.forEach(function(th,i){ delW(keyOf(th,i)); }); location.reload(); });
+            b.textContent='↔ redefinir colunas';
+            b.addEventListener('click',function(){ ths.forEach(function(th,i){ delW(keyOf(th,i)); }); delW(FKEY); location.reload(); });
             bar.appendChild(b); wrap.parentNode.insertBefore(bar,wrap);
           }
         })();

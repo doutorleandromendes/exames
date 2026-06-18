@@ -49,6 +49,7 @@ const EXTRAS = [
   { key:'idade_dias', label:'Idade (dias)', tipo:'numero' },
   { key:'idade_meses', label:'Idade (meses)', tipo:'numero' },
   { key:'idade_anos', label:'Idade (anos)', tipo:'numero' },
+  { key:'dias_internacao', label:'Dias desde a internação', tipo:'numero' },
 ];
 
 function tipoTriagemCampo(c){

@@ -128,9 +128,24 @@ function calcIdade(dn, ref) {
 
 // Monta o objeto que as condições enxergam: TODAS as colunas da ficha + idades.
 // (data de referência da idade: data clínica da ficha → internação → criação.)
+// Dias inteiros entre uma data (YYYY-MM-DD) e a referência (= submissão da ficha).
+// Negativo/ausente -> null (não casa em comparações numéricas).
+function _diasDesde(data, ref) {
+  const d = _toDate(data); if (!d) return null;
+  const r = _toDate(ref) || new Date();
+  const dias = Math.floor((r - d) / 86400000);
+  return dias >= 0 ? dias : null;
+}
+
 export function contextoFicha(f) {
   const ref = f.data_referencia || f.jotform_created_at || f.created_at || null;
-  return { ...f, ...calcIdade(f.paciente_dn, ref) };
+  return {
+    ...f,
+    ...calcIdade(f.paciente_dn, ref),
+    // Campos calculados por OPERAÇÃO (data/derivados). Para uma nova regra baseada
+    // em operação: calcule aqui e registre em EXTRAS (atb-regras-routes.js).
+    dias_internacao: _diasDesde(f.data_internacao, ref),
+  };
 }
 
 // ── Aplicação ──────────────────────────────────────────────────────────────

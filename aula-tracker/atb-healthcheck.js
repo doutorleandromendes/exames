@@ -166,7 +166,7 @@ export function startHealthcheckSchedule(pool) {
     .then(r => console.log('[healthcheck]', r.ok ? 'NORMAL' : 'SUSPENSO', r.passed + '/' + r.total))
     .catch(e => console.error('[healthcheck] erro:', e.message));
   setTimeout(run, 30 * 1000);             // ~30s após o boot
-  setInterval(run, 24 * 60 * 60 * 1000);  // diário
+  setInterval(run, 8 * 60 * 60 * 1000);  // a cada 8 horas
 }
 
 export function registerHealthcheckRoutes(app, pool, adminRequired) {

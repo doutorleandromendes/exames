@@ -1199,17 +1199,16 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
             }
             function buildPanel(){
               var fz=getFreeze();
-              var ABTN='border:1px solid #dadce0;background:#fff;border-radius:5px;cursor:pointer;font-size:11px;line-height:1;color:#5f6368;padding:3px 7px;flex:0 0 auto';
               var html='<div style="font-size:10px;color:#80868b;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px 6px">\u2744\ufe0f congelar \u00b7 \u2195 ordem</div>';
               ths.forEach(function(th,i){
                 if(rawKey(th,i)==='end') return;
                 var lab=String(colLabel(th,i)).replace(/&/g,'&amp;').replace(/</g,'&lt;');
                 var dU=(i===0), dD=(i>=ths.length-1);
-                html+='<div style="display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px">'
-                  +'<input type="checkbox" class="gcpF" data-i="'+i+'"'+(i<fz?' checked':'')+' title="Congelar at\u00e9 esta coluna" style="flex:0 0 auto;margin:0">'
-                  +'<button type="button" class="gcpU" data-i="'+i+'"'+(dU?' disabled':'')+' title="Mover p/ esquerda" style="'+ABTN+(dU?';opacity:.3':'')+'">\u25b2</button>'
-                  +'<button type="button" class="gcpD" data-i="'+i+'"'+(dD?' disabled':'')+' title="Mover p/ direita" style="'+ABTN+(dD?';opacity:.3':'')+'">\u25bc</button>'
-                  +'<span style="flex:1 1 0;min-width:0;text-align:left;font-size:12px;color:#202124;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+lab+'</span>'
+                html+='<div style="padding:5px 8px;white-space:nowrap;font-size:12px;color:#202124;border-top:1px solid #f3f4f6">'
+                  +'<input type="checkbox" class="gcpF" data-i="'+i+'"'+(i<fz?' checked':'')+' style="vertical-align:middle;margin:0 7px 0 0">'
+                  +'<button type="button" class="gcpU" data-i="'+i+'"'+(dU?' disabled':'')+' style="font-size:11px;line-height:1;cursor:pointer;padding:2px 6px;margin-right:3px;border:1px solid #dadce0;border-radius:4px;background:#fff'+(dU?';opacity:.3':'')+'">\u25b2</button>'
+                  +'<button type="button" class="gcpD" data-i="'+i+'"'+(dD?' disabled':'')+' style="font-size:11px;line-height:1;cursor:pointer;padding:2px 6px;margin-right:9px;border:1px solid #dadce0;border-radius:4px;background:#fff'+(dD?';opacity:.3':'')+'">\u25bc</button>'
+                  +lab
                 +'</div>';
               });
               panel.innerHTML=html;

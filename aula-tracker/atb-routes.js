@@ -27,6 +27,7 @@ import { registerRegrasFormRoutes, validarObrigatoriosServidor } from './atb-reg
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
+import { registerFormTestRoutes } from './atb-form-test-routes.js';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +81,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerRegrasFormRoutes(app, pool, adminRequired);
   registerFichaEditRoutes(app, pool, adminRequired);   // gate de super_admin é interno
   registerParecerFrasesRoutes(app, pool, adminRequired);
+  registerFormTestRoutes(app, pool, adminRequired);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -182,6 +184,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         return res.status(400).json({ error: _faltas[0].msg, campos: _faltas.map(f => f.key) });
       }
       const parsed = parseFormPayload(d);
+      // Modo dry-run: exercita validação + parse e retorna sem gravar (harness de testes).
+      if (body.dryrun === true) {
+        return res.json({ ok: true, dryrun: true, paciente: parsed.paciente_nome || null });
+      }
       const { rows: [instRow] } = await pool.query(
         'SELECT id FROM atb_instituicoes WHERE sigla = $1', [inst]
       );

@@ -71,6 +71,10 @@ export function validarObrigatoriosServidor(schema, dados) {
     if (sec.cond && !avaliaCondServer(sec.cond, dados)) continue;
     for (const c of (sec.campos || [])) {
       if (!c.key) continue;
+      // Bloco composto SOFA: os dados ficam em sub-chaves (sofa_*), nunca na key
+      // do bloco (_sofa_bloco). O engine do cliente já valida a completude do SOFA;
+      // checar dados[c.key] aqui daria sempre "obrigatório" (falso positivo → 400).
+      if (c.type === 'sofa') continue;
       if (c.cond && !avaliaCondServer(c.cond, dados)) continue;
       const obrig = c.required === true || (c.requiredCond && avaliaCondServer(c.requiredCond, dados));
       if (!obrig) continue;

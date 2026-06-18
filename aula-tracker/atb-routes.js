@@ -1190,7 +1190,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           var wrap=TABLE.closest('.grid-wrap');
           if(wrap&&wrap.parentNode){
             var bar=document.createElement('div'); bar.className='grid-toolbar';
-            var panel=document.createElement('div'); panel.className='grid-colpanel'; panel.style.display='none';
+            var panel=document.createElement('div'); panel.className='grid-colpanel';
+            panel.style.cssText='display:none;position:absolute;right:0;top:100%;margin-top:4px;width:250px;background:#fff;border:1px solid #e0e2e6;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.13);padding:6px;z-index:30;max-height:62vh;overflow-y:auto;overflow-x:hidden;text-align:left';
             function moveCol(i,dir){
               var order=ths.map(function(th,k){ return rawKey(th,k); });
               var j=i+dir; if(j<0||j>=order.length) return;
@@ -1198,15 +1199,19 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
             }
             function buildPanel(){
               panel.innerHTML=''; var fz=getFreeze();
-              var hd=document.createElement('div'); hd.className='gcp-head'; hd.textContent='\u2744\ufe0f congelar \u00b7 \u2195 ordem'; panel.appendChild(hd);
+              var hd=document.createElement('div'); hd.textContent='\u2744\ufe0f congelar \u00b7 \u2195 ordem';
+              hd.style.cssText='font-size:10px;color:#80868b;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px 6px';
+              panel.appendChild(hd);
+              var ABTN='flex:0 0 auto;border:1px solid #dadce0;background:#fff;border-radius:5px;cursor:pointer;font-size:10px;line-height:1;color:#5f6368;padding:3px 7px';
               ths.forEach(function(th,i){
                 if(rawKey(th,i)==='end') return;
-                var r=document.createElement('div'); r.className='gcp-row';
-                var fc=document.createElement('input'); fc.type='checkbox'; fc.className='gcp-fz'; fc.checked=i<fz; fc.title='Congelar at\u00e9 esta coluna';
+                var r=document.createElement('div'); r.style.cssText='display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px';
+                var fc=document.createElement('input'); fc.type='checkbox'; fc.checked=i<fz; fc.title='Congelar at\u00e9 esta coluna'; fc.style.flex='0 0 auto';
                 fc.addEventListener('change',function(){ var nn=fc.checked?i+1:i; setW(FKEY,nn); applyFreeze(nn); buildPanel(); });
-                var nm=document.createElement('span'); nm.className='gcp-name'; nm.textContent=colLabel(th,i);
-                var up=document.createElement('button'); up.type='button'; up.className='gcp-arr'; up.textContent='\u25b2'; up.title='Mover p/ esquerda'; up.disabled=(i===0);
-                var dn=document.createElement('button'); dn.type='button'; dn.className='gcp-arr'; dn.textContent='\u25bc'; dn.title='Mover p/ direita'; dn.disabled=(i>=ths.length-1);
+                var nm=document.createElement('span'); nm.textContent=colLabel(th,i);
+                nm.style.cssText='flex:1 1 auto;min-width:0;font-size:12px;color:#202124;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+                var up=document.createElement('button'); up.type='button'; up.textContent='\u25b2'; up.title='Mover p/ esquerda'; up.disabled=(i===0); up.style.cssText=ABTN; if(up.disabled)up.style.opacity='.3';
+                var dn=document.createElement('button'); dn.type='button'; dn.textContent='\u25bc'; dn.title='Mover p/ direita'; dn.disabled=(i>=ths.length-1); dn.style.cssText=ABTN; if(dn.disabled)dn.style.opacity='.3';
                 up.addEventListener('click',function(){ moveCol(i,-1); });
                 dn.addEventListener('click',function(){ moveCol(i, 1); });
                 r.appendChild(fc); r.appendChild(nm); r.appendChild(up); r.appendChild(dn); panel.appendChild(r);

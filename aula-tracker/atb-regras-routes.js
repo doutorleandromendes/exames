@@ -46,11 +46,14 @@ const BOOL_KEYS = new Set(['sepse','gestante','lactante','uso_atb_7d','dialise',
 const EXTRAS = [
   { key:'sofa', label:'SOFA', tipo:'numero' },
   { key:'sofa_renal', label:'SOFA renal', tipo:'numero' },
-  { key:'idade_dias', label:'Idade (dias)', tipo:'numero' },
-  { key:'idade_meses', label:'Idade (meses)', tipo:'numero' },
-  { key:'idade_anos', label:'Idade (anos)', tipo:'numero' },
-  { key:'dias_internacao', label:'Dias desde a internação', tipo:'numero' },
+  { key:'idade_dias', label:'Idade (dias)', tipo:'numero', calc:true },
+  { key:'idade_meses', label:'Idade (meses)', tipo:'numero', calc:true },
+  { key:'idade_anos', label:'Idade (anos)', tipo:'numero', calc:true },
+  { key:'dias_internacao', label:'Dias desde a internação', tipo:'numero', calc:true },
 ];
+// Chaves CALCULADAS em contextoFicha (sem coluna real em atb_fichas): aparecem no
+// catálogo, mas NUNCA entram no SELECT do dry-run. Fonte única para os dois filtros.
+const CALC_KEYS = new Set(EXTRAS.filter(e => e.calc).map(e => e.key));
 
 function tipoTriagemCampo(c){
   switch(c.type){
@@ -93,7 +96,7 @@ async function colunasReais(pool){
 async function catalogoCampos(pool, inst='HUSF'){
   const schema = await getFormSchema(pool, inst);
   const cols = await colunasReais(pool);
-  return construirCampos(schema).filter(c => cols.has(c.key) || /^idade_/.test(c.key));
+  return construirCampos(schema).filter(c => cols.has(c.key) || CALC_KEYS.has(c.key));
 }
 
 const OPERADORES = {
@@ -378,7 +381,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const cond = req.body?.condicoes;
       const irasRegra = req.body?.acoes?.iras || null;
       if(!cond || (!cond.all && !cond.any)) return res.json({ok:true, total:0, casam:0, ja_iras:0, vazias:0, divergentes:null});
-      const COLS_BANCO = (await catalogoCampos(pool)).map(c => c.key).filter(k => !/^idade_/.test(k));
+      const COLS_BANCO = (await catalogoCampos(pool)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
       const cols = ['id','paciente_dn','data_referencia','jotform_created_at','created_at', ...COLS_BANCO]
         .filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
       const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id`);

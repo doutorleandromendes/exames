@@ -667,7 +667,7 @@
         .then(function (res) {
           setEnviando(false);
           if (res.ok) setEnviado(true);
-          else alert('Erro ao enviar: ' + (res.d.erro || 'tente novamente'));
+          else alert('Erro ao enviar: ' + (res.d.error || res.d.erro || 'tente novamente'));
         })
         .catch(function (err) { setEnviando(false); alert('Erro de conexão: ' + err.message); });
     }

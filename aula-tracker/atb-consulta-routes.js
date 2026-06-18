@@ -21,6 +21,8 @@
 //  Link amigável: https://app.lcmendes.med.br/consulta
 // ════════════════════════════════════════════════════════════════════════════
 
+import { getLatestHealthcheck, renderHealthCard } from './atb-healthcheck.js';
+
 const ehAdmin = req => req.cookies?.adm === '1';
 
 function normIp(ip) { return String(ip || '').replace(/^::ffff:/i, '').trim(); }
@@ -134,7 +136,7 @@ function paginaRestrito(req) {
     </div>`);
 }
 
-function paginaConsulta(rows) {
+function paginaConsulta(rows, cardHtml = '') {
   const dt = d => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—';
   const linhas = rows.map(f => {
     const nome = f.paciente_nome || f.paciente_nome_raw || '—';
@@ -157,6 +159,7 @@ function paginaConsulta(rows) {
       <h1>Consulta de fichas</h1>
       <p>Fichas submetidas nos últimos 30 dias · mais recentes primeiro</p>
     </div>
+    ${cardHtml}
     <div class="barra">
       <input type="search" id="busca" placeholder="Buscar por nome, prontuário ou ATB…">
       <span class="cont" id="cont">${rows.length} fichas</span>
@@ -200,7 +203,8 @@ export function registerConsultaRoutes(app, pool) {
         FROM atb_fichas f
         WHERE COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'
         ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`);
-      res.send(paginaConsulta(rows));
+      const hc = await getLatestHealthcheck(pool).catch(() => null);
+      res.send(paginaConsulta(rows, renderHealthCard(hc)));
     } catch (e) {
       console.error('[atb] consulta error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

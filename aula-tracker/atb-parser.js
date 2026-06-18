@@ -93,7 +93,7 @@ export function parseAnswers(answers, formId) {
     : null;
   const nomePac  = paciente_nome_raw;
   const link_labs = nomePac
-    ? `http://localhost:3000/api/buscar?nome=${encodeURIComponent(nomePac)}`
+    ? `http://localhost:3000/api/buscar?nome=${String(nomePac).trim().replace(/\s+/g,"+")}`
     : null;
 
   return {

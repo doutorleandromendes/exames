@@ -183,6 +183,35 @@ export function registerHealthcheckRoutes(app, pool, adminRequired) {
     try { res.json((await getLatestHealthcheck(pool)) || { vazio: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
+  // painel HTML: card de status + falhas + botao "rodar agora" (?run=1)
+  app.get('/atb/admin/healthcheck/painel', adminRequired, async (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    try {
+      const hc = req.query.run === '1' ? await runHealthcheck(pool) : await getLatestHealthcheck(pool);
+      const esc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+      const falhas = ((hc && hc.detalhe) || []).filter(d => !d.ok);
+      const linhas = falhas.map(d =>
+        `<tr><td style="padding:6px 10px;border-top:1px solid #eee">${esc(d.caso)}</td>` +
+        `<td style="padding:6px 10px;border-top:1px solid #eee;color:#5f6368">${esc(d.cond || '\u2014')}</td>` +
+        `<td style="padding:6px 10px;border-top:1px solid #eee">${esc(d.erro || (d.faltas ? 'faltam: ' + (Array.isArray(d.faltas) ? d.faltas.join(', ') : d.faltas) : '\u2014'))}</td></tr>`
+      ).join('');
+      const tabela = falhas.length
+        ? `<table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:8px">` +
+          `<thead><tr style="text-align:left;color:#80868b">` +
+          `<th style="padding:6px 10px">Caso</th><th style="padding:6px 10px">Condicao</th><th style="padding:6px 10px">Problema</th>` +
+          `</tr></thead><tbody>${linhas}</tbody></table>`
+        : `<p style="color:#1a8a52;font-size:13px;margin-top:8px">Todos os testes passaram.</p>`;
+      res.send(`<!doctype html><html lang="pt-br"><head><meta charset="utf-8">` +
+        `<meta name="viewport" content="width=device-width,initial-scale=1"><title>Saude do sistema</title></head>` +
+        `<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#202124">` +
+        `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">` +
+        `<h1 style="font-size:18px;margin:0">Saude do sistema</h1>` +
+        `<a href="/atb/admin/healthcheck/painel?run=1" style="font-size:13px;padding:7px 12px;border:1px solid #d0d3d9;border-radius:8px;text-decoration:none;color:#1a73e8;background:#f8fafe">&#8635; Rodar verificacao agora</a>` +
+        `</div>${renderHealthCard(hc)}${tabela}` +
+        `<p style="margin-top:18px"><a href="/scih" style="font-size:13px;color:#5f6368">&#8592; Voltar ao Portal do SCIH</a></p>` +
+        `</body></html>`);
+    } catch (e) { res.status(500).send('Erro: ' + e.message); }
+  });
 }
 
 // ── card de status (estilos inline; não depende do CSS da página) ────────────

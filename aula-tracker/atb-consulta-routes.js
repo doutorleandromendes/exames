@@ -201,7 +201,8 @@ export function registerConsultaRoutes(app, pool) {
                f.atb_solicitado, f.recomendacao_scih, f.recomendacoes_especificacao,
                COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) AS data_ficha
         FROM atb_fichas f
-        WHERE COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'
+        WHERE f.deletado_em IS NULL
+          AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'
         ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`);
       const hc = await getLatestHealthcheck(pool).catch(() => null);
       res.send(paginaConsulta(rows, renderHealthCard(hc)));

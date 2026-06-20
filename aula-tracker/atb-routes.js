@@ -20,6 +20,7 @@ import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-r
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
 import { registerConsultaRoutes } from './atb-consulta-routes.js';
 import { ensureHealthcheckTable, startHealthcheckSchedule, registerHealthcheckRoutes } from './atb-healthcheck.js';
+import { ensureRegrasCheckTable, startRegrasCheckSchedule, registerRegrasCheckRoutes } from './atb-regras-check.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
@@ -79,6 +80,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerConsultaRoutes(app, pool);
   ensureHealthcheckTable(pool).then(() => startHealthcheckSchedule(pool)).catch(e => console.error('[atb] healthcheck:', e.message));
   registerHealthcheckRoutes(app, pool, adminRequired);
+  ensureRegrasCheckTable(pool).then(() => startRegrasCheckSchedule(pool)).catch(e => console.error('[atb] regras-check:', e.message));
+  registerRegrasCheckRoutes(app, pool, adminRequired);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
   registerRegrasFormRoutes(app, pool, adminRequired);

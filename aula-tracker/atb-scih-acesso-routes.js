@@ -120,7 +120,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/parecer-frases', '💬', 'Frases do Parecer')}
           ${card('/scih/solicitar', '✉️', 'Página de solicitação')}
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
-          ${card('/atb/admin/healthcheck/painel', '🩺', 'Saúde do sistema')}
+          ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema')}
         </div>
       </div>`));
   });

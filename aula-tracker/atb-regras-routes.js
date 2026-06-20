@@ -50,6 +50,7 @@ const EXTRAS = [
   { key:'idade_meses', label:'Idade (meses)', tipo:'numero', calc:true },
   { key:'idade_anos', label:'Idade (anos)', tipo:'numero', calc:true },
   { key:'dias_internacao', label:'Dias desde a internação', tipo:'numero', calc:true },
+  { key:'dias_desde_submissao', label:'Dias desde a submissão', tipo:'numero', calc:true },
 ];
 // Chaves CALCULADAS em contextoFicha (sem coluna real em atb_fichas): aparecem no
 // catálogo, mas NUNCA entram no SELECT do dry-run. Fonte única para os dois filtros.

@@ -111,6 +111,8 @@ export function avaliaCond(cond, valores) {
 // ── Contexto da ficha (colunas + calculados) ───────────────────────────────
 function _toDate(x) {
   if (!x) return null;
+  // Colunas DATE/TIMESTAMPTZ chegam como objeto Date do pg — usar direto.
+  if (x instanceof Date) return isNaN(x.getTime()) ? null : x;
   const d = new Date(String(x).slice(0, 10) + 'T00:00:00');
   return isNaN(d) ? null : d;
 }

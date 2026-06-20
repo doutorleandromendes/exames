@@ -18,7 +18,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { PARECER_VEREDITOS } from './atb-parecer-edit-routes.js';
-import { avaliaCond, contextoFicha } from './atb-triagem-regras.js';
+import { avaliaCond, contextoFicha, aplicarRegras } from './atb-triagem-regras.js';
 import { getFormSchema } from './atb-form-schema.js';
 
 const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
@@ -171,6 +171,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
           <td>${r.ativo?'<span class="pill on">ativa</span>':'<span class="pill off">inativa</span>'}</td>
           <td class="row">
             <a class="btn ghost" href="/atb/admin/regras/${r.id}">Editar</a>
+            <a class="btn ghost" href="/atb/admin/regras/${r.id}/backfill">Backfill</a>
             <form method="POST" action="/atb/admin/regras/${r.id}/toggle" style="display:inline"><button class="ghost">${r.ativo?'Desativar':'Ativar'}</button></form>
             <form method="POST" action="/atb/admin/regras/${r.id}/excluir" style="display:inline" onsubmit="return confirm('Excluir esta regra?')"><button class="danger">Excluir</button></form>
           </td>
@@ -396,5 +397,94 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       }
       res.json({ok:true, total:rows.length, casam, ja_iras:ja, vazias:vaz, divergentes: irasRegra?div:null});
     }catch(e){ console.error('[regras] testar:',e.message); res.status(500).json({ok:false,error:e.message}); }
+  });
+
+  // ── Backfill por regra: aplica a regra às fichas existentes que se encaixam ──
+  // Só fichas AINDA NÃO triadas (sem triagem_regra_id) e onde ESTA é a 1ª regra a
+  // casar (respeita prioridade). Preenche Parecer/IrAS apenas em campo vazio, via
+  // aplicarRegras (mesmo motor da criação). Requer contextoFicha já corrigido.
+  async function coletarBackfill(regra, de, ate){
+    const ativas = (await pool.query(
+      'SELECT id, condicoes FROM atb_triagem_regras WHERE ativo=true ORDER BY prioridade ASC, id ASC'
+    )).rows;
+    const COLS_BANCO = (await catalogoCampos(pool)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
+    const base = ['id','paciente_nome','setor','data_internacao','paciente_dn','data_referencia','jotform_created_at','created_at'];
+    const cols = [...base, ...COLS_BANCO].filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
+    const filtros = ['f.deletado_em IS NULL'], params = [];
+    const dataCanon = 'COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)';
+    if(de){  params.push(de);  filtros.push(`${dataCanon} >= $${params.length}::date`); }
+    if(ate){ params.push(ate); filtros.push(`${dataCanon} < ($${params.length}::date + interval '1 day')`); }
+    const { rows } = await pool.query(
+      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid
+         FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
+        WHERE ${filtros.join(' AND ')}`, params);
+    const primeira = (ctx)=> ativas.find(r=>avaliaCond(r.condicoes, ctx));
+    const candidatos=[], amostra=[]; let casamTotal=0, jaTriada=0, outraRegra=0;
+    for(const f of rows){
+      const ctx = contextoFicha(f);
+      if(!avaliaCond(regra.condicoes, ctx)) continue;
+      casamTotal++;
+      if(f._trid != null){ jaTriada++; continue; }
+      const dono = primeira(ctx);
+      if(dono && dono.id === regra.id){ candidatos.push(f.id); if(amostra.length<30) amostra.push({id:f.id, nome:f.paciente_nome, setor:f.setor}); }
+      else outraRegra++;
+    }
+    return { candidatos, amostra, casamTotal, jaTriada, outraRegra };
+  }
+
+  // preview (não altera nada)
+  app.get('/atb/admin/regras/:id/backfill', soSuper, async (req,res)=>{
+    try{
+      const id = parseInt(req.params.id,10);
+      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1',[id])).rows[0];
+      if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1><a href="/atb/admin/regras">Voltar</a></div>`));
+      const de = req.query.de === undefined ? new Date(Date.now()-90*864e5).toISOString().slice(0,10) : String(req.query.de||'');
+      const ate = String(req.query.ate||'');
+      const { candidatos, amostra, casamTotal, jaTriada, outraRegra } = await coletarBackfill(regra, de, ate);
+      const tab = amostra.map(a=>`<tr><td>#${a.id}</td><td>${esc(a.nome||'')}</td><td>${esc(a.setor||'')}</td></tr>`).join('');
+      res.send(page('Backfill — '+regra.nome,`
+        <div class="card"><h1>Backfill: ${esc(regra.nome)}</h1>
+          <p class="mut">Aplica esta regra às fichas existentes que se encaixam <strong>e ainda não foram triadas</strong>, respeitando a prioridade (só onde esta é a 1ª regra a casar). Preenche Parecer/IrAS só em campo vazio — igual ao fluxo de criação.</p>
+          ${regra.ativo?'':'<p class="nota" style="color:#c0392b">Regra inativa — ative-a para que o backfill possa aplicá-la.</p>'}
+        </div>
+        <div class="card">
+          <form method="GET" action="/atb/admin/regras/${id}/backfill" class="row" style="align-items:flex-end;gap:12px">
+            <div><label class="lbl">De</label><br><input type="date" name="de" value="${esc(de)}"></div>
+            <div><label class="lbl">Até</label><br><input type="date" name="ate" value="${esc(ate)}"></div>
+            <button class="ghost">Atualizar período</button>
+            <span class="nota">Vazio = sem limite nesse lado. Filtra pela data clínica (referência → criação).</span>
+          </form>
+        </div>
+        <div class="card">
+          <p>Casam com a regra: <strong>${casamTotal}</strong></p>
+          <p class="nota">• já triadas (puladas): ${jaTriada} &nbsp;•&nbsp; pertencem a outra regra de maior precedência: ${outraRegra}</p>
+          <p style="margin-top:10px">Serão aplicadas a <strong>${candidatos.length}</strong> ficha(s).</p>
+          ${candidatos.length?`<form method="POST" action="/atb/admin/regras/${id}/backfill/aplicar" onsubmit="return confirm('Aplicar a ${candidatos.length} ficha(s)?')"><input type="hidden" name="de" value="${esc(de)}"><input type="hidden" name="ate" value="${esc(ate)}"><button>Aplicar a ${candidatos.length} ficha(s)</button></form>`:''}
+          <a class="btn ghost" href="/atb/admin/regras">Voltar</a>
+        </div>
+        ${amostra.length?`<div class="card"><h2>Amostra (até 30)</h2><table><thead><tr><th>Ficha</th><th>Paciente</th><th>Setor</th></tr></thead><tbody>${tab}</tbody></table></div>`:''}`));
+    }catch(e){ console.error('[regras] backfill preview:',e.message); res.status(500).send(page('Erro',`<div class="card"><h1>Falha</h1><p class="mut">${esc(e.message)}</p></div>`)); }
+  });
+
+  // aplicar (recalcula candidatos e roda aplicarRegras em cada)
+  app.post('/atb/admin/regras/:id/backfill/aplicar', soSuper, async (req,res)=>{
+    try{
+      const id = parseInt(req.params.id,10);
+      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1',[id])).rows[0];
+      if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1></div>`));
+      const de = String(req.body?.de||''); const ate = String(req.body?.ate||'');
+      const { candidatos } = await coletarBackfill(regra, de, ate);
+      let aplicadas=0, outras=0;
+      for(const fid of candidatos){
+        const r = await aplicarRegras(pool, fid);
+        if(r && r.regra_id === id) aplicadas++; else outras++;
+      }
+      res.send(page('Backfill concluído',`
+        <div class="card"><h1>Backfill concluído — ${esc(regra.nome)}</h1>
+          <p>Fichas processadas: <strong>${candidatos.length}</strong></p>
+          <p>Aplicaram esta regra: <strong>${aplicadas}</strong>${outras?` · outras: ${outras}`:''}</p>
+          <a class="btn" href="/atb/admin/regras">Voltar às regras</a>
+        </div>`));
+    }catch(e){ console.error('[regras] backfill aplicar:',e.message); res.status(500).send(page('Erro',`<div class="card"><h1>Falha</h1><p class="mut">${esc(e.message)}</p></div>`)); }
   });
 }

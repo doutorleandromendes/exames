@@ -950,7 +950,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>
           <td>${f.setor?_pill(SETOR_CORES,f.setor):'—'}</td>
-          <td>${_pillsMulti(ATB_CORES, f.atb_solicitado)||'—'}</td>
+          <td class="atb-cell">${_pillsMulti(ATB_CORES, f.atb_solicitado)||'—'}</td>
           <td style="text-align:center;font-family:monospace">${f.sofa!=null?f.sofa:'—'}</td>
           ${renderParecerCell(f, safe)}
           <td class="iras-cell">${_pillsIras(f.iras)}
@@ -1050,6 +1050,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           table.atb-grid th{position:sticky;top:0;z-index:5;background:#fff;color:#5f6368;text-align:left;font-size:11px;font-weight:600;padding:11px 12px;border-bottom:1px solid #e0e2e6;border-right:1px solid #f0f1f3;white-space:nowrap}
           table.atb-grid th.grp{background:#f3faf6;color:#1a8a5a}
           table.atb-grid td{padding:8px 12px;border-bottom:1px solid #f0f1f3;border-right:1px solid #f6f7f8;white-space:nowrap;vertical-align:middle;color:#202124}
+          table.atb-grid td.atb-cell{white-space:normal;overflow:visible;min-width:160px;max-width:240px;line-height:2.05}
           table.atb-grid tbody tr:hover td{background:#fafbfc}
           table.atb-grid tbody tr.com-parecer{opacity:.45}
           table.atb-grid tbody tr.com-parecer:hover{opacity:1}

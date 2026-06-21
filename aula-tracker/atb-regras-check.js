@@ -76,7 +76,7 @@ function condResumo(cond) {
 // ── síntese de ficha p/ regras de TRIAGEM (datas como Date, como o pg) ────────
 function _startOfDay(d){ const x = new Date(d); x.setHours(0,0,0,0); return x; }
 function _dateMinusDays(ref, k){ const x = _startOfDay(ref); x.setDate(x.getDate() - k); return x; }
-const CALC_DATE = { idade_dias: 'paciente_dn', dias_internacao: 'data_internacao' };
+const CALC_DATE = { idade_dias: 'paciente_dn', dias_internacao: 'data_internacao', dias_uti: 'data_uti' };
 const NAO_SINT = new Set(['idade_meses', 'idade_anos', 'dias_desde_submissao']); // não sintetizáveis com segurança
 function _alvoDias(op, v){
   v = Number(v); if (!Number.isFinite(v)) return null;

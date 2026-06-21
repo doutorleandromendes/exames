@@ -147,6 +147,8 @@ export function contextoFicha(f) {
     // Campos calculados por OPERAÇÃO (data/derivados). Para uma nova regra baseada
     // em operação: calcule aqui e registre em EXTRAS (atb-regras-routes.js).
     dias_internacao: _diasDesde(f.data_internacao, ref),
+    // Dias desde a admissão na UTI (data_uti), referência = submissão.
+    dias_uti: _diasDesde(f.data_uti, ref),
     // Dias desde a SUBMISSÃO da ficha (referência = hoje, não a própria submissão):
     // hoje - COALESCE(jotform_created_at, created_at). Útil sobretudo em backfill.
     dias_desde_submissao: _diasDesde(f.jotform_created_at || f.created_at, null),

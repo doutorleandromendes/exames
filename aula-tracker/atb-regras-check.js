@@ -64,6 +64,27 @@ function refsCond(cond, acc) {
   if (cond.campo) acc.push(cond.campo);
   return acc;
 }
+const ARRAY_OPS = new Set(['contains', 'contains_any']);
+const SCALAR_OPS = new Set(['eq', 'neq', 'in', 'text_contains_any']);
+function leafConds(cond, acc) {
+  acc = acc || [];
+  if (!cond) return acc;
+  if (cond.all) { cond.all.forEach(c => leafConds(c, acc)); return acc; }
+  if (cond.any) { cond.any.forEach(c => leafConds(c, acc)); return acc; }
+  if (cond.campo) acc.push(cond);
+  return acc;
+}
+// operador incompatível com o tipo do campo (ex.: contains_any em texto/número → nunca casa)
+function incompatibilidadeOpTipo(cond, map) {
+  const probl = [];
+  for (const c of leafConds(cond)) {
+    const f = map[c.campo]; if (!f) continue;
+    const ehArray = f.type === 'checkbox';
+    if (ehArray && SCALAR_OPS.has(c.op)) probl.push(`"${c.campo}" é multi-seleção (lista); operador "${c.op}" nunca casa — use "contém"/"contém algum de"`);
+    if (!ehArray && ARRAY_OPS.has(c.op)) probl.push(`"${c.campo}" é de valor único; operador "${c.op}" não se aplica — use "texto contém algum de" (texto), "está entre"/"é igual a"`);
+  }
+  return probl;
+}
 function condResumo(cond) {
   if (!cond) return '(sem condição)';
   if (cond.all) return 'TODAS(' + cond.all.map(condResumo).join(' & ') + ')';
@@ -174,6 +195,8 @@ export async function runRegrasCheck(pool) {
     const refs = refsCond(r.quando); if (r.campo) refs.push(r.campo);
     const faltando = refs.filter(k => !map[k]);
     if (faltando.length) { detalhe.push({ grupo: 'preenchimento', caso, cond, ok: false, erro: 'referência inexistente: ' + faltando.join(', ') }); failed++; continue; }
+    const incompP = incompatibilidadeOpTipo(r.quando, map);
+    if (incompP.length) { detalhe.push({ grupo: 'preenchimento', caso, cond, ok: false, erro: 'operador×tipo: ' + incompP.join('; ') }); failed++; continue; }
     // (b) valor é uma opção do campo-alvo (quando o campo tem opções)
     const ops = opt(alvoF);
     if (ops.length && !ops.includes(r.valor)) {
@@ -187,6 +210,22 @@ export async function runRegrasCheck(pool) {
     if (setou) passed++; else failed++;
     detalhe.push({ grupo: 'preenchimento', caso, cond, ok: setou,
       erro: setou ? null : 'não preencheu o campo na ficha sintetizada que satisfaz a condição' });
+  }
+
+  // 4) Operador × tipo de campo em TODAS as condições do formulário (visibilidade + obrigatoriedade)
+  const auditarOpTipo = (cond, caso) => {
+    if (!cond) return;
+    const incomp = incompatibilidadeOpTipo(cond, map);
+    if (incomp.length) { detalhe.push({ grupo: 'op_tipo', caso, cond: condResumo(cond), ok: false, erro: 'operador×tipo: ' + incomp.join('; ') }); failed++; }
+    else { detalhe.push({ grupo: 'op_tipo', caso, cond: condResumo(cond), ok: true, skip: true }); passed++; }
+  };
+  for (const sec of (schema.secoes || [])) {
+    auditarOpTipo(sec.cond, 'Visibilidade · Seção: ' + (sec.titulo || sec.id || '(seção)'));
+    for (const c of (sec.campos || [])) {
+      if (!c.key) continue;
+      auditarOpTipo(c.cond, 'Visibilidade · ' + (c.label || c.key));
+      auditarOpTipo(c.requiredCond, 'Obrigatoriedade · ' + (c.label || c.key));
+    }
   }
 
   const total = detalhe.length, ok = failed === 0;
@@ -264,7 +303,7 @@ export function renderRegrasCard(rc) {
     ? new Date(rc.ran_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     : '—';
   if (rc.ok) return wrap('#f1faf4', '#bfe6cf', '#1a8a52', 'Regras OK',
-    `Triagem + obrigatoriedade + preenchimento: ${rc.passed}/${rc.total} testes OK · ${quando}`);
+    `Triagem, obrigatoriedade, preenchimento e operador×tipo: ${rc.passed}/${rc.total} testes OK · ${quando}`);
   return wrap('#fdf2f2', '#f3c2c2', '#c0392b', 'Regras com FALHA',
     `${rc.failed} de ${rc.total} testes falharam · verificado ${quando}`);
 }

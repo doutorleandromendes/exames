@@ -63,6 +63,23 @@ export function avaliaCondServer(cond, valores) {
 
 // ── Validador genérico de obrigatórios (backstop server-side) ────────────────
 // Espelha o que o engine do cliente já exige: campo VISÍVEL e (required ||
+// Aplica schema.preenchimentos sobre `dados` (mutação in-place), espelhando o cliente.
+export function aplicarPreenchimentosServidor(schema, dados) {
+  const aplicados = [];
+  if (!schema || !Array.isArray(schema.preenchimentos) || !dados) return aplicados;
+  for (const r of schema.preenchimentos) {
+    if (!r || !r.campo || !avaliaCondServer(r.quando, dados)) continue;
+    const atual = dados[r.campo];
+    const vazio = atual === undefined || atual === null || atual === ''
+      || (Array.isArray(atual) && atual.length === 0);
+    if (!r.sobrescrever && !vazio) continue;
+    if (atual === r.valor) continue;
+    dados[r.campo] = r.valor;
+    aplicados.push(r.campo);
+  }
+  return aplicados;
+}
+
 // requiredCond satisfeito) precisa estar preenchido (e respeitar minChars).
 export function validarObrigatoriosServidor(schema, dados) {
   const faltas = [];
@@ -158,6 +175,12 @@ function descreverCond(cond, campos) {
   const op  = esc(OP_LABEL[cond.op] || cond.op);
   const vt  = esc(valorTxt(cond.valor));
   return `${lbl} <i>${op}</i>${vt ? ' ' + vt : ''}`;
+}
+function descreverPreench(r, campos) {
+  const alvo = esc(rotuloCampo(campos, r.campo));
+  const val  = esc(valorTxt(r.valor));
+  const modo = r.sobrescrever ? '<span class="tag ob">sobrescreve</span>' : '<span class="tag se">só se vazio</span>';
+  return `Define <b>${alvo}</b> = ${val || '<span class="mut">(vazio)</span>'} ${modo}<br><span class="nota">quando ${descreverCond(r.quando, campos)}</span>`;
 }
 function ehFolha(c) { return !!(c && c.campo && !c.all && !c.any); }
 function flatRepresentavel(cond) {
@@ -274,6 +297,17 @@ function paginaLista(schema) {
     }
   }
 
+  const preench = Array.isArray(schema.preenchimentos) ? schema.preenchimentos : [];
+  const linhasP = preench.map((r, i) => `
+    <tr>
+      <td>${descreverPreench(r, campos)}</td>
+      <td class="acoes">
+        <a class="btn sm" href="/atb/admin/regras-form/preench?idx=${i}">Editar</a>
+        <form class="inl" method="post" action="/atb/admin/regras-form/preench/excluir" onsubmit="return confirm('Remover este preenchimento?')">
+          <input type="hidden" name="idx" value="${i}">
+          <button class="btn sm del" type="submit">Excluir</button></form>
+      </td></tr>`).join('');
+
   return shell('Regras condicionais', `
     <a class="voltar" href="/scih">← Portal SCIH</a>
     <h1>Regras condicionais do formulário</h1>
@@ -283,6 +317,15 @@ function paginaLista(schema) {
       <table>
         <thead><tr><th>Alvo</th><th>Tipo</th><th>Condição</th><th></th></tr></thead>
         <tbody>${linhas.join('') || '<tr><td colspan="4" class="nota">Nenhuma regra definida.</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="sec">Preenchimento condicional</div>
+      <p class="nota">Deriva ou sobrescreve o valor de um campo quando as condições valerem (ex.: marcar "Profilaxia cirúrgica").</p>
+      <a class="btn pri" href="/atb/admin/regras-form/preench">+ Novo preenchimento</a>
+      <table style="margin-top:12px">
+        <thead><tr><th>Regra</th><th></th></tr></thead>
+        <tbody>${linhasP || '<tr><td colspan="2" class="nota">Nenhum preenchimento definido.</td></tr>'}</tbody>
       </table>
     </div>`);
 }
@@ -381,6 +424,91 @@ function montarCond(body) {
   return { [juncao]: conds };
 }
 
+function paginaEditorPreench(schema, { idx, juncao, conds, complexo, raw, campo, valor, sobrescrever }) {
+  const campos = listarCampos(schema);
+  const novo = (idx == null || idx === '');
+  const alvoSel = ['<option value="">— campo a preencher —</option>']
+    .concat(campos.map(c => `<option value="${esc(c.key)}" ${c.key === campo ? 'selected' : ''}>${esc(c.label)} (${esc(c.key)})</option>`)).join('');
+  const modoSel = [['', 'inserir — só se estiver vazio'], ['1', 'sobrescrever — força o valor']]
+    .map(([k, v]) => `<option value="${k}" ${((sobrescrever ? '1' : '') === k) ? 'selected' : ''}>${v}</option>`).join('');
+  const CAMPOS_JSON = JSON.stringify(campos.reduce((m, c) => (m[c.key] = c.options, m), {}));
+  const OPVALOR_JSON = JSON.stringify(OP_VALOR);
+  const cabAlvo = `
+      <div class="row">
+        <div><label class="f">Campo a preencher</label><select name="campo_alvo" id="campo_alvo" class="campo" onchange="syncAlvo()">${alvoSel}</select></div>
+        <div><label class="f">Valor</label><input name="valor" id="valor_alvo" value="${esc(valor == null ? '' : valor)}" list="dl_alvo" placeholder="valor a inserir"><datalist id="dl_alvo"></datalist></div>
+        <div><label class="f">Modo</label><select name="sobrescrever">${modoSel}</select></div>
+      </div>`;
+  const jsAlvo = `function syncAlvo(){var c=document.getElementById('campo_alvo').value,dl=document.getElementById('dl_alvo'),ops=(CAMPOS[c]||[]);dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');}`;
+
+  if (complexo) {
+    return shell('Editar preenchimento (avançado)', `
+    <a class="voltar" href="/atb/admin/regras-form">← Regras</a>
+    <h1>Editar preenchimento (condição avançada)</h1>
+    <p class="sub">A condição "quando" é aninhada e é editada como JSON. Os demais campos seguem normais.</p>
+    <form method="post" action="/atb/admin/regras-form/preench/salvar" class="card">
+      <input type="hidden" name="idx" value="${novo ? '' : esc(idx)}">
+      <input type="hidden" name="modo" value="json">
+      ${cabAlvo}
+      <label class="f">Condição "quando" (JSON)</label>
+      <textarea name="quando_json" style="width:100%;min-height:170px;font-family:monospace;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:10px">${esc(JSON.stringify(raw || {}, null, 2))}</textarea>
+      <div style="margin-top:14px"><button class="btn pri" type="submit">Salvar preenchimento</button> <a class="btn" href="/atb/admin/regras-form">Cancelar</a></div>
+    </form>
+    <script>var CAMPOS=${CAMPOS_JSON};${jsAlvo}syncAlvo();</script>`);
+  }
+
+  const optsJuncao = [['all', 'TODAS as condições (E)'], ['any', 'QUALQUER condição (OU)']]
+    .map(([k, v]) => `<option value="${k}" ${k === juncao ? 'selected' : ''}>${v}</option>`).join('');
+  const rows = [];
+  for (let i = 0; i < MAX_COND; i++) {
+    const cur = conds[i] || {};
+    const v = Array.isArray(cur.valor) ? cur.valor.join(', ') : (cur.valor == null ? '' : cur.valor);
+    const opSel = OPS.map(o => `<option value="${o.op}" ${o.op === cur.op ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+    const campoSel = ['<option value="">— campo —</option>']
+      .concat(campos.map(c => `<option value="${esc(c.key)}" ${c.key === cur.campo ? 'selected' : ''}>${esc(c.label)}</option>`)).join('');
+    rows.push(`
+      <div class="row" data-row="${i}">
+        <select class="campo" name="campo_${i}" onchange="syncVal(${i})">${campoSel}</select>
+        <select class="op" name="op_${i}" onchange="syncVal(${i})">${opSel}</select>
+        <input class="val" name="val_${i}" value="${esc(v)}" list="dl_${i}" placeholder="valor (vários: separe por vírgula)">
+        <datalist id="dl_${i}"></datalist>
+      </div>`);
+  }
+  return shell(novo ? 'Novo preenchimento' : 'Editar preenchimento', `
+    <a class="voltar" href="/atb/admin/regras-form">← Regras</a>
+    <h1>${novo ? 'Novo preenchimento condicional' : 'Editar preenchimento'}</h1>
+    <p class="sub">Quando as condições valerem, o campo-alvo recebe o valor. "Sobrescrever" força; "inserir" preenche só se vazio. Vale no formulário e no servidor ao salvar a ficha.</p>
+    <form method="post" action="/atb/admin/regras-form/preench/salvar" class="card">
+      <input type="hidden" name="idx" value="${novo ? '' : esc(idx)}">
+      <input type="hidden" name="modo" value="builder">
+      ${cabAlvo}
+      <div class="sec" style="margin-top:14px">Quando (condições)</div>
+      <div class="row"><div><label class="f">Satisfazer</label><select name="juncao">${optsJuncao}</select></div></div>
+      <p class="nota">Linhas em branco são ignoradas. Para "preenchido"/"vazio", o valor é ignorado.</p>
+      ${rows.join('')}
+      <div style="margin-top:14px">
+        <button class="btn pri" type="submit">Salvar preenchimento</button>
+        <a class="btn" href="/atb/admin/regras-form">Cancelar</a>
+      </div>
+    </form>
+    <script>
+      var CAMPOS=${CAMPOS_JSON}, OPVALOR=${OPVALOR_JSON};
+      function syncVal(i){
+        var row=document.querySelector('[data-row="'+i+'"]'); if(!row) return;
+        var campo=row.querySelector('.campo').value, op=row.querySelector('.op').value;
+        var val=row.querySelector('.val'), dl=document.getElementById('dl_'+i);
+        var ops=CAMPOS[campo]||[];
+        dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');
+        var modo=OPVALOR[op]||'um';
+        if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
+        else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+      }
+      ${jsAlvo}
+      for(var i=0;i<MAXC;i++) syncVal(i);
+      syncAlvo();
+    </script>`.replace(/MAXC/g, String(MAX_COND)));
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  Rotas
 // ════════════════════════════════════════════════════════════════════════════
@@ -460,5 +588,62 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       if (f && f.required === true) { delete f.required; await saveFormSchema(pool, inst, schema, req.user?.id || null); }
       res.redirect('/atb/admin/regras-form');
     } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
+  });
+
+  // ── Preenchimento condicional ──────────────────────────────────────────────
+  app.get('/atb/admin/regras-form/preench', soSuper, async (req, res) => {
+    try {
+      const schema = await getFormSchema(pool, inst);
+      const lista = Array.isArray(schema.preenchimentos) ? schema.preenchimentos : [];
+      const idxRaw = req.query.idx;
+      const idx = (idxRaw != null && idxRaw !== '') ? parseInt(idxRaw, 10) : null;
+      let juncao = 'all', conds = [], complexo = false, raw = null, campo = '', valor = '', sobrescrever = false;
+      if (idx != null && lista[idx]) {
+        const r = lista[idx];
+        const ex = extrairRegra(r.quando);
+        juncao = ex.juncao; conds = ex.conds; complexo = !!ex.complexo; raw = ex.raw || null;
+        campo = r.campo || ''; valor = r.valor == null ? '' : r.valor; sobrescrever = !!r.sobrescrever;
+      }
+      res.send(paginaEditorPreench(schema, { idx, juncao, conds, complexo, raw, campo, valor, sobrescrever }));
+    } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
+  });
+
+  app.post('/atb/admin/regras-form/preench/salvar', soSuper, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const campo = String(b.campo_alvo || '').trim();
+      if (!campo) return res.redirect('/atb/admin/regras-form');
+      const schema = await getFormSchema(pool, inst);
+      if (!Array.isArray(schema.preenchimentos)) schema.preenchimentos = [];
+      let quando = null;
+      if (b.modo === 'json') {
+        const txt = String(b.quando_json || '').trim();
+        if (txt) { try { quando = JSON.parse(txt); } catch (e2) { return res.status(400).send('JSON inválido: ' + esc(e2.message) + ' — <a href="javascript:history.back()">voltar</a>'); } }
+      } else {
+        quando = montarCond(b);
+      }
+      const regra = { quando: quando || null, campo, valor: String(b.valor == null ? '' : b.valor) };
+      if (b.sobrescrever === '1') regra.sobrescrever = true;
+      const idxRaw = b.idx;
+      if (idxRaw != null && idxRaw !== '' && schema.preenchimentos[parseInt(idxRaw, 10)]) {
+        schema.preenchimentos[parseInt(idxRaw, 10)] = regra;
+      } else {
+        schema.preenchimentos.push(regra);
+      }
+      await saveFormSchema(pool, inst, schema, req.user?.id || null);
+      res.redirect('/atb/admin/regras-form');
+    } catch (e) { res.status(500).send('Erro ao salvar: ' + esc(e.message)); }
+  });
+
+  app.post('/atb/admin/regras-form/preench/excluir', soSuper, async (req, res) => {
+    try {
+      const i = parseInt(String((req.body || {}).idx || ''), 10);
+      const schema = await getFormSchema(pool, inst);
+      if (Array.isArray(schema.preenchimentos) && schema.preenchimentos[i]) {
+        schema.preenchimentos.splice(i, 1);
+        await saveFormSchema(pool, inst, schema, req.user?.id || null);
+      }
+      res.redirect('/atb/admin/regras-form');
+    } catch (e) { res.status(500).send('Erro ao excluir: ' + esc(e.message)); }
   });
 }

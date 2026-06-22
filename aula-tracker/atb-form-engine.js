@@ -597,6 +597,24 @@
         .filter(function (sec) { return sec.campos.length > 0; });
     }, [schema, valores]);
 
+    // Preenchimento condicional: deriva/sobrescreve valores conforme regras do schema.
+    // schema.preenchimentos = [{ quando:<cond>, campo, valor, sobrescrever }]
+    // Mesma gramática de `cond`. 'inserir' = só se vazio; 'sobrescrever' = força enquanto a condição vale.
+    useEffect(function () {
+      if (!schema || !Array.isArray(schema.preenchimentos)) return;
+      var patch = null;
+      schema.preenchimentos.forEach(function (r) {
+        if (!r || !r.campo || !avaliaCond(r.quando, valores)) return;
+        var atual = valores[r.campo];
+        var vazio = atual === undefined || atual === null || atual === ''
+          || (Array.isArray(atual) && atual.length === 0);
+        if (!r.sobrescrever && !vazio) return;   // 'inserir': preenche só se estiver vazio
+        if (atual === r.valor) return;           // já está no alvo (converge, sem loop)
+        (patch = patch || {})[r.campo] = r.valor;
+      });
+      if (patch) setValores(function (prev) { return Object.assign({}, prev, patch); });
+    }, [schema, valores]);
+
     // Progresso: % de campos obrigatórios visíveis preenchidos
     var progresso = useMemo(function () {
       var obrig = [], preenchidos = 0;

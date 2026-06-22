@@ -26,7 +26,7 @@ import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-ace
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
-import { registerRegrasFormRoutes, validarObrigatoriosServidor } from './atb-regras-form-routes.js';
+import { registerRegrasFormRoutes, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
@@ -187,6 +187,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         return res.status(400).json({ error: 'Campos obrigatórios em falta' });
       }
       const _schemaVal = await getFormSchema(pool, inst);
+      aplicarPreenchimentosServidor(_schemaVal, d);   // preenchimento condicional (autoritativo) antes de validar/inserir
       const _faltas = validarObrigatoriosServidor(_schemaVal, d);
       if (_faltas.length) {
         return res.status(400).json({ error: _faltas[0].msg, campos: _faltas.map(f => f.key) });

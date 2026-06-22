@@ -14,7 +14,7 @@
 //    registerRegrasCheckRoutes(app, pool, adminRequired);
 // ════════════════════════════════════════════════════════════════════════════
 import { getFormSchema } from './atb-form-schema.js';
-import { avaliaCondServer, validarObrigatoriosServidor } from './atb-regras-form-routes.js';
+import { avaliaCondServer, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { contextoFicha, avaliaCond } from './atb-triagem-regras.js';
 import { getLatestHealthcheck, renderHealthCard } from './atb-healthcheck.js';
 
@@ -165,6 +165,30 @@ export async function runRegrasCheck(pool) {
     }
   }
 
+  // 3) Preenchimento condicional: referências válidas + valor é opção do alvo + dispara
+  for (const [i, r] of (schema.preenchimentos || []).entries()) {
+    const alvoF = map[r.campo];
+    const caso = 'Preenchimento: ' + (alvoF ? (alvoF.label || r.campo) : (r.campo || ('#' + i)));
+    const cond = condResumo(r.quando);
+    // (a) referências do "quando" + campo-alvo existem
+    const refs = refsCond(r.quando); if (r.campo) refs.push(r.campo);
+    const faltando = refs.filter(k => !map[k]);
+    if (faltando.length) { detalhe.push({ grupo: 'preenchimento', caso, cond, ok: false, erro: 'referência inexistente: ' + faltando.join(', ') }); failed++; continue; }
+    // (b) valor é uma opção do campo-alvo (quando o campo tem opções)
+    const ops = opt(alvoF);
+    if (ops.length && !ops.includes(r.valor)) {
+      detalhe.push({ grupo: 'preenchimento', caso, cond, ok: false, erro: `valor "${r.valor}" não é opção de ${r.campo} (${ops.join(' | ')})` }); failed++; continue;
+    }
+    // (c) sintetiza ficha que satisfaz o "quando", alvo vazio → aplicar tem que setar
+    const dados = satisfazerForm(r.quando, map); delete dados[r.campo];
+    let setou;
+    try { aplicarPreenchimentosServidor({ preenchimentos: [r] }, dados); setou = dados[r.campo] === r.valor; }
+    catch (e) { detalhe.push({ grupo: 'preenchimento', caso, cond, ok: false, erro: 'aplicador: ' + e.message }); failed++; continue; }
+    if (setou) passed++; else failed++;
+    detalhe.push({ grupo: 'preenchimento', caso, cond, ok: setou,
+      erro: setou ? null : 'não preencheu o campo na ficha sintetizada que satisfaz a condição' });
+  }
+
   const total = detalhe.length, ok = failed === 0;
   const { rows: [row] } = await pool.query(
     `INSERT INTO atb_regras_check (ok, total, passed, failed, detalhe)
@@ -240,7 +264,7 @@ export function renderRegrasCard(rc) {
     ? new Date(rc.ran_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     : '—';
   if (rc.ok) return wrap('#f1faf4', '#bfe6cf', '#1a8a52', 'Regras OK',
-    `Triagem + obrigatoriedade condicional: ${rc.passed}/${rc.total} testes OK · ${quando}`);
+    `Triagem + obrigatoriedade + preenchimento: ${rc.passed}/${rc.total} testes OK · ${quando}`);
   return wrap('#fdf2f2', '#f3c2c2', '#c0392b', 'Regras com FALHA',
     `${rc.failed} de ${rc.total} testes falharam · verificado ${quando}`);
 }

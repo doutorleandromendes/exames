@@ -8,6 +8,7 @@
 // adminRequired -> médico (ações sensíveis: apagar, etc.)
 import express from "express";
 import { uploadToR2, fetchR2Stream } from "./lab-storage.js";
+import { readFile } from "node:fs/promises";
 
 function safe(s) {
   return String(s ?? "")
@@ -196,6 +197,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           <div class="right">
             ${ncol ? `<a href="/pront/paciente/${id}/exames"><button type="button">Exames (${ncol})</button></a>` : ""}
             <a href="/pront/paciente/${id}/upload"><button type="button" style="background:#0e9f6e">Enviar exame</button></a>
+            <a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>
             <a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>
             <a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>
           </div>
@@ -757,7 +759,22 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 
-  // ===== RECONCILIAÇÃO: casar lab_patients antigos com o cadastro mestre =====
+  // ===== GERADOR DE DOCUMENTOS: abre já com o paciente preenchido =====
+  let __geradorHTML = null;
+  app.get("/pront/paciente/:id/documento", authRequired, async (req, res) => {
+    const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
+    try {
+      if (!__geradorHTML) __geradorHTML = await readFile(new URL("./gerador-documentos.html", import.meta.url), "utf8");
+      // injeta o nome no estado inicial (S.paciente) — literal JS seguro
+      const nomeJS = JSON.stringify(p.nome).replace(/</g, "\\u003c");
+      const html = __geradorHTML.replace('paciente:""', `paciente:${nomeJS}`);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (e) {
+      res.status(500).send(renderShell("Erro", `<div class="card"><h1>Gerador indisponível</h1><div class="mut">${safe(e.message)}</div></div>`));
+    }
+  });
   const semAcento = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
   app.get("/pront/reconciliar", authRequired, adminRequired, async (req, res) => {

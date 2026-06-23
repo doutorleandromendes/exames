@@ -49,6 +49,13 @@ function renderConsulta(txt) {
 export function registerProntRoutes(app, pool, authRequired, adminRequired, renderShell) {
   const quem = req => req.user?.full_name || req.user?.email || "sistema";
 
+  // ---- API: cadastro mestre de pacientes (consumido pelo dropdown do lab) ----
+  app.get("/pront/api/pacientes", authRequired, async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT id, nome, to_char(dn,'YYYY-MM-DD') dn FROM pront_pacientes ORDER BY lower(nome)`);
+    res.json(rows);
+  });
+
   // ---- dashboard: resumo + fila + busca + lista ----
   app.get("/pront", authRequired, async (req, res) => {
     const q = (req.query.q || "").trim();

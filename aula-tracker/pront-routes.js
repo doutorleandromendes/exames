@@ -705,6 +705,81 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     await pool.query(`DELETE FROM pront_consultas WHERE id=$1 AND paciente_id=$2`, [req.params.cid, req.params.id]);
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
+
+  // ===== RECONCILIAÇÃO: casar lab_patients antigos com o cadastro mestre =====
+  const semAcento = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  app.get("/pront/reconciliar", authRequired, adminRequired, async (req, res) => {
+    // lab_patients ainda não ligados, com contagem de coletas
+    let labs;
+    try {
+      labs = (await pool.query(
+        `SELECT lp.id, lp.full_name, to_char(lp.birth_date,'YYYY-MM-DD') dn,
+                (SELECT count(*) FROM lab_collections lc WHERE lc.patient_id=lp.id)::int ncol
+           FROM lab_patients lp
+          WHERE lp.pront_id IS NULL
+          ORDER BY lp.full_name`)).rows;
+    } catch (e) {
+      return res.send(renderShell("Reconciliação", `<div class="card"><h1>Reconciliação</h1><div class="mut">Módulo de laboratório não encontrado neste banco (${safe(e.message)}).</div></div>`));
+    }
+    const pacs = (await pool.query(`SELECT id, nome, to_char(dn,'YYYY-MM-DD') dn FROM pront_pacientes`)).rows;
+    const porNome = new Map();
+    for (const p of pacs) { const k = semAcento(p.nome); (porNome.get(k) || porNome.set(k, []).get(k)).push(p); }
+
+    const linhas = labs.map(l => {
+      const cand = porNome.get(semAcento(l.full_name)) || [];
+      const forte = cand.find(c => c.dn && l.dn && c.dn === l.dn);
+      const sugerido = forte || cand[0] || null;
+      const conf = forte ? `<span style="background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:999px;font-size:.8em">nome+DN</span>`
+                 : cand.length ? `<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:999px;font-size:.8em">só nome</span>`
+                 : `<span class="mut" style="font-size:.8em">sem candidato</span>`;
+      const opts = pacs.map(p => `<option value="${p.id}" ${sugerido && sugerido.id === p.id ? "selected" : ""}>${safe(p.nome)}${p.dn ? " · " + toBR(p.dn) : ""}</option>`).join("");
+      return `<tr>
+        <td>${safe(l.full_name)}<div class="mut" style="font-size:.8em">${l.dn ? toBR(l.dn) : "sem DN"} · ${l.ncol} coleta(s)</div></td>
+        <td>${conf}</td>
+        <td>
+          <form method="post" action="/pront/reconciliar/ligar" class="inline" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="hidden" name="lab_id" value="${l.id}"/>
+            <select name="pront_id" style="max-width:280px"><option value="">— escolha —</option>${opts}</select>
+            <button type="submit">Ligar</button>
+          </form>
+          <form method="post" action="/pront/reconciliar/criar" class="inline" style="margin-top:4px">
+            <input type="hidden" name="lab_id" value="${l.id}"/>
+            <button type="submit" style="background:#0e9f6e">Criar no prontuário</button>
+          </form>
+        </td>
+      </tr>`;
+    }).join("");
+
+    res.send(renderShell("Reconciliação de pacientes", `
+      <div class="admin-back-top"><a href="/pront">← Prontuário</a></div>
+      <div class="card">
+        <h1 style="margin-top:0">Reconciliar pacientes do laboratório</h1>
+        <p class="mut">Pacientes do lab ainda não ligados ao cadastro mestre. Confirme o casamento (ou crie um novo no prontuário). Nada é ligado sem você confirmar.</p>
+        ${labs.length ? `<table class="mt">
+          <thead><tr><th>Paciente do lab</th><th>Sugestão</th><th>Ação</th></tr></thead>
+          <tbody>${linhas}</tbody></table>`
+        : `<div class="mut mt">Tudo reconciliado — nenhum paciente do lab pendente. 🎉</div>`}
+      </div>`));
+  });
+
+  app.post("/pront/reconciliar/ligar", authRequired, adminRequired, async (req, res) => {
+    const { lab_id, pront_id } = req.body || {};
+    if (lab_id && pront_id) await pool.query(`UPDATE lab_patients SET pront_id=$1 WHERE id=$2`, [pront_id, lab_id]);
+    res.redirect("/pront/reconciliar");
+  });
+
+  app.post("/pront/reconciliar/criar", authRequired, adminRequired, async (req, res) => {
+    const { lab_id } = req.body || {};
+    const lp = (await pool.query(`SELECT full_name, to_char(birth_date,'YYYY-MM-DD') dn FROM lab_patients WHERE id=$1`, [lab_id])).rows[0];
+    if (lp) {
+      const novo = (await pool.query(
+        `INSERT INTO pront_pacientes(nome,dn,criado_por) VALUES($1,NULLIF($2,'')::date,$3) RETURNING id`,
+        [lp.full_name, lp.dn || "", quem(req)])).rows[0];
+      await pool.query(`UPDATE lab_patients SET pront_id=$1 WHERE id=$2`, [novo.id, lab_id]);
+    }
+    res.redirect("/pront/reconciliar");
+  });
 }
 
 // rótulo a partir do canônico (sem depender do normalizador no cliente)

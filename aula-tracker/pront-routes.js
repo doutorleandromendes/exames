@@ -9,6 +9,7 @@
 import express from "express";
 import { uploadToR2, fetchR2Stream } from "./lab-storage.js";
 import { readFile } from "node:fs/promises";
+import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
 
 function safe(s) {
   return String(s ?? "")
@@ -174,6 +175,12 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           ORDER BY lc.collected_at DESC`, [id])).rows;
     } catch { labColetas = []; }
 
+    // documentos emitidos pelo gerador (receita/pedido/relatório/atestado)
+    const docsEmitidos = (await pool.query(
+      `SELECT id, tipo, paper, to_char(criado_em,'YYYY-MM-DD') data
+         FROM pront_docs_emitidos WHERE paciente_id=$1 ORDER BY criado_em DESC`, [id])).rows;
+    const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado" };
+
     const dados = [
       p.dn && `<b>Nasc.:</b> ${toBR(p.dn)}${idade(p.dn) != null ? ` (${idade(p.dn)} anos)` : ""}`,
       p.cpf && `<b>CPF:</b> ${safe(p.cpf)}`,
@@ -216,6 +223,20 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
               <td>${toBR(c.data)}</td>
               <td>${c.nex}</td>
               <td><a href="/lab/admin/coletas/${c.id}">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">laudo PDF</a></td>
+            </tr>`).join("")}</tbody>
+        </table>
+      </div>` : ""}
+      ${docsEmitidos.length ? `
+      <h2 class="mt2" style="margin-bottom:0">Documentos emitidos <span class="mut" style="font-weight:400">(${docsEmitidos.length})</span></h2>
+      <div class="card mt">
+        <table>
+          <thead><tr><th>Data</th><th>Tipo</th><th>Papel</th><th></th></tr></thead>
+          <tbody>${docsEmitidos.map(d => `
+            <tr>
+              <td>${toBR(d.data)}</td>
+              <td>${TIPO_DOC[d.tipo] || safe(d.tipo)}</td>
+              <td class="mut">${safe(d.paper || "")}</td>
+              <td><a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a></td>
             </tr>`).join("")}</tbody>
         </table>
       </div>` : ""}
@@ -759,20 +780,97 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 
-  // ===== GERADOR DE DOCUMENTOS: abre já com o paciente preenchido =====
-  let __geradorHTML = null;
+  // ===== GERADOR DE DOCUMENTOS: abre pré-preenchido + salva o emitido na ficha =====
+  // Gancho injetado DENTRO da IIFE do gerador (acesso a S/applyPaper/renderPanel/renderDoc),
+  // sem tocar no arquivo do gerador. Âncora única: setTimeout(fitPreview,80);
+  const HOOK_JS = `
+window.__GETSTATE=function(){return S;};
+window.__RENDER_FOR_PDF=function(s){try{Object.assign(S,s);applyPaper();renderPanel();renderDoc();}catch(e){console.error(e);}};
+window.__READY=1;`;
+  let __gerBase = null;
+  async function geradorBase() {
+    if (!__gerBase) {
+      let h = await readFile(new URL("./gerador-documentos.html", import.meta.url), "utf8");
+      h = h.replace("setTimeout(fitPreview,80);", "setTimeout(fitPreview,80);" + HOOK_JS);
+      __gerBase = h;
+    }
+    return __gerBase;
+  }
+  // botão flutuante "Salvar no prontuário" (oculto na impressão), injetado só na versão servida ao humano
+  const SAVE_UI = `<script>(function(){
+    var st=document.createElement('style');st.textContent='@media print{#__save,#__savemsg{display:none!important}}';document.head.appendChild(st);
+    var b=document.createElement('button');b.id='__save';b.textContent='Salvar no prontuário';
+    b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;background:#0c447c;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
+    var m=document.createElement('div');m.id='__savemsg';m.style.cssText='position:fixed;right:18px;bottom:62px;z-index:99999;font:600 13px system-ui';
+    document.body.appendChild(b);document.body.appendChild(m);
+    b.onclick=async function(){
+      if(!window.__GETSTATE){m.style.color='#b91c1c';m.textContent='Estado indisponível';return;}
+      b.disabled=true;m.style.color='#0c447c';m.textContent='Salvando…';
+      try{
+        var r=await fetch(window.__SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
+        var j=await r.json();
+        if(r.ok&&j.ok){m.style.color='#0e7a4b';m.textContent='Salvo na ficha ✓';}
+        else{m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);b.disabled=false;}
+      }catch(e){m.style.color='#b91c1c';m.textContent='Erro: '+e.message;b.disabled=false;}
+    };
+  })();</script>`;
+
   app.get("/pront/paciente/:id/documento", authRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
     try {
-      if (!__geradorHTML) __geradorHTML = await readFile(new URL("./gerador-documentos.html", import.meta.url), "utf8");
-      // injeta o nome no estado inicial (S.paciente) — literal JS seguro
-      const nomeJS = JSON.stringify(p.nome).replace(/</g, "\\u003c");
-      const html = __geradorHTML.replace('paciente:""', `paciente:${nomeJS}`);
+      let html = await geradorBase();
+      const nomeJS = JSON.stringify(p.nome).replace(/</g, "\\u003c");   // injeta nome no estado inicial
+      html = html.replace('paciente:""', `paciente:${nomeJS}`);
+      const saveUrl = `/pront/paciente/${p.id}/documento/salvar`;
+      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};</script>${SAVE_UI}</body>`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (e) {
       res.status(500).send(renderShell("Erro", `<div class="card"><h1>Gerador indisponível</h1><div class="mut">${safe(e.message)}</div></div>`));
+    }
+  });
+
+  // salva o documento emitido: estado S -> PDF (puppeteer) -> R2 -> ficha
+  app.post("/pront/paciente/:id/documento/salvar", authRequired, async (req, res) => {
+    const id = req.params.id;
+    try {
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const state = req.body && req.body.state;
+      if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+
+      const html = await geradorBase();
+      const pdf = await gerarDocumentoPDF(html, state);   // puppeteer (roda no Render)
+
+      const tipo = String(state.doc || "documento").slice(0, 40);
+      const paper = String(state.paper || "A4").slice(0, 8);
+      const r2key = `pront/docs/${id}/${Date.now()}-${tipo}.pdf`;
+      await uploadToR2(r2key, pdf, "application/pdf");
+
+      const { rows: [row] } = await pool.query(
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [id, tipo, paper, r2key, quem(req)]);
+      res.json({ ok: true, id: row.id });
+    } catch (e) {
+      console.error("SALVAR DOC ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
+
+  // serve o PDF de um documento emitido (inline)
+  app.get("/pront/documento-emitido/:id/pdf", authRequired, async (req, res) => {
+    const d = (await pool.query(`SELECT r2_key FROM pront_docs_emitidos WHERE id=$1`, [req.params.id])).rows[0];
+    if (!d) return res.status(404).send("Documento não encontrado");
+    try {
+      const r = await fetchR2Stream(d.r2_key);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline");
+      res.send(buf);
+    } catch (e) {
+      res.status(500).send("Falha ao abrir o documento");
     }
   });
   const semAcento = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();

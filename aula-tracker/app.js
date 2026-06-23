@@ -18,6 +18,8 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
+import { runProntMigrations } from './pront-db.js';
+import { registerProntRoutes } from './pront-routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -332,6 +334,7 @@ await migratorPool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  
 migrate().catch(e=>console.error('migration error', e));
 runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
 runAtbMigrations(migratorPool).catch(e => console.error('atb migration error', e));   // ← ADICIONAR
+runProntMigrations(migratorPool).catch(e => console.error('pront migration error', e));
 
 
 // ====== Clonar curso (formulário com lista de aulas + ferramentas por linha) ======
@@ -4493,6 +4496,8 @@ try { registerLabRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabRoutes', e); }
 try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
+try { registerProntRoutes(app, pool, authRequired, adminRequired, renderShell); }
+catch (e) { console.error('ERRO registerProntRoutes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

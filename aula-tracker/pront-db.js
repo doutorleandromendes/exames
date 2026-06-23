@@ -86,6 +86,16 @@ export async function runProntMigrations(pool) {
     criado_em   TIMESTAMPTZ DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_pront_cons_pac ON pront_consultas (paciente_id, data);
+
+  -- ponte com o módulo de laboratório: lab_patients aponta para o cadastro mestre (pront_pacientes).
+  -- Guardado: só roda se lab_patients já existir (as migrações rodam concorrentes no boot).
+  DO $$
+  BEGIN
+    IF to_regclass('public.lab_patients') IS NOT NULL THEN
+      ALTER TABLE lab_patients ADD COLUMN IF NOT EXISTS pront_id BIGINT REFERENCES pront_pacientes(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_lab_patients_pront ON lab_patients (pront_id);
+    END IF;
+  END $$;
   `;
   await pool.query(sql);
   console.log("[pront] migrations OK");

@@ -59,6 +59,19 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   // ---- dashboard: resumo + fila + busca + lista ----
   app.get("/pront", authRequired, async (req, res) => {
     const q = (req.query.q || "").trim();
+    // ordenação por cabeçalho — allowlist (nunca interpola entrada do usuário no SQL)
+    const SORTS = {
+      nome:    "lower(p.nome)",
+      dn:      "p.dn",
+      ncons:   "ncons",
+      ncol:    "ncol",
+      ultima:  "ultima",
+    };
+    const sort = SORTS[req.query.sort] ? req.query.sort : null;
+    const dir = req.query.dir === "asc" ? "ASC" : req.query.dir === "desc" ? "DESC" : null;
+    const orderBy = (sort && dir)
+      ? `${SORTS[sort]} ${dir} NULLS LAST, lower(p.nome)`
+      : `ultima DESC NULLS LAST, lower(p.nome)`;   // padrão
     const { rows } = await pool.query(
       `SELECT p.id, p.nome, p.dn,
               (SELECT count(*) FROM pront_consultas c WHERE c.paciente_id=p.id)::int ncons,
@@ -66,7 +79,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
               (SELECT count(*) FROM pront_coletas  k WHERE k.paciente_id=p.id)::int ncol
          FROM pront_pacientes p
         WHERE ($1='' OR p.nome ILIKE '%'||$1||'%')
-        ORDER BY ultima DESC NULLS LAST, lower(p.nome)
+        ORDER BY ${orderBy}
         LIMIT 400`, [q]);
 
     // estatísticas do resumo
@@ -119,7 +132,20 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         </form>
         <div class="mut mt">${rows.length} paciente(s)${q ? ` para “${safe(q)}”` : ""}</div>
         <table class="mt">
-          <thead><tr><th>Nome</th><th>Nascimento</th><th>Consultas</th><th>Coletas</th><th>Última consulta</th></tr></thead>
+          <thead><tr>${(() => {
+            const cols = [["nome", "Nome"], ["dn", "Nascimento"], ["ncons", "Consultas"], ["ncol", "Coletas"], ["ultima", "Última consulta"]];
+            return cols.map(([key, label]) => {
+              const ativo = sort === key;
+              // ciclo: sem ordem -> asc -> desc -> reset
+              const prox = !ativo ? "asc" : dir === "ASC" ? "desc" : "";
+              const seta = ativo ? (dir === "ASC" ? " ▲" : " ▼") : "";
+              const qs = new URLSearchParams();
+              if (q) qs.set("q", q);
+              if (prox) { qs.set("sort", key); qs.set("dir", prox); }
+              const href = "/pront" + (qs.toString() ? "?" + qs.toString() : "");
+              return `<th><a href="${href}" style="color:inherit;text-decoration:none">${label}${seta}</a></th>`;
+            }).join("");
+          })()}</tr></thead>
           <tbody>${linhas || `<tr><td colspan="5" class="mut">Nenhum paciente.</td></tr>`}</tbody>
         </table>
       </div>`));

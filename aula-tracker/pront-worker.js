@@ -21,7 +21,9 @@ import { processarAudio } from "./pront-transcricao.js";
 const POLL_MS = Number(process.env.PRONT_POLL_MS || 5000);
 const MAX_TENT = Number(process.env.PRONT_MAX_TENT || 3);
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
+// SSL para conexão externa (Postgres do Render exige TLS); PGSSL=disable desliga (ex.: dentro da rede do Render)
+const __ssl = process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false };
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 2, ssl: __ssl });
 
 // reivindica 1 documento de forma segura mesmo com vários workers
 async function claimPendente() {

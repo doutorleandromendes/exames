@@ -10,6 +10,7 @@
 
 import { readFile } from "node:fs/promises";
 import { brNum } from "./pront-normalizador.js";
+import { runProntMigrations } from "./pront-db.js";
 
 // ---- helpers de leitura da exportação ----
 const ans = (s, qid) => s?.answers?.[qid] || {};
@@ -166,7 +167,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const file = process.argv[2]; const reset = process.argv.includes("--reset");
   if (!file) { console.error("uso: node pront-migra-jotform.js submissions.json [--reset]"); process.exit(1); }
   const pg = (await import("pg")).default;
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const url = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
+  if (!url) { console.error("defina DATABASE_URL (string de conexão do Postgres/Supabase)"); process.exit(1); }
+  // SSL para conexões gerenciadas (Supabase/Render); PGSSL=disable desliga
+  const ssl = process.env.PGSSL === "disable" ? false : { rejectUnauthorized: false };
+  const pool = new pg.Pool({ connectionString: url, ssl });
+  await runProntMigrations(pool);                 // idempotente — garante as tabelas
   const subs = JSON.parse(await readFile(file, "utf8"));
   await migrarJotform(pool, subs, { reset });
   await pool.end();

@@ -161,6 +161,18 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       `SELECT id, data, texto FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
     const ncol = (await pool.query(`SELECT count(*)::int n FROM pront_coletas WHERE paciente_id=$1`, [id])).rows[0].n;
 
+    // coletas do laboratório ligadas a este paciente (via lab_patients.pront_id); guardado se o lab não existir
+    let labColetas = [];
+    try {
+      labColetas = (await pool.query(
+        `SELECT lc.id, to_char(lc.collected_at,'YYYY-MM-DD') data,
+                (SELECT count(*) FROM lab_results r WHERE r.collection_id=lc.id)::int nex
+           FROM lab_collections lc
+           JOIN lab_patients lp ON lp.id=lc.patient_id
+          WHERE lp.pront_id=$1
+          ORDER BY lc.collected_at DESC`, [id])).rows;
+    } catch { labColetas = []; }
+
     const dados = [
       p.dn && `<b>Nasc.:</b> ${toBR(p.dn)}${idade(p.dn) != null ? ` (${idade(p.dn)} anos)` : ""}`,
       p.cpf && `<b>CPF:</b> ${safe(p.cpf)}`,
@@ -192,6 +204,19 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         ${p.obs ? `<div class="mut mt" style="white-space:pre-line">${safe(p.obs)}</div>` : ""}
         <div class="mt"><a class="mut" style="font-size:.85em" href="/pront/paciente/${id}/editar">editar dados</a></div>
       </div>
+      ${labColetas.length ? `
+      <h2 class="mt2" style="margin-bottom:0">Exames do laboratório <span class="mut" style="font-weight:400">(${labColetas.length})</span></h2>
+      <div class="card mt">
+        <table>
+          <thead><tr><th>Data da coleta</th><th>Exames</th><th></th></tr></thead>
+          <tbody>${labColetas.map(c => `
+            <tr>
+              <td>${toBR(c.data)}</td>
+              <td>${c.nex}</td>
+              <td><a href="/lab/admin/coletas/${c.id}">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">laudo PDF</a></td>
+            </tr>`).join("")}</tbody>
+        </table>
+      </div>` : ""}
       <h2 class="mt2" style="margin-bottom:0">Consultas <span class="mut" style="font-weight:400">(${consultas.length})</span></h2>
       ${timeline || `<div class="card mt mut">Sem consultas registradas.</div>`}
     `));

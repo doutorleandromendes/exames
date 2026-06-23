@@ -87,6 +87,18 @@ export async function runProntMigrations(pool) {
   );
   CREATE INDEX IF NOT EXISTS idx_pront_cons_pac ON pront_consultas (paciente_id, data);
 
+  -- documentos emitidos pelo gerador (receita/pedido/relatório/atestado), guardados na ficha
+  CREATE TABLE IF NOT EXISTS pront_docs_emitidos (
+    id          BIGSERIAL PRIMARY KEY,
+    paciente_id BIGINT NOT NULL REFERENCES pront_pacientes(id) ON DELETE CASCADE,
+    tipo        TEXT,            -- receituario | pedido | relatorio | atestado
+    paper       TEXT,            -- A4 | A5
+    r2_key      TEXT NOT NULL,
+    criado_por  TEXT,
+    criado_em   TIMESTAMPTZ DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pront_docs_emit_pac ON pront_docs_emitidos (paciente_id, criado_em DESC);
+
   -- ponte com o módulo de laboratório: lab_patients aponta para o cadastro mestre (pront_pacientes).
   -- Guardado: só roda se lab_patients já existir (as migrações rodam concorrentes no boot).
   DO $$

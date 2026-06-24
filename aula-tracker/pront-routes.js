@@ -273,6 +273,10 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       "colesterol_total","ldl","hdl","triglicerides","glicose","hba1c","insulina",
       "tsh","t4_livre","vitamina_b12","acido_folico","reticulocitos","ferritina","vhs","pcr","cpk"];
     const colIdx = new Map(coletas.map((c, i) => [c.id, i]));
+    // ordem de exibição da TABELA: mais recente à esquerda -> mais antiga à direita.
+    // (o array `coletas` continua cronológico; isto afeta só cabeçalho e células.
+    //  o gráfico abaixo segue usando a ordem cronológica original.)
+    const ordemExib = coletas.map((_, i) => coletas.length - 1 - i);
     const ordC = c => { const i = ORDEM.indexOf(c); return i < 0 ? 999 : i; };
 
     // monta matriz canonico -> {rotulo, unidade, celulas[col], pontos[]}
@@ -310,7 +314,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       return `<td ${meta}${bg ? `background:${bg};` : ""}${revStyle}text-align:right;font-variant-numeric:tabular-nums">${txt}${u}</td>`;
     };
 
-    const head = coletas.map(c => {
+    const head = ordemExib.map(ci => {
+      const c = coletas[ci];
       const inf = /inferido/i.test(c.laboratorio || "");
       return `<th style="text-align:right;white-space:nowrap">${toBR(c.data)}${inf ? ' <span title="ano inferido na migração — confirmar">⚠</span>' : ""}</th>`;
     }).join("");
@@ -319,7 +324,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       const temSerie = L.celulas.filter(c => c && c.tipo_valor === "numerico").length >= 2;
       const rotulo = `${safe(L.rotulo)}${L.unidade ? ` <span class="mut" style="font-weight:400;font-size:.8em">(${safe(L.unidade)})</span>` : ""}`;
       const clic = temSerie ? ` data-i="${i}" class="evrow"` : "";
-      const cels = L.celulas.map((c, ci) => cell(c, coletas[ci].id, L.canonico, L.rotulo)).join("");
+      const cels = ordemExib.map(ci => cell(L.celulas[ci], coletas[ci].id, L.canonico, L.rotulo)).join("");
       return `<tr${clic}><th style="text-align:left;white-space:nowrap;${STICKY}">${temSerie ? `<span class="evtrend" data-i="${i}" style="cursor:pointer">📈 </span>` : ""}${rotulo}</th>${cels}</tr>` +
              (temSerie ? `<tr id="chart-${i}" style="display:none"><td colspan="${coletas.length + 1}" style="padding:0"><div class="chart-host" style="padding:8px 4px"></div></td></tr>` : "");
     }).join("");

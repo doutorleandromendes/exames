@@ -946,7 +946,7 @@ window.__READY=1;`;
     var st=document.createElement('style');st.textContent='@media print{#__save,#__dl,#__savemsg{display:none!important}}';document.head.appendChild(st);
     var b=document.createElement('button');b.id='__save';b.textContent='Salvar no prontuário';
     b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;background:#0c447c;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
-    var d=document.createElement('button');d.id='__dl';d.textContent='Baixar PDF p/ papel timbrado';
+    var d=document.createElement('button');d.id='__dl';d.textContent='Abrir PDF p/ papel timbrado';
     d.style.cssText='position:fixed;right:18px;bottom:64px;z-index:99999;background:#b45309;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
     var m=document.createElement('div');m.id='__savemsg';m.style.cssText='position:fixed;right:18px;bottom:112px;z-index:99999;font:600 13px system-ui';
     document.body.appendChild(b);document.body.appendChild(d);document.body.appendChild(m);
@@ -962,17 +962,20 @@ window.__READY=1;`;
     };
     d.onclick=async function(){
       if(!window.__GETSTATE){m.style.color='#b91c1c';m.textContent='Estado indisponível';return;}
+      var w=window.open('','_blank');   // abre a aba JÁ no clique, senão o navegador bloqueia como pop-up
+      if(w){try{w.document.write('<!doctype html><meta charset=utf-8><title>Gerando…</title><body style="font:15px system-ui;padding:24px;color:#444">Gerando PDF para impressão…</body>');}catch(e){}}
       d.disabled=true;m.style.color='#b45309';m.textContent='Gerando PDF…';
       try{
         var st0=window.__GETSTATE();
         var r=await fetch(window.__PP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:st0})});
-        if(!r.ok){var j=await r.json().catch(function(){return {};});m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);d.disabled=false;return;}
+        if(!r.ok){var j=await r.json().catch(function(){return {};});if(w)w.close();m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);d.disabled=false;return;}
         var blob=await r.blob();
         var url=URL.createObjectURL(blob);
-        var a=document.createElement('a');a.href=url;a.download=(st0.doc||'documento')+'-timbrado.pdf';document.body.appendChild(a);a.click();a.remove();
-        setTimeout(function(){URL.revokeObjectURL(url);},2000);
-        m.style.color='#0e7a4b';m.textContent='PDF baixado ✓ — imprima em "Tamanho real"';d.disabled=false;
-      }catch(e){m.style.color='#b91c1c';m.textContent='Erro: '+e.message;d.disabled=false;}
+        if(w){w.location=url;}
+        else{var a=document.createElement('a');a.href=url;a.target='_blank';document.body.appendChild(a);a.click();a.remove();}
+        setTimeout(function(){URL.revokeObjectURL(url);},120000);   // some sozinho; nada fica no disco
+        m.style.color='#0e7a4b';m.textContent=w?'PDF aberto em nova aba ✓ — imprima em "Tamanho real"':'Habilite pop-ups p/ abrir o PDF';d.disabled=false;
+      }catch(e){if(w)w.close();m.style.color='#b91c1c';m.textContent='Erro: '+e.message;d.disabled=false;}
     };
   })();</script>`;
 

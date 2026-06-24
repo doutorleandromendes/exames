@@ -930,7 +930,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   // sem tocar no arquivo do gerador. Âncora única: setTimeout(fitPreview,80);
   const HOOK_JS = `
 window.__GETSTATE=function(){return S;};
-window.__RENDER_FOR_PDF=function(s){try{Object.assign(S,s);applyPaper();renderPanel();renderDoc();}catch(e){console.error(e);}};
+window.__RENDER_FOR_PDF=function(s){try{Object.assign(S,s);document.body.classList.toggle("pp",S.impressao==="pp");applyPaper();renderPanel();renderDoc();}catch(e){console.error(e);}};
 window.__READY=1;`;
   let __gerBase = null;
   async function geradorBase() {
@@ -943,11 +943,13 @@ window.__READY=1;`;
   }
   // botão flutuante "Salvar no prontuário" (oculto na impressão), injetado só na versão servida ao humano
   const SAVE_UI = `<script>(function(){
-    var st=document.createElement('style');st.textContent='@media print{#__save,#__savemsg{display:none!important}}';document.head.appendChild(st);
+    var st=document.createElement('style');st.textContent='@media print{#__save,#__dl,#__savemsg{display:none!important}}';document.head.appendChild(st);
     var b=document.createElement('button');b.id='__save';b.textContent='Salvar no prontuário';
     b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;background:#0c447c;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
-    var m=document.createElement('div');m.id='__savemsg';m.style.cssText='position:fixed;right:18px;bottom:62px;z-index:99999;font:600 13px system-ui';
-    document.body.appendChild(b);document.body.appendChild(m);
+    var d=document.createElement('button');d.id='__dl';d.textContent='Baixar PDF p/ papel timbrado';
+    d.style.cssText='position:fixed;right:18px;bottom:64px;z-index:99999;background:#b45309;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
+    var m=document.createElement('div');m.id='__savemsg';m.style.cssText='position:fixed;right:18px;bottom:112px;z-index:99999;font:600 13px system-ui';
+    document.body.appendChild(b);document.body.appendChild(d);document.body.appendChild(m);
     b.onclick=async function(){
       if(!window.__GETSTATE){m.style.color='#b91c1c';m.textContent='Estado indisponível';return;}
       b.disabled=true;m.style.color='#0c447c';m.textContent='Salvando…';
@@ -957,6 +959,20 @@ window.__READY=1;`;
         if(r.ok&&j.ok){m.style.color='#0e7a4b';m.textContent='Salvo na ficha ✓';}
         else{m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);b.disabled=false;}
       }catch(e){m.style.color='#b91c1c';m.textContent='Erro: '+e.message;b.disabled=false;}
+    };
+    d.onclick=async function(){
+      if(!window.__GETSTATE){m.style.color='#b91c1c';m.textContent='Estado indisponível';return;}
+      d.disabled=true;m.style.color='#b45309';m.textContent='Gerando PDF…';
+      try{
+        var st0=window.__GETSTATE();
+        var r=await fetch(window.__PP_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:st0})});
+        if(!r.ok){var j=await r.json().catch(function(){return {};});m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);d.disabled=false;return;}
+        var blob=await r.blob();
+        var url=URL.createObjectURL(blob);
+        var a=document.createElement('a');a.href=url;a.download=(st0.doc||'documento')+'-timbrado.pdf';document.body.appendChild(a);a.click();a.remove();
+        setTimeout(function(){URL.revokeObjectURL(url);},2000);
+        m.style.color='#0e7a4b';m.textContent='PDF baixado ✓ — imprima em "Tamanho real"';d.disabled=false;
+      }catch(e){m.style.color='#b91c1c';m.textContent='Erro: '+e.message;d.disabled=false;}
     };
   })();</script>`;
 
@@ -968,7 +984,8 @@ window.__READY=1;`;
       const nomeJS = JSON.stringify(p.nome).replace(/</g, "\\u003c");   // injeta nome no estado inicial
       html = html.replace('paciente:""', `paciente:${nomeJS}`);
       const saveUrl = `/pront/paciente/${p.id}/documento/salvar`;
-      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};</script>${SAVE_UI}</body>`);
+      const ppUrl = `/pront/paciente/${p.id}/documento/pdf-timbrado`;
+      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};</script>${SAVE_UI}</body>`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (e) {
@@ -984,6 +1001,7 @@ window.__READY=1;`;
       if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
       const state = req.body && req.body.state;
       if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+      state.impressao = "digital";   // a cópia da ficha mantém SEMPRE o timbrado digital
 
       const html = await geradorBase();
       const pdf = await gerarDocumentoPDF(html, state);   // puppeteer (roda no Render)
@@ -1000,6 +1018,30 @@ window.__READY=1;`;
       res.json({ ok: true, id: row.id });
     } catch (e) {
       console.error("SALVAR DOC ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
+
+  // gera o PDF SEM o timbrado digital (para imprimir sobre o papel timbrado físico).
+  // NÃO salva na ficha: é só um download. Imprimir em "Tamanho real" / escala 100%.
+  app.post("/pront/paciente/:id/documento/pdf-timbrado", authRequired, async (req, res) => {
+    const id = req.params.id;
+    try {
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const state = req.body && req.body.state;
+      if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+      state.impressao = "pp";   // suprime o timbrado digital — o papel já tem o timbrado impresso
+
+      const html = await geradorBase();
+      const pdf = await gerarDocumentoPDF(html, state);   // puppeteer (roda no Render)
+
+      const tipo = String(state.doc || "documento").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40) || "documento";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${tipo}-timbrado.pdf"`);
+      res.send(pdf);
+    } catch (e) {
+      console.error("PDF TIMBRADO ERROR", e);
       res.status(500).json({ ok: false, erro: e.message });
     }
   });

@@ -218,6 +218,23 @@ const prontRequired = async (req,res,next)=>{
   }catch{ return res.redirect('/'); }
 };
 
+// Médico (gerador de documentos / ações clínicas): exige super_admin; ADMIN_SECRET (cookie adm) é break-glass
+const medicoRequired = async (req,res,next)=>{
+  const adm = isAdmin(req);
+  const uid = req.cookies?.uid;
+  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+  try{
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,pront FROM users WHERE id=$1',[uid]);
+    const user = rows[0];
+    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    const exp = parseISO(user.expires_at);
+    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+    req.user = user;
+    if(user.super_admin || adm) return next();
+    return res.status(403).send(renderShell('Área do médico', `<div class="card"><h1>Área do médico</h1><p class="mut">O gerador de documentos é restrito ao médico responsável.</p><a href="/pront">Voltar ao prontuário</a></div>`));
+  }catch{ return res.redirect('/'); }
+};
+
 // ====== MIGRAÇÕES ======
 async function migrate(){
   await migratorPool.query(`
@@ -4514,7 +4531,7 @@ try { registerLabRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabRoutes', e); }
 try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
-try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell); }
+try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 

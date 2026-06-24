@@ -10,6 +10,7 @@ import express from "express";
 import { uploadToR2, fetchR2Stream } from "./lab-storage.js";
 import { readFile } from "node:fs/promises";
 import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
+import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
 
 function safe(s) {
   return String(s ?? "")
@@ -203,6 +204,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           <h1 style="margin:0">${safe(p.nome)}</h1>
           <div class="right">
             ${ncol ? `<a href="/pront/paciente/${id}/exames"><button type="button">Exames (${ncol})</button></a>` : ""}
+            <a href="/pront/paciente/${id}/exames/importar"><button type="button" style="background:#0369a1">Importar exames</button></a>
             <a href="/pront/paciente/${id}/upload"><button type="button" style="background:#0e9f6e">Enviar exame</button></a>
             <a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>
             <a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>
@@ -381,6 +383,89 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         [req.params.id, tipo, nome || null, contentType || null, r2key, buffer.length, quem(req)])).rows[0];
       res.json({ ok: true, docId: doc.id });
     } catch (e) { res.status(500).json({ erro: String(e.message || e) }); }
+  });
+
+  // ===== IMPORTAR .xlsx DE EXAMES EXTERNOS (planilha longitudinal) =====
+  // lê a planilha (SheetJS) -> matriz -> motor importarPlanilha -> prévia -> grava no grid
+  async function lerMatrizXlsx(b64) {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(b64, { type: "base64", cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  }
+
+  app.get("/pront/paciente/:id/exames/importar", authRequired, async (req, res) => {
+    const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
+    const id = p.id;
+    res.send(renderShell("Importar exames", `
+      <div class="admin-back-top"><a href="/pront/paciente/${id}">← Ficha de ${safe(p.nome)}</a></div>
+      <div class="card">
+        <h1 style="margin-top:0">Importar exames (.xlsx)</h1>
+        <p class="mut">Planilha longitudinal (datas nas colunas, exames nas linhas). Os resultados limpos vão direto pro grid; os duvidosos entram marcados como <b>revisar</b>.</p>
+        <input type="file" id="f" accept=".xlsx,.xls" />
+        <div id="msg" class="mut mt"></div>
+        <div id="previa"></div>
+      </div>
+      <script>
+        var pac=${id}, b64="";
+        var f=document.getElementById("f"), msg=document.getElementById("msg"), previa=document.getElementById("previa");
+        f.addEventListener("change", async function(){
+          var file=f.files[0]; if(!file) return;
+          msg.textContent="Lendo planilha…"; previa.innerHTML="";
+          b64=await new Promise(function(ok,er){var r=new FileReader();r.onload=function(){ok(String(r.result).split(",")[1]);};r.onerror=er;r.readAsDataURL(file);});
+          try{
+            var r=await fetch("/pront/paciente/"+pac+"/exames/importar/previa",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({b64:b64})});
+            var j=await r.json();
+            if(!j.ok){msg.textContent="Falha: "+(j.erro||r.status);return;}
+            msg.textContent="";
+            var alerta = j.mismatchPaciente ? '<div class="card" style="border-color:#b45309;background:#fffbeb"><b>Atenção:</b> a planilha diz <b>'+j.paciente+'</b>, mas a ficha é de outro paciente. Confira antes de gravar.</div>' : '';
+            var marc = j.marcados.map(function(m){return '<tr><td>'+m.data+'</td><td>'+m.rotulo+'</td><td>'+m.resultado_txt+'</td><td class="mut">'+m.motivos.join("; ")+'</td></tr>';}).join("");
+            previa.innerHTML = alerta +
+              '<div class="mt"><b>Paciente da planilha:</b> '+(j.paciente||"—")+' · <b>DN:</b> '+(j.dn||"—")+'</div>'+
+              '<div class="mut">Datas: '+j.datas.join(", ")+'</div>'+
+              '<div class="mt2"><b style="color:#0e7a4b">'+j.limposCount+'</b> resultados limpos (gravam direto) · <b style="color:#b45309">'+j.marcados.length+'</b> marcados pra revisar</div>'+
+              (marc?'<table class="mt"><thead><tr><th>Data</th><th>Exame</th><th>Valor</th><th>Motivo</th></tr></thead><tbody>'+marc+'</tbody></table>':'')+
+              (j.naoMapeados.length?'<div class="mut mt">Não reconhecidos (entram como "outros"): '+j.naoMapeados.join(", ")+'</div>':'')+
+              '<div class="mt2"><button id="go" type="button" style="background:#0e9f6e">Confirmar e gravar no grid</button></div>';
+            document.getElementById("go").addEventListener("click", async function(){
+              this.disabled=true; msg.textContent="Gravando…";
+              var rg=await fetch("/pront/paciente/"+pac+"/exames/importar/gravar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({b64:b64})});
+              var jg=await rg.json();
+              if(rg.ok&&jg.ok){location.href="/pront/paciente/"+pac+"/exames";}
+              else{msg.textContent="Falha ao gravar: "+(jg.erro||rg.status); document.getElementById("go").disabled=false;}
+            });
+          }catch(e){msg.textContent="Erro: "+e.message;}
+        });
+      </script>
+    `));
+  });
+
+  app.post("/pront/paciente/:id/exames/importar/previa", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const p = (await pool.query(`SELECT nome, to_char(dn,'YYYY-MM-DD') dn FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const rows = await lerMatrizXlsx(req.body?.b64 || "");
+      const prev = preverImportacao(rows);
+      const mismatchPaciente = !!(prev.paciente && p.nome && semAcento(prev.paciente) !== semAcento(p.nome));
+      res.json({
+        ok: true, paciente: prev.paciente, dn: prev.dn, datas: prev.datas,
+        limposCount: prev.limpos.length,
+        marcados: prev.marcados.map(m => ({ data: m.data, rotulo: m.rotulo || m.nome_original, resultado_txt: m.resultado_txt, motivos: m.motivos })),
+        naoMapeados: prev.naoMapeados, mismatchPaciente,
+      });
+    } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
+  });
+
+  app.post("/pront/paciente/:id/exames/importar/gravar", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const rows = await lerMatrizXlsx(req.body?.b64 || "");
+      const prev = preverImportacao(rows);
+      const stats = await gravarTudo(pool, p.id, prev, quem(req));
+      res.json({ ok: true, ...stats });
+    } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
   });
 
   // serve o arquivo do R2 (imagem/pdf) para a conferência

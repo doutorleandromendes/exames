@@ -1,0 +1,19 @@
+# segredos — NUNCA versionar
+.env
+*.env
+**/.env
+
+# dependências e cache
+node_modules/
+**/node_modules/
+.cache/
+**/.cache/
+package-lock.json
+
+# dados de pacientes (LGPD) — não devem ir pro git
+**/submissions.json
+**/*-backup/
+
+# lixo do macOS
+.DS_Store
+**/.DS_Store

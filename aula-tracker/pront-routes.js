@@ -50,7 +50,9 @@ function renderConsulta(txt) {
   return out;
 }
 
-export function registerProntRoutes(app, pool, authRequired, adminRequired, renderShell) {
+export function registerProntRoutes(app, pool, authRequired, adminRequired, renderShell, medicoRequired) {
+  // gate do gerador de documentos = médico (super_admin). Se não vier (compat), recai no de prontuário.
+  medicoRequired = medicoRequired || authRequired;
   const quem = req => req.user?.full_name || req.user?.email || "sistema";
 
   // ---- API: cadastro mestre de pacientes (consumido pelo dropdown do lab) ----
@@ -162,7 +164,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1><a href="/pront">← Pacientes</a></div>`));
 
     const consultas = (await pool.query(
-      `SELECT id, data, texto FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
+      `SELECT id, data, texto, criado_por FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
     const ncol = (await pool.query(`SELECT count(*)::int n FROM pront_coletas WHERE paciente_id=$1`, [id])).rows[0].n;
 
     // coletas do laboratório ligadas a este paciente (via lab_patients.pront_id); guardado se o lab não existir
@@ -192,8 +194,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const timeline = consultas.map(c => `
       <div class="card mt" style="padding:16px">
         <div class="right" style="justify-content:space-between">
-          <div style="font-weight:700">${toBR(c.data)}</div>
-          <a class="mut" style="font-size:.85em" href="/pront/paciente/${id}/consulta/${c.id}/editar">editar</a>
+          <div style="font-weight:700">${toBR(c.data)}${c.criado_por ? ` <span class="mut" style="font-weight:400;font-size:.85em">· por ${safe(c.criado_por)}</span>` : ""}</div>
+          ${req.user?.super_admin ? `<a class="mut" style="font-size:.85em" href="/pront/paciente/${id}/consulta/${c.id}/editar">editar</a>` : ""}
         </div>
         <div class="mt" style="line-height:1.5">${renderConsulta(c.texto)}</div>
       </div>`).join("");
@@ -207,8 +209,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
             ${ncol ? `<a href="/pront/paciente/${id}/exames"><button type="button">Exames (${ncol})</button></a>` : ""}
             <a href="/pront/paciente/${id}/exames/importar"><button type="button" style="background:#0369a1">Importar exames</button></a>
             <a href="/pront/paciente/${id}/upload"><button type="button" style="background:#0e9f6e">Enviar exame</button></a>
-            <a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>
-            <a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>
+            ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>` : ""}
+            ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>` : ""}
             <a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>
           </div>
         </div>
@@ -746,7 +748,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   });
 
   // ===== ÁUDIO DA CONSULTA: envio -> fila =====
-  app.get("/pront/paciente/:id/consulta/audio", authRequired, async (req, res) => {
+  app.get("/pront/paciente/:id/consulta/audio", medicoRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id,nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
     res.send(renderShell(`Áudio da consulta — ${safe(p.nome)}`, `
@@ -784,7 +786,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       </script>`));
   });
 
-  app.post("/pront/paciente/:id/consulta/audio", authRequired, jsonGrande, async (req, res) => {
+  app.post("/pront/paciente/:id/consulta/audio", medicoRequired, jsonGrande, async (req, res) => {
     try {
       const { data, contentType, nome, modo, diarizar } = req.body || {};
       if (!data) return res.status(400).json({ erro: "sem dados" });
@@ -905,13 +907,13 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   });
 
   // editar consulta
-  app.get("/pront/paciente/:id/consulta/:cid/editar", authRequired, async (req, res) => {
+  app.get("/pront/paciente/:id/consulta/:cid/editar", medicoRequired, async (req, res) => {
     const c = (await pool.query(`SELECT id, to_char(data,'YYYY-MM-DD') data, texto FROM pront_consultas WHERE id=$1 AND paciente_id=$2`, [req.params.cid, req.params.id])).rows[0];
     if (!c) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Consulta não encontrada</h1></div>`));
     res.send(renderShell("Editar consulta", `<div class="admin-back-top"><a href="/pront/paciente/${req.params.id}">← voltar</a></div>${formConsulta(req.params.id, c, `/pront/paciente/${req.params.id}/consulta/${c.id}/editar`, "Editar consulta")}`));
   });
 
-  app.post("/pront/paciente/:id/consulta/:cid/editar", authRequired, async (req, res) => {
+  app.post("/pront/paciente/:id/consulta/:cid/editar", medicoRequired, async (req, res) => {
     const { data, texto } = req.body || {};
     if (!texto || !texto.trim()) return res.redirect(`/pront/paciente/${req.params.id}/consulta/${req.params.cid}/editar`);
     await pool.query(`UPDATE pront_consultas SET data=COALESCE(NULLIF($3,'')::date,data), texto=$4 WHERE id=$1 AND paciente_id=$2`,
@@ -979,7 +981,7 @@ window.__READY=1;`;
     };
   })();</script>`;
 
-  app.get("/pront/paciente/:id/documento", authRequired, async (req, res) => {
+  app.get("/pront/paciente/:id/documento", medicoRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
     try {
@@ -997,7 +999,7 @@ window.__READY=1;`;
   });
 
   // salva o documento emitido: estado S -> PDF (puppeteer) -> R2 -> ficha
-  app.post("/pront/paciente/:id/documento/salvar", authRequired, async (req, res) => {
+  app.post("/pront/paciente/:id/documento/salvar", medicoRequired, async (req, res) => {
     const id = req.params.id;
     try {
       const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [id])).rows[0];
@@ -1027,7 +1029,7 @@ window.__READY=1;`;
 
   // gera o PDF SEM o timbrado digital (para imprimir sobre o papel timbrado físico).
   // NÃO salva na ficha: é só um download. Imprimir em "Tamanho real" / escala 100%.
-  app.post("/pront/paciente/:id/documento/pdf-timbrado", authRequired, async (req, res) => {
+  app.post("/pront/paciente/:id/documento/pdf-timbrado", medicoRequired, async (req, res) => {
     const id = req.params.id;
     try {
       const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [id])).rows[0];

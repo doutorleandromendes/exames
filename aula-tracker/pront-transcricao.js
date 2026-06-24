@@ -113,16 +113,24 @@ const REGRAS = `REGRAS ABSOLUTAS:
 - Use SOMENTE o que está na transcrição. NÃO invente sintomas, exames, doses ou diagnósticos.
 - Se algo não foi dito, não preencha a seção (melhor faltar do que inventar).
 - Preserve EXATAMENTE nomes de medicação, doses e termos técnicos como foram ditos. Se um nome ficou duvidoso na transcrição, mantenha e marque com "(?)".
+- NÃO omita a hipótese/diagnóstico principal nem a conduta/plano: esses entram SEMPRE, por completo.
+- NÃO inverta o sentido. Se o médico AFASTA, DESCARTA ou diz que algo "não confirma", registre exatamente assim — nunca transforme uma hipótese afastada em diagnóstico.
 - Não dê conselho médico nem complete raciocínio clínico. Você organiza, não decide.
 - Saída em texto, no formato: "## " para título, "# " para seção, "- " para itens. Sem comentários fora do texto.`;
 
-const PROMPT_RESUMO = (t) => `Você recebe a transcrição de um médico DITANDO o resumo de uma consulta (uma só voz).
-Organize fielmente no formato do prontuário. ${REGRAS}
+const PROMPT_RESUMO = (t) => `Você recebe a transcrição de um médico ditando NOTAS CLÍNICAS de uma consulta (uma só voz). Isto NÃO é um resumo — são notas clínicas. Sua tarefa é ORGANIZAR o que foi dito em texto limpo e legível, SEM condensar e SEM descartar conteúdo clínico.
+
+Como organizar:
+- Preserve TODO o conteúdo clínico: resultados de exames comentados, o raciocínio do médico, TODAS as hipóteses (principal e diferenciais) e a conduta/plano por inteiro. Não julgue o que é "secundário" — não omita.
+- Mantenha-se próximo do que foi dito. Pode remover muletas de fala ("então", "assim", "né") e repetições, mas NÃO reescreva nem encurte o raciocínio clínico.
+- Use as seções que o conteúdo pedir (por exemplo: Exames/Resultados, Discussão/Raciocínio, Hipóteses, Conduta) — não force um molde fixo nem invente seções vazias.
+
+${REGRAS}
 
 Transcrição:
 """${t}"""
 
-Responda SOMENTE com JSON: {"texto":"<a evolução formatada com ## / # / ->","data":"<AAAA-MM-DD se uma data foi dita, senão vazio>"}`;
+Responda SOMENTE com JSON: {"texto":"<as notas clínicas formatadas com ## título / # seção / - itens>","data":"<AAAA-MM-DD se uma data foi dita, senão vazio>"}`;
 
 const PROMPT_CONSULTA = (t) => `Você recebe a transcrição de uma CONSULTA inteira (médico e paciente; pode haver rótulos de quem falou).
 Produza a evolução em formato SOAP, atribuindo: relato/queixas do paciente em "# Subjetivo"; achados ditos pelo médico em "# Objetivo"; impressão em "# Avaliação"; e o que o médico determinou em "# Conduta". ${REGRAS}

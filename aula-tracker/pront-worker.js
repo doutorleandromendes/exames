@@ -13,6 +13,7 @@
 // Uso:  node pront-worker.js        (loop contínuo)
 //       node pront-worker.js --once (processa um e sai — útil para teste/cron)
 
+import "dotenv/config";
 import pg from "pg";
 import { fetchR2Stream } from "./lab-storage.js";
 import { extrairDocumento } from "./pront-extracao.js";

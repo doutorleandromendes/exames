@@ -11,6 +11,7 @@ import { uploadToR2, fetchR2Stream } from "./lab-storage.js";
 import { readFile } from "node:fs/promises";
 import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
 import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
+import { parseValue } from "./pront-normalizador.js";
 
 function safe(s) {
   return String(s ?? "")
@@ -288,14 +289,25 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       (ordC(a.canonico) - ordC(b.canonico)) || String(a.rotulo).localeCompare(String(b.rotulo)));
 
     const COR = { alto: "#fde68a", baixo: "#bfdbfe", normal: "" };
-    const cell = r => {
-      if (!r) return `<td class="mut" style="text-align:center">·</td>`;
-      if (r.tipo_valor === "qualitativo") return `<td><span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#ede9fe;border:1px solid #ddd6fe;font-size:.85em">${safe(r.resultado_txt || "—")}</span></td>`;
+    const STICKY = "position:sticky;left:0;z-index:1;background:var(--card);";
+    const cell = (r, coletaId, canon, rotulo) => {
+      let raw = "";
+      if (r) {
+        if (r.tipo_valor === "qualitativo") raw = r.resultado_txt || "";
+        else if (r.tipo_valor === "censurado") raw = `${r.operador || ""}${fmtNum(r.valor_num)}`;
+        else if (r.valor_num != null) raw = String(fmtNum(r.valor_num));
+        else raw = r.resultado_txt || "";
+      }
+      const meta = `data-coleta="${coletaId}" data-canon="${canon || ""}" data-rotulo="${safe(rotulo || "")}" data-raw="${safe(raw)}" class="evcell" style="cursor:text;`;
+      const rev = r && r.status_flag === "revisar";
+      const revStyle = rev ? "outline:2px solid #f59e0b;outline-offset:-2px;" : "";
+      if (!r) return `<td ${meta}text-align:center;color:var(--mut)">·</td>`;
+      if (r.tipo_valor === "qualitativo") return `<td ${meta}${revStyle}"><span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#ede9fe;border:1px solid #ddd6fe;font-size:.85em">${safe(r.resultado_txt || "—")}</span></td>`;
       let txt, bg = "";
       if (r.tipo_valor === "censurado") { txt = `${safe(r.operador || "")} ${fmtNum(r.valor_num)}`; bg = "#e9d5ff"; }
       else { txt = fmtNum(r.valor_num); bg = COR[r.status_flag] || ""; }
       const u = r.unidade ? `<span class="mut" style="font-size:.8em"> ${safe(r.unidade)}</span>` : "";
-      return `<td style="${bg ? `background:${bg};` : ""}text-align:right;font-variant-numeric:tabular-nums">${txt}${u}</td>`;
+      return `<td ${meta}${bg ? `background:${bg};` : ""}${revStyle}text-align:right;font-variant-numeric:tabular-nums">${txt}${u}</td>`;
     };
 
     const head = coletas.map(c => {
@@ -306,8 +318,9 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const corpo = linhasOrd.map((L, i) => {
       const temSerie = L.celulas.filter(c => c && c.tipo_valor === "numerico").length >= 2;
       const rotulo = `${safe(L.rotulo)}${L.unidade ? ` <span class="mut" style="font-weight:400;font-size:.8em">(${safe(L.unidade)})</span>` : ""}`;
-      const clic = temSerie ? ` style="cursor:pointer" data-i="${i}" class="evrow"` : "";
-      return `<tr${clic}><th style="text-align:left;white-space:nowrap">${temSerie ? "📈 " : ""}${rotulo}</th>${L.celulas.map(cell).join("")}</tr>` +
+      const clic = temSerie ? ` data-i="${i}" class="evrow"` : "";
+      const cels = L.celulas.map((c, ci) => cell(c, coletas[ci].id, L.canonico, L.rotulo)).join("");
+      return `<tr${clic}><th style="text-align:left;white-space:nowrap;${STICKY}">${temSerie ? `<span class="evtrend" data-i="${i}" style="cursor:pointer">📈 </span>` : ""}${rotulo}</th>${cels}</tr>` +
              (temSerie ? `<tr id="chart-${i}" style="display:none"><td colspan="${coletas.length + 1}" style="padding:0"><div class="chart-host" style="padding:8px 4px"></div></td></tr>` : "");
     }).join("");
 
@@ -326,12 +339,13 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         <div class="mut mt" style="font-size:.85em">Clique numa linha com 📈 para ver a tendência. Cores: <span style="background:#fde68a;padding:0 6px;border-radius:4px">alto</span> <span style="background:#bfdbfe;padding:0 6px;border-radius:4px">baixo</span> <span style="background:#e9d5ff;padding:0 6px;border-radius:4px">censurado</span></div>
         <div style="overflow:auto" class="mt">
           <table style="min-width:600px">
-            <thead><tr><th style="text-align:left">Analito</th>${head}</tr></thead>
+            <thead><tr><th style="text-align:left;${STICKY}z-index:2">Analito</th>${head}</tr></thead>
             <tbody>${corpo}</tbody>
           </table>
         </div>
       </div>
       <script id="evdata" type="application/json">${JSON.stringify({ datas, series }).replace(/</g, "\\u003c")}</script>
+      <script>window.__PAC_ID=${id};</script>
       <script>${CHART_JS}</script>
     `));
   });
@@ -465,6 +479,47 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       const prev = preverImportacao(rows);
       const stats = await gravarTudo(pool, p.id, prev, quem(req));
       res.json({ ok: true, ...stats });
+    } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
+  });
+
+  // edição inline de uma célula do grid: re-tipa o valor, cria/atualiza, e limpa flag 'revisar'
+  app.post("/pront/paciente/:id/exames/resultado/editar", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const { coleta_id, canonico, rotulo, valor } = req.body || {};
+      if (!coleta_id) return res.status(400).json({ ok: false, erro: "coleta ausente" });
+      // garante que a coleta é deste paciente
+      const col = (await pool.query(`SELECT id FROM pront_coletas WHERE id=$1 AND paciente_id=$2`, [coleta_id, req.params.id])).rows[0];
+      if (!col) return res.status(404).json({ ok: false, erro: "coleta não encontrada" });
+
+      const v = parseValue(valor);                 // re-tipa: numerico | censurado | qualitativo | texto | vazio
+      const valor_num = (v.tipo_valor === "numerico" || v.tipo_valor === "censurado") ? (v.valor ?? null) : null;
+      const status = null;                          // edição manual = já revisado; sem flag automática
+      const resultado_txt = (v.tipo_valor === "qualitativo" || v.tipo_valor === "texto") ? (v.texto || v.resultado || null) : (v.texto || null);
+
+      // localiza a linha existente (por canônico, ou por rótulo quando "outros")
+      const cond = canonico ? `canonico=$2` : `canonico IS NULL AND rotulo=$2`;
+      const arg = canonico || rotulo;
+      const existente = (await pool.query(
+        `SELECT id FROM pront_resultados WHERE coleta_id=$1 AND ${cond} LIMIT 1`, [coleta_id, arg])).rows[0];
+
+      if ((valor == null || String(valor).trim() === "") && existente) {
+        // valor apagado -> remove a célula
+        await pool.query(`DELETE FROM pront_resultados WHERE id=$1`, [existente.id]);
+        return res.json({ ok: true, removido: true });
+      }
+
+      if (existente) {
+        await pool.query(
+          `UPDATE pront_resultados SET tipo_valor=$1, valor_num=$2, operador=$3, unidade=$4, resultado_txt=$5, status_flag=$6
+             WHERE id=$7`,
+          [v.tipo_valor, valor_num, v.operador || null, v.unidade || null, resultado_txt, status, existente.id]);
+      } else {
+        await pool.query(
+          `INSERT INTO pront_resultados (coleta_id, canonico, rotulo, nome_original, tipo_valor, valor_num, operador, unidade, resultado_txt, status_flag)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [coleta_id, canonico || null, rotulo || null, rotulo || null, v.tipo_valor, valor_num, v.operador || null, v.unidade || null, resultado_txt, status]);
+      }
+      res.json({ ok: true });
     } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
   });
 
@@ -1082,13 +1137,50 @@ const CHART_JS = `
     svg+='</svg>';
     host.innerHTML='<div style="font-weight:600;color:#0c447c;margin:2px 0 4px">'+s.rotulo+(s.unidade?' ('+s.unidade+')':'')+'</div>'+svg;
   }
-  document.querySelectorAll('.evrow').forEach(function(row){
-    row.addEventListener('click', function(){
-      var i=row.getAttribute('data-i'); var tr=document.getElementById('chart-'+i);
+  document.querySelectorAll('.evtrend').forEach(function(t){
+    t.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var i=t.getAttribute('data-i'); var tr=document.getElementById('chart-'+i);
       if(!tr) return; var open=tr.style.display!=='none';
       tr.style.display=open?'none':'';
       if(!open && !tr.dataset.drawn){ draw(tr.querySelector('.chart-host'), data.series[i]); tr.dataset.drawn='1'; }
     });
+  });
+
+  // ---- edição inline: clicar numa célula abre input; Enter salva (re-tipa e limpa flag) ----
+  var PAC = window.__PAC_ID;
+  function valorAtual(td){
+    var raw = td.getAttribute('data-raw');
+    if(raw!=null) return raw;
+    return (td.textContent||'').replace(/·/,'').trim();
+  }
+  function editar(td){
+    if(td.querySelector('input')) return;
+    var antigo = td.innerHTML;
+    var atual = valorAtual(td);
+    td.innerHTML = '<input value="'+atual.replace(/"/g,'&quot;')+'" style="width:90px;font:inherit;text-align:right;padding:2px 4px" />';
+    var inp = td.querySelector('input'); inp.focus(); inp.select();
+    function cancelar(){ td.innerHTML = antigo; }
+    inp.addEventListener('keydown', function(e){
+      if(e.key==='Escape'){ cancelar(); }
+      else if(e.key==='Enter'){ salvar(td, inp.value); }
+    });
+    inp.addEventListener('blur', function(){ cancelar(); });   // sair sem Enter = cancela
+  }
+  async function salvar(td, valor){
+    var body = { coleta_id: td.getAttribute('data-coleta'), canonico: td.getAttribute('data-canon')||null,
+                 rotulo: td.getAttribute('data-rotulo')||null, valor: valor };
+    td.innerHTML = '<span class="mut">…</span>';
+    try{
+      var r = await fetch('/pront/paciente/'+PAC+'/exames/resultado/editar',
+        { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      var j = await r.json();
+      if(r.ok && j.ok){ location.reload(); }   // recarrega: re-tipa, re-cor, remove flag, atualiza gráfico
+      else { td.innerHTML = '<span style="color:#b91c1c">erro</span>'; }
+    }catch(e){ td.innerHTML = '<span style="color:#b91c1c">erro</span>'; }
+  }
+  document.querySelectorAll('.evcell').forEach(function(td){
+    td.addEventListener('click', function(){ editar(td); });
   });
 })();
 `;

@@ -54,6 +54,7 @@ function page(title, body) {
 }
 
 export async function ensureScihAcessoSchema(pool) {
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pront BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'curso'`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS set_pw_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS set_pw_expires TIMESTAMPTZ`);
@@ -182,10 +183,10 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ORDER BY created_at ASC`)).rows;
 
       const usuarios = (await pool.query(
-        `SELECT id, full_name, email, scih, super_admin,
+        `SELECT id, full_name, email, scih, super_admin, pront,
                 (set_pw_token IS NOT NULL AND (set_pw_expires IS NULL OR set_pw_expires > now())) AS pendente_senha
            FROM users
-          WHERE scih = true OR super_admin = true
+          WHERE scih = true OR super_admin = true OR pront = true
           ORDER BY super_admin DESC, LOWER(email) ASC`)).rows;
 
       const linhasPend = pend.map(r => `
@@ -204,10 +205,12 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           <td>${esc(u.full_name || '—')}</td>
           <td>${esc(u.email)}</td>
           <td>${u.super_admin ? '<span class="pill on">super admin</span>' : (u.scih ? '<span class="pill on">SCIH</span>' : '<span class="pill off">—</span>')}</td>
+          <td>${u.super_admin ? '<span class="pill on">sempre</span>' : (u.pront ? '<span class="pill on">liberado</span>' : '<span class="pill off">—</span>')}</td>
           <td>${u.pendente_senha ? '<span class="pill off">aguardando definir senha</span>' : '<span class="mut">ativa</span>'}</td>
           <td class="row">
             ${u.super_admin ? '<span class="mut">protegido</span>' : `
               <form method="POST" action="/atb/admin/scih/toggle/${u.id}" class="inline"><button class="ghost">${u.scih ? 'Remover SCIH' : 'Tornar SCIH'}</button></form>
+              <form method="POST" action="/atb/admin/scih/pront-toggle/${u.id}" class="inline"><button class="ghost">${u.pront ? 'Remover prontuário' : 'Liberar prontuário'}</button></form>
               <form method="POST" action="/atb/admin/scih/link/${u.id}" class="inline"><button class="ghost">Gerar link de senha</button></form>`}
           </td>
         </tr>`).join('');
@@ -229,7 +232,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <div class="card">
           <h2>Usuários com acesso</h2>
           <table>
-            <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Senha</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Prontuário</th><th>Senha</th><th>Ações</th></tr></thead>
             <tbody>${linhasUsr}</tbody>
           </table>
           <div class="mt">
@@ -238,7 +241,12 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
               <input name="email" type="email" placeholder="email@dominio" required style="max-width:340px">
               <button class="ghost">Marcar como SCIH</button>
             </form>
-            <p class="mut" style="font-size:13px">Use isto só para contas que já existem. Para gente nova, prefira o fluxo de solicitação/aprovação.</p>
+            <h2 style="margin-top:18px">Liberar acesso ao prontuário por e-mail</h2>
+            <form method="POST" action="/atb/admin/scih/pront-marcar" class="row">
+              <input name="email" type="email" placeholder="email@dominio" required style="max-width:340px">
+              <button class="ghost">Liberar prontuário</button>
+            </form>
+            <p class="mut" style="font-size:13px">Use isto só para contas que já existem. Para gente nova, cadastre primeiro em /admin/alunos.</p>
           </div>
         </div>`));
     } catch (err) {
@@ -327,6 +335,30 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       }
       res.redirect('/atb/admin/scih');
     } catch (err) { console.error('[scih] marcar:', err); res.status(500).send('Falha ao marcar'); }
+  });
+
+  // liga/desliga o acesso ao prontuário de um usuário (super_admin é sempre liberado)
+  app.post('/atb/admin/scih/pront-toggle/:userId', adminSuper, async (req, res) => {
+    try {
+      const uid = parseInt(req.params.userId, 10);
+      const u = (await pool.query('SELECT pront, super_admin FROM users WHERE id=$1', [uid])).rows[0];
+      if (u && !u.super_admin) {
+        await pool.query('UPDATE users SET pront=$1 WHERE id=$2', [!u.pront, uid]);
+      }
+      res.redirect('/atb/admin/scih');
+    } catch (err) { console.error('[scih] pront-toggle:', err); res.status(500).send('Falha ao alternar prontuário'); }
+  });
+
+  // libera acesso ao prontuário para um e-mail já existente
+  app.post('/atb/admin/scih/pront-marcar', adminSuper, async (req, res) => {
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const r = await pool.query('UPDATE users SET pront=true WHERE email=$1 RETURNING id', [email]);
+      if (!r.rowCount) {
+        return res.status(404).send(page('Não encontrado', `<div class="card"><h1>E-mail não cadastrado</h1><p class="mut">${esc(email)} não existe em usuários. Cadastre primeiro em /admin/alunos.</p><a href="/atb/admin/scih">Voltar</a></div>`));
+      }
+      res.redirect('/atb/admin/scih');
+    } catch (err) { console.error('[scih] pront-marcar:', err); res.status(500).send('Falha ao liberar prontuário'); }
   });
 
   // (re)gera link de definição de senha para um usuário existente

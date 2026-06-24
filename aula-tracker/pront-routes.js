@@ -8,6 +8,10 @@
 // adminRequired -> médico (ações sensíveis: apagar, etc.)
 import express from "express";
 import { uploadToR2, fetchR2Stream } from "./lab-storage.js";
+import { readFile } from "node:fs/promises";
+import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
+import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
+import { parseValue } from "./pront-normalizador.js";
 
 function safe(s) {
   return String(s ?? "")
@@ -49,9 +53,29 @@ function renderConsulta(txt) {
 export function registerProntRoutes(app, pool, authRequired, adminRequired, renderShell) {
   const quem = req => req.user?.full_name || req.user?.email || "sistema";
 
+  // ---- API: cadastro mestre de pacientes (consumido pelo dropdown do lab) ----
+  app.get("/pront/api/pacientes", authRequired, async (req, res) => {
+    const { rows } = await pool.query(
+      `SELECT id, nome, to_char(dn,'YYYY-MM-DD') dn FROM pront_pacientes ORDER BY lower(nome)`);
+    res.json(rows);
+  });
+
   // ---- dashboard: resumo + fila + busca + lista ----
   app.get("/pront", authRequired, async (req, res) => {
     const q = (req.query.q || "").trim();
+    // ordenação por cabeçalho — allowlist (nunca interpola entrada do usuário no SQL)
+    const SORTS = {
+      nome:    "lower(p.nome)",
+      dn:      "p.dn",
+      ncons:   "ncons",
+      ncol:    "ncol",
+      ultima:  "ultima",
+    };
+    const sort = SORTS[req.query.sort] ? req.query.sort : null;
+    const dir = req.query.dir === "asc" ? "ASC" : req.query.dir === "desc" ? "DESC" : null;
+    const orderBy = (sort && dir)
+      ? `${SORTS[sort]} ${dir} NULLS LAST, lower(p.nome)`
+      : `ultima DESC NULLS LAST, lower(p.nome)`;   // padrão
     const { rows } = await pool.query(
       `SELECT p.id, p.nome, p.dn,
               (SELECT count(*) FROM pront_consultas c WHERE c.paciente_id=p.id)::int ncons,
@@ -59,7 +83,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
               (SELECT count(*) FROM pront_coletas  k WHERE k.paciente_id=p.id)::int ncol
          FROM pront_pacientes p
         WHERE ($1='' OR p.nome ILIKE '%'||$1||'%')
-        ORDER BY ultima DESC NULLS LAST, lower(p.nome)
+        ORDER BY ${orderBy}
         LIMIT 400`, [q]);
 
     // estatísticas do resumo
@@ -112,7 +136,20 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         </form>
         <div class="mut mt">${rows.length} paciente(s)${q ? ` para “${safe(q)}”` : ""}</div>
         <table class="mt">
-          <thead><tr><th>Nome</th><th>Nascimento</th><th>Consultas</th><th>Coletas</th><th>Última consulta</th></tr></thead>
+          <thead><tr>${(() => {
+            const cols = [["nome", "Nome"], ["dn", "Nascimento"], ["ncons", "Consultas"], ["ncol", "Coletas"], ["ultima", "Última consulta"]];
+            return cols.map(([key, label]) => {
+              const ativo = sort === key;
+              // ciclo: sem ordem -> asc -> desc -> reset
+              const prox = !ativo ? "asc" : dir === "ASC" ? "desc" : "";
+              const seta = ativo ? (dir === "ASC" ? " ▲" : " ▼") : "";
+              const qs = new URLSearchParams();
+              if (q) qs.set("q", q);
+              if (prox) { qs.set("sort", key); qs.set("dir", prox); }
+              const href = "/pront" + (qs.toString() ? "?" + qs.toString() : "");
+              return `<th><a href="${href}" style="color:inherit;text-decoration:none">${label}${seta}</a></th>`;
+            }).join("");
+          })()}</tr></thead>
           <tbody>${linhas || `<tr><td colspan="5" class="mut">Nenhum paciente.</td></tr>`}</tbody>
         </table>
       </div>`));
@@ -127,6 +164,24 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const consultas = (await pool.query(
       `SELECT id, data, texto FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
     const ncol = (await pool.query(`SELECT count(*)::int n FROM pront_coletas WHERE paciente_id=$1`, [id])).rows[0].n;
+
+    // coletas do laboratório ligadas a este paciente (via lab_patients.pront_id); guardado se o lab não existir
+    let labColetas = [];
+    try {
+      labColetas = (await pool.query(
+        `SELECT lc.id, to_char(lc.collected_at,'YYYY-MM-DD') data,
+                (SELECT count(*) FROM lab_results r WHERE r.collection_id=lc.id)::int nex
+           FROM lab_collections lc
+           JOIN lab_patients lp ON lp.id=lc.patient_id
+          WHERE lp.pront_id=$1
+          ORDER BY lc.collected_at DESC`, [id])).rows;
+    } catch { labColetas = []; }
+
+    // documentos emitidos pelo gerador (receita/pedido/relatório/atestado)
+    const docsEmitidos = (await pool.query(
+      `SELECT id, tipo, paper, to_char(criado_em,'YYYY-MM-DD') data
+         FROM pront_docs_emitidos WHERE paciente_id=$1 ORDER BY criado_em DESC`, [id])).rows;
+    const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado" };
 
     const dados = [
       p.dn && `<b>Nasc.:</b> ${toBR(p.dn)}${idade(p.dn) != null ? ` (${idade(p.dn)} anos)` : ""}`,
@@ -150,7 +205,9 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           <h1 style="margin:0">${safe(p.nome)}</h1>
           <div class="right">
             ${ncol ? `<a href="/pront/paciente/${id}/exames"><button type="button">Exames (${ncol})</button></a>` : ""}
+            <a href="/pront/paciente/${id}/exames/importar"><button type="button" style="background:#0369a1">Importar exames</button></a>
             <a href="/pront/paciente/${id}/upload"><button type="button" style="background:#0e9f6e">Enviar exame</button></a>
+            <a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>
             <a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>
             <a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>
           </div>
@@ -159,6 +216,33 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         ${p.obs ? `<div class="mut mt" style="white-space:pre-line">${safe(p.obs)}</div>` : ""}
         <div class="mt"><a class="mut" style="font-size:.85em" href="/pront/paciente/${id}/editar">editar dados</a></div>
       </div>
+      ${labColetas.length ? `
+      <h2 class="mt2" style="margin-bottom:0">Exames do laboratório <span class="mut" style="font-weight:400">(${labColetas.length})</span></h2>
+      <div class="card mt">
+        <table>
+          <thead><tr><th>Data da coleta</th><th>Exames</th><th></th></tr></thead>
+          <tbody>${labColetas.map(c => `
+            <tr>
+              <td>${toBR(c.data)}</td>
+              <td>${c.nex}</td>
+              <td><a href="/lab/admin/coletas/${c.id}">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">laudo PDF</a></td>
+            </tr>`).join("")}</tbody>
+        </table>
+      </div>` : ""}
+      ${docsEmitidos.length ? `
+      <h2 class="mt2" style="margin-bottom:0">Documentos emitidos <span class="mut" style="font-weight:400">(${docsEmitidos.length})</span></h2>
+      <div class="card mt">
+        <table>
+          <thead><tr><th>Data</th><th>Tipo</th><th>Papel</th><th></th></tr></thead>
+          <tbody>${docsEmitidos.map(d => `
+            <tr>
+              <td>${toBR(d.data)}</td>
+              <td>${TIPO_DOC[d.tipo] || safe(d.tipo)}</td>
+              <td class="mut">${safe(d.paper || "")}</td>
+              <td><a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a></td>
+            </tr>`).join("")}</tbody>
+        </table>
+      </div>` : ""}
       <h2 class="mt2" style="margin-bottom:0">Consultas <span class="mut" style="font-weight:400">(${consultas.length})</span></h2>
       ${timeline || `<div class="card mt mut">Sem consultas registradas.</div>`}
     `));
@@ -205,14 +289,25 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       (ordC(a.canonico) - ordC(b.canonico)) || String(a.rotulo).localeCompare(String(b.rotulo)));
 
     const COR = { alto: "#fde68a", baixo: "#bfdbfe", normal: "" };
-    const cell = r => {
-      if (!r) return `<td class="mut" style="text-align:center">·</td>`;
-      if (r.tipo_valor === "qualitativo") return `<td><span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#ede9fe;border:1px solid #ddd6fe;font-size:.85em">${safe(r.resultado_txt || "—")}</span></td>`;
+    const STICKY = "position:sticky;left:0;z-index:1;background:var(--card);";
+    const cell = (r, coletaId, canon, rotulo) => {
+      let raw = "";
+      if (r) {
+        if (r.tipo_valor === "qualitativo") raw = r.resultado_txt || "";
+        else if (r.tipo_valor === "censurado") raw = `${r.operador || ""}${fmtNum(r.valor_num)}`;
+        else if (r.valor_num != null) raw = String(fmtNum(r.valor_num));
+        else raw = r.resultado_txt || "";
+      }
+      const meta = `data-coleta="${coletaId}" data-canon="${canon || ""}" data-rotulo="${safe(rotulo || "")}" data-raw="${safe(raw)}" class="evcell" style="cursor:text;`;
+      const rev = r && r.status_flag === "revisar";
+      const revStyle = rev ? "outline:2px solid #f59e0b;outline-offset:-2px;" : "";
+      if (!r) return `<td ${meta}text-align:center;color:var(--mut)">·</td>`;
+      if (r.tipo_valor === "qualitativo") return `<td ${meta}${revStyle}"><span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#ede9fe;border:1px solid #ddd6fe;font-size:.85em">${safe(r.resultado_txt || "—")}</span></td>`;
       let txt, bg = "";
       if (r.tipo_valor === "censurado") { txt = `${safe(r.operador || "")} ${fmtNum(r.valor_num)}`; bg = "#e9d5ff"; }
       else { txt = fmtNum(r.valor_num); bg = COR[r.status_flag] || ""; }
       const u = r.unidade ? `<span class="mut" style="font-size:.8em"> ${safe(r.unidade)}</span>` : "";
-      return `<td style="${bg ? `background:${bg};` : ""}text-align:right;font-variant-numeric:tabular-nums">${txt}${u}</td>`;
+      return `<td ${meta}${bg ? `background:${bg};` : ""}${revStyle}text-align:right;font-variant-numeric:tabular-nums">${txt}${u}</td>`;
     };
 
     const head = coletas.map(c => {
@@ -223,8 +318,9 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const corpo = linhasOrd.map((L, i) => {
       const temSerie = L.celulas.filter(c => c && c.tipo_valor === "numerico").length >= 2;
       const rotulo = `${safe(L.rotulo)}${L.unidade ? ` <span class="mut" style="font-weight:400;font-size:.8em">(${safe(L.unidade)})</span>` : ""}`;
-      const clic = temSerie ? ` style="cursor:pointer" data-i="${i}" class="evrow"` : "";
-      return `<tr${clic}><th style="text-align:left;white-space:nowrap">${temSerie ? "📈 " : ""}${rotulo}</th>${L.celulas.map(cell).join("")}</tr>` +
+      const clic = temSerie ? ` data-i="${i}" class="evrow"` : "";
+      const cels = L.celulas.map((c, ci) => cell(c, coletas[ci].id, L.canonico, L.rotulo)).join("");
+      return `<tr${clic}><th style="text-align:left;white-space:nowrap;${STICKY}">${temSerie ? `<span class="evtrend" data-i="${i}" style="cursor:pointer">📈 </span>` : ""}${rotulo}</th>${cels}</tr>` +
              (temSerie ? `<tr id="chart-${i}" style="display:none"><td colspan="${coletas.length + 1}" style="padding:0"><div class="chart-host" style="padding:8px 4px"></div></td></tr>` : "");
     }).join("");
 
@@ -243,12 +339,13 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         <div class="mut mt" style="font-size:.85em">Clique numa linha com 📈 para ver a tendência. Cores: <span style="background:#fde68a;padding:0 6px;border-radius:4px">alto</span> <span style="background:#bfdbfe;padding:0 6px;border-radius:4px">baixo</span> <span style="background:#e9d5ff;padding:0 6px;border-radius:4px">censurado</span></div>
         <div style="overflow:auto" class="mt">
           <table style="min-width:600px">
-            <thead><tr><th style="text-align:left">Analito</th>${head}</tr></thead>
+            <thead><tr><th style="text-align:left;${STICKY}z-index:2">Analito</th>${head}</tr></thead>
             <tbody>${corpo}</tbody>
           </table>
         </div>
       </div>
       <script id="evdata" type="application/json">${JSON.stringify({ datas, series }).replace(/</g, "\\u003c")}</script>
+      <script>window.__PAC_ID=${id};</script>
       <script>${CHART_JS}</script>
     `));
   });
@@ -300,6 +397,130 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         [req.params.id, tipo, nome || null, contentType || null, r2key, buffer.length, quem(req)])).rows[0];
       res.json({ ok: true, docId: doc.id });
     } catch (e) { res.status(500).json({ erro: String(e.message || e) }); }
+  });
+
+  // ===== IMPORTAR .xlsx DE EXAMES EXTERNOS (planilha longitudinal) =====
+  // lê a planilha (SheetJS) -> matriz -> motor importarPlanilha -> prévia -> grava no grid
+  async function lerMatrizXlsx(b64) {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(b64, { type: "base64", cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+  }
+
+  app.get("/pront/paciente/:id/exames/importar", authRequired, async (req, res) => {
+    const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
+    const id = p.id;
+    res.send(renderShell("Importar exames", `
+      <div class="admin-back-top"><a href="/pront/paciente/${id}">← Ficha de ${safe(p.nome)}</a></div>
+      <div class="card">
+        <h1 style="margin-top:0">Importar exames (.xlsx)</h1>
+        <p class="mut">Planilha longitudinal (datas nas colunas, exames nas linhas). Os resultados limpos vão direto pro grid; os duvidosos entram marcados como <b>revisar</b>.</p>
+        <input type="file" id="f" accept=".xlsx,.xls" />
+        <div id="msg" class="mut mt"></div>
+        <div id="previa"></div>
+      </div>
+      <script>
+        var pac=${id}, b64="";
+        var f=document.getElementById("f"), msg=document.getElementById("msg"), previa=document.getElementById("previa");
+        f.addEventListener("change", async function(){
+          var file=f.files[0]; if(!file) return;
+          msg.textContent="Lendo planilha…"; previa.innerHTML="";
+          b64=await new Promise(function(ok,er){var r=new FileReader();r.onload=function(){ok(String(r.result).split(",")[1]);};r.onerror=er;r.readAsDataURL(file);});
+          try{
+            var r=await fetch("/pront/paciente/"+pac+"/exames/importar/previa",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({b64:b64})});
+            var j=await r.json();
+            if(!j.ok){msg.textContent="Falha: "+(j.erro||r.status);return;}
+            msg.textContent="";
+            var alerta = j.mismatchPaciente ? '<div class="card" style="border-color:#b45309;background:#fffbeb"><b>Atenção:</b> a planilha diz <b>'+j.paciente+'</b>, mas a ficha é de outro paciente. Confira antes de gravar.</div>' : '';
+            var marc = j.marcados.map(function(m){return '<tr><td>'+m.data+'</td><td>'+m.rotulo+'</td><td>'+m.resultado_txt+'</td><td class="mut">'+m.motivos.join("; ")+'</td></tr>';}).join("");
+            previa.innerHTML = alerta +
+              '<div class="mt"><b>Paciente da planilha:</b> '+(j.paciente||"—")+' · <b>DN:</b> '+(j.dn||"—")+'</div>'+
+              '<div class="mut">Datas: '+j.datas.join(", ")+'</div>'+
+              '<div class="mt2"><b style="color:#0e7a4b">'+j.limposCount+'</b> resultados limpos (gravam direto) · <b style="color:#b45309">'+j.marcados.length+'</b> marcados pra revisar</div>'+
+              (marc?'<table class="mt"><thead><tr><th>Data</th><th>Exame</th><th>Valor</th><th>Motivo</th></tr></thead><tbody>'+marc+'</tbody></table>':'')+
+              (j.naoMapeados.length?'<div class="mut mt">Não reconhecidos (entram como "outros"): '+j.naoMapeados.join(", ")+'</div>':'')+
+              '<div class="mt2"><button id="go" type="button" style="background:#0e9f6e">Confirmar e gravar no grid</button></div>';
+            document.getElementById("go").addEventListener("click", async function(){
+              this.disabled=true; msg.textContent="Gravando…";
+              var rg=await fetch("/pront/paciente/"+pac+"/exames/importar/gravar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({b64:b64})});
+              var jg=await rg.json();
+              if(rg.ok&&jg.ok){location.href="/pront/paciente/"+pac+"/exames";}
+              else{msg.textContent="Falha ao gravar: "+(jg.erro||rg.status); document.getElementById("go").disabled=false;}
+            });
+          }catch(e){msg.textContent="Erro: "+e.message;}
+        });
+      </script>
+    `));
+  });
+
+  app.post("/pront/paciente/:id/exames/importar/previa", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const p = (await pool.query(`SELECT nome, to_char(dn,'YYYY-MM-DD') dn FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const rows = await lerMatrizXlsx(req.body?.b64 || "");
+      const prev = preverImportacao(rows);
+      const mismatchPaciente = !!(prev.paciente && p.nome && semAcento(prev.paciente) !== semAcento(p.nome));
+      res.json({
+        ok: true, paciente: prev.paciente, dn: prev.dn, datas: prev.datas,
+        limposCount: prev.limpos.length,
+        marcados: prev.marcados.map(m => ({ data: m.data, rotulo: m.rotulo || m.nome_original, resultado_txt: m.resultado_txt, motivos: m.motivos })),
+        naoMapeados: prev.naoMapeados, mismatchPaciente,
+      });
+    } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
+  });
+
+  app.post("/pront/paciente/:id/exames/importar/gravar", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const rows = await lerMatrizXlsx(req.body?.b64 || "");
+      const prev = preverImportacao(rows);
+      const stats = await gravarTudo(pool, p.id, prev, quem(req));
+      res.json({ ok: true, ...stats });
+    } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
+  });
+
+  // edição inline de uma célula do grid: re-tipa o valor, cria/atualiza, e limpa flag 'revisar'
+  app.post("/pront/paciente/:id/exames/resultado/editar", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const { coleta_id, canonico, rotulo, valor } = req.body || {};
+      if (!coleta_id) return res.status(400).json({ ok: false, erro: "coleta ausente" });
+      // garante que a coleta é deste paciente
+      const col = (await pool.query(`SELECT id FROM pront_coletas WHERE id=$1 AND paciente_id=$2`, [coleta_id, req.params.id])).rows[0];
+      if (!col) return res.status(404).json({ ok: false, erro: "coleta não encontrada" });
+
+      const v = parseValue(valor);                 // re-tipa: numerico | censurado | qualitativo | texto | vazio
+      const valor_num = (v.tipo_valor === "numerico" || v.tipo_valor === "censurado") ? (v.valor ?? null) : null;
+      const status = null;                          // edição manual = já revisado; sem flag automática
+      const resultado_txt = (v.tipo_valor === "qualitativo" || v.tipo_valor === "texto") ? (v.texto || v.resultado || null) : (v.texto || null);
+
+      // localiza a linha existente (por canônico, ou por rótulo quando "outros")
+      const cond = canonico ? `canonico=$2` : `canonico IS NULL AND rotulo=$2`;
+      const arg = canonico || rotulo;
+      const existente = (await pool.query(
+        `SELECT id FROM pront_resultados WHERE coleta_id=$1 AND ${cond} LIMIT 1`, [coleta_id, arg])).rows[0];
+
+      if ((valor == null || String(valor).trim() === "") && existente) {
+        // valor apagado -> remove a célula
+        await pool.query(`DELETE FROM pront_resultados WHERE id=$1`, [existente.id]);
+        return res.json({ ok: true, removido: true });
+      }
+
+      if (existente) {
+        await pool.query(
+          `UPDATE pront_resultados SET tipo_valor=$1, valor_num=$2, operador=$3, unidade=$4, resultado_txt=$5, status_flag=$6
+             WHERE id=$7`,
+          [v.tipo_valor, valor_num, v.operador || null, v.unidade || null, resultado_txt, status, existente.id]);
+      } else {
+        await pool.query(
+          `INSERT INTO pront_resultados (coleta_id, canonico, rotulo, nome_original, tipo_valor, valor_num, operador, unidade, resultado_txt, status_flag)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [coleta_id, canonico || null, rotulo || null, rotulo || null, v.tipo_valor, valor_num, v.operador || null, v.unidade || null, resultado_txt, status]);
+      }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ ok: false, erro: String(e.message || e) }); }
   });
 
   // serve o arquivo do R2 (imagem/pdf) para a conferência
@@ -698,6 +919,173 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     await pool.query(`DELETE FROM pront_consultas WHERE id=$1 AND paciente_id=$2`, [req.params.cid, req.params.id]);
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
+
+  // ===== GERADOR DE DOCUMENTOS: abre pré-preenchido + salva o emitido na ficha =====
+  // Gancho injetado DENTRO da IIFE do gerador (acesso a S/applyPaper/renderPanel/renderDoc),
+  // sem tocar no arquivo do gerador. Âncora única: setTimeout(fitPreview,80);
+  const HOOK_JS = `
+window.__GETSTATE=function(){return S;};
+window.__RENDER_FOR_PDF=function(s){try{Object.assign(S,s);applyPaper();renderPanel();renderDoc();}catch(e){console.error(e);}};
+window.__READY=1;`;
+  let __gerBase = null;
+  async function geradorBase() {
+    if (!__gerBase) {
+      let h = await readFile(new URL("./gerador-documentos.html", import.meta.url), "utf8");
+      h = h.replace("setTimeout(fitPreview,80);", "setTimeout(fitPreview,80);" + HOOK_JS);
+      __gerBase = h;
+    }
+    return __gerBase;
+  }
+  // botão flutuante "Salvar no prontuário" (oculto na impressão), injetado só na versão servida ao humano
+  const SAVE_UI = `<script>(function(){
+    var st=document.createElement('style');st.textContent='@media print{#__save,#__savemsg{display:none!important}}';document.head.appendChild(st);
+    var b=document.createElement('button');b.id='__save';b.textContent='Salvar no prontuário';
+    b.style.cssText='position:fixed;right:18px;bottom:18px;z-index:99999;background:#0c447c;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
+    var m=document.createElement('div');m.id='__savemsg';m.style.cssText='position:fixed;right:18px;bottom:62px;z-index:99999;font:600 13px system-ui';
+    document.body.appendChild(b);document.body.appendChild(m);
+    b.onclick=async function(){
+      if(!window.__GETSTATE){m.style.color='#b91c1c';m.textContent='Estado indisponível';return;}
+      b.disabled=true;m.style.color='#0c447c';m.textContent='Salvando…';
+      try{
+        var r=await fetch(window.__SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
+        var j=await r.json();
+        if(r.ok&&j.ok){m.style.color='#0e7a4b';m.textContent='Salvo na ficha ✓';}
+        else{m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);b.disabled=false;}
+      }catch(e){m.style.color='#b91c1c';m.textContent='Erro: '+e.message;b.disabled=false;}
+    };
+  })();</script>`;
+
+  app.get("/pront/paciente/:id/documento", authRequired, async (req, res) => {
+    const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
+    try {
+      let html = await geradorBase();
+      const nomeJS = JSON.stringify(p.nome).replace(/</g, "\\u003c");   // injeta nome no estado inicial
+      html = html.replace('paciente:""', `paciente:${nomeJS}`);
+      const saveUrl = `/pront/paciente/${p.id}/documento/salvar`;
+      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};</script>${SAVE_UI}</body>`);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (e) {
+      res.status(500).send(renderShell("Erro", `<div class="card"><h1>Gerador indisponível</h1><div class="mut">${safe(e.message)}</div></div>`));
+    }
+  });
+
+  // salva o documento emitido: estado S -> PDF (puppeteer) -> R2 -> ficha
+  app.post("/pront/paciente/:id/documento/salvar", authRequired, async (req, res) => {
+    const id = req.params.id;
+    try {
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const state = req.body && req.body.state;
+      if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+
+      const html = await geradorBase();
+      const pdf = await gerarDocumentoPDF(html, state);   // puppeteer (roda no Render)
+
+      const tipo = String(state.doc || "documento").slice(0, 40);
+      const paper = String(state.paper || "A4").slice(0, 8);
+      const r2key = `pront/docs/${id}/${Date.now()}-${tipo}.pdf`;
+      await uploadToR2(r2key, pdf, "application/pdf");
+
+      const { rows: [row] } = await pool.query(
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [id, tipo, paper, r2key, quem(req)]);
+      res.json({ ok: true, id: row.id });
+    } catch (e) {
+      console.error("SALVAR DOC ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
+
+  // serve o PDF de um documento emitido (inline)
+  app.get("/pront/documento-emitido/:id/pdf", authRequired, async (req, res) => {
+    const d = (await pool.query(`SELECT r2_key FROM pront_docs_emitidos WHERE id=$1`, [req.params.id])).rows[0];
+    if (!d) return res.status(404).send("Documento não encontrado");
+    try {
+      const r = await fetchR2Stream(d.r2_key);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline");
+      res.send(buf);
+    } catch (e) {
+      res.status(500).send("Falha ao abrir o documento");
+    }
+  });
+  const semAcento = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  app.get("/pront/reconciliar", authRequired, adminRequired, async (req, res) => {
+    // lab_patients ainda não ligados, com contagem de coletas
+    let labs;
+    try {
+      labs = (await pool.query(
+        `SELECT lp.id, lp.full_name, to_char(lp.birth_date,'YYYY-MM-DD') dn,
+                (SELECT count(*) FROM lab_collections lc WHERE lc.patient_id=lp.id)::int ncol
+           FROM lab_patients lp
+          WHERE lp.pront_id IS NULL
+          ORDER BY lp.full_name`)).rows;
+    } catch (e) {
+      return res.send(renderShell("Reconciliação", `<div class="card"><h1>Reconciliação</h1><div class="mut">Módulo de laboratório não encontrado neste banco (${safe(e.message)}).</div></div>`));
+    }
+    const pacs = (await pool.query(`SELECT id, nome, to_char(dn,'YYYY-MM-DD') dn FROM pront_pacientes`)).rows;
+    const porNome = new Map();
+    for (const p of pacs) { const k = semAcento(p.nome); (porNome.get(k) || porNome.set(k, []).get(k)).push(p); }
+
+    const linhas = labs.map(l => {
+      const cand = porNome.get(semAcento(l.full_name)) || [];
+      const forte = cand.find(c => c.dn && l.dn && c.dn === l.dn);
+      const sugerido = forte || cand[0] || null;
+      const conf = forte ? `<span style="background:#d1fae5;color:#065f46;padding:1px 8px;border-radius:999px;font-size:.8em">nome+DN</span>`
+                 : cand.length ? `<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:999px;font-size:.8em">só nome</span>`
+                 : `<span class="mut" style="font-size:.8em">sem candidato</span>`;
+      const opts = pacs.map(p => `<option value="${p.id}" ${sugerido && sugerido.id === p.id ? "selected" : ""}>${safe(p.nome)}${p.dn ? " · " + toBR(p.dn) : ""}</option>`).join("");
+      return `<tr>
+        <td>${safe(l.full_name)}<div class="mut" style="font-size:.8em">${l.dn ? toBR(l.dn) : "sem DN"} · ${l.ncol} coleta(s)</div></td>
+        <td>${conf}</td>
+        <td>
+          <form method="post" action="/pront/reconciliar/ligar" class="inline" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="hidden" name="lab_id" value="${l.id}"/>
+            <select name="pront_id" style="max-width:280px"><option value="">— escolha —</option>${opts}</select>
+            <button type="submit">Ligar</button>
+          </form>
+          <form method="post" action="/pront/reconciliar/criar" class="inline" style="margin-top:4px">
+            <input type="hidden" name="lab_id" value="${l.id}"/>
+            <button type="submit" style="background:#0e9f6e">Criar no prontuário</button>
+          </form>
+        </td>
+      </tr>`;
+    }).join("");
+
+    res.send(renderShell("Reconciliação de pacientes", `
+      <div class="admin-back-top"><a href="/pront">← Prontuário</a></div>
+      <div class="card">
+        <h1 style="margin-top:0">Reconciliar pacientes do laboratório</h1>
+        <p class="mut">Pacientes do lab ainda não ligados ao cadastro mestre. Confirme o casamento (ou crie um novo no prontuário). Nada é ligado sem você confirmar.</p>
+        ${labs.length ? `<table class="mt">
+          <thead><tr><th>Paciente do lab</th><th>Sugestão</th><th>Ação</th></tr></thead>
+          <tbody>${linhas}</tbody></table>`
+        : `<div class="mut mt">Tudo reconciliado — nenhum paciente do lab pendente. 🎉</div>`}
+      </div>`));
+  });
+
+  app.post("/pront/reconciliar/ligar", authRequired, adminRequired, async (req, res) => {
+    const { lab_id, pront_id } = req.body || {};
+    if (lab_id && pront_id) await pool.query(`UPDATE lab_patients SET pront_id=$1 WHERE id=$2`, [pront_id, lab_id]);
+    res.redirect("/pront/reconciliar");
+  });
+
+  app.post("/pront/reconciliar/criar", authRequired, adminRequired, async (req, res) => {
+    const { lab_id } = req.body || {};
+    const lp = (await pool.query(`SELECT full_name, to_char(birth_date,'YYYY-MM-DD') dn FROM lab_patients WHERE id=$1`, [lab_id])).rows[0];
+    if (lp) {
+      const novo = (await pool.query(
+        `INSERT INTO pront_pacientes(nome,dn,criado_por) VALUES($1,NULLIF($2,'')::date,$3) RETURNING id`,
+        [lp.full_name, lp.dn || "", quem(req)])).rows[0];
+      await pool.query(`UPDATE lab_patients SET pront_id=$1 WHERE id=$2`, [novo.id, lab_id]);
+    }
+    res.redirect("/pront/reconciliar");
+  });
 }
 
 // rótulo a partir do canônico (sem depender do normalizador no cliente)
@@ -749,13 +1137,50 @@ const CHART_JS = `
     svg+='</svg>';
     host.innerHTML='<div style="font-weight:600;color:#0c447c;margin:2px 0 4px">'+s.rotulo+(s.unidade?' ('+s.unidade+')':'')+'</div>'+svg;
   }
-  document.querySelectorAll('.evrow').forEach(function(row){
-    row.addEventListener('click', function(){
-      var i=row.getAttribute('data-i'); var tr=document.getElementById('chart-'+i);
+  document.querySelectorAll('.evtrend').forEach(function(t){
+    t.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var i=t.getAttribute('data-i'); var tr=document.getElementById('chart-'+i);
       if(!tr) return; var open=tr.style.display!=='none';
       tr.style.display=open?'none':'';
       if(!open && !tr.dataset.drawn){ draw(tr.querySelector('.chart-host'), data.series[i]); tr.dataset.drawn='1'; }
     });
+  });
+
+  // ---- edição inline: clicar numa célula abre input; Enter salva (re-tipa e limpa flag) ----
+  var PAC = window.__PAC_ID;
+  function valorAtual(td){
+    var raw = td.getAttribute('data-raw');
+    if(raw!=null) return raw;
+    return (td.textContent||'').replace(/·/,'').trim();
+  }
+  function editar(td){
+    if(td.querySelector('input')) return;
+    var antigo = td.innerHTML;
+    var atual = valorAtual(td);
+    td.innerHTML = '<input value="'+atual.replace(/"/g,'&quot;')+'" style="width:90px;font:inherit;text-align:right;padding:2px 4px" />';
+    var inp = td.querySelector('input'); inp.focus(); inp.select();
+    function cancelar(){ td.innerHTML = antigo; }
+    inp.addEventListener('keydown', function(e){
+      if(e.key==='Escape'){ cancelar(); }
+      else if(e.key==='Enter'){ salvar(td, inp.value); }
+    });
+    inp.addEventListener('blur', function(){ cancelar(); });   // sair sem Enter = cancela
+  }
+  async function salvar(td, valor){
+    var body = { coleta_id: td.getAttribute('data-coleta'), canonico: td.getAttribute('data-canon')||null,
+                 rotulo: td.getAttribute('data-rotulo')||null, valor: valor };
+    td.innerHTML = '<span class="mut">…</span>';
+    try{
+      var r = await fetch('/pront/paciente/'+PAC+'/exames/resultado/editar',
+        { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      var j = await r.json();
+      if(r.ok && j.ok){ location.reload(); }   // recarrega: re-tipa, re-cor, remove flag, atualiza gráfico
+      else { td.innerHTML = '<span style="color:#b91c1c">erro</span>'; }
+    }catch(e){ td.innerHTML = '<span style="color:#b91c1c">erro</span>'; }
+  }
+  document.querySelectorAll('.evcell').forEach(function(td){
+    td.addEventListener('click', function(){ editar(td); });
   });
 })();
 `;

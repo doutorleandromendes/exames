@@ -577,26 +577,26 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
     // Script injetado como string normal para evitar conflito com template literals do Node
     const clientScript = [
       '(function(){',
-      '  fetch("/lab/admin/api/pacientes-sheet")',
+      '  fetch("/pront/api/pacientes")',
       '    .then(function(r){ return r.json(); })',
       '    .then(function(pacs){',
       '      var sel = document.getElementById("pacSelect");',
       '      pacs.forEach(function(p){',
       '        var opt = document.createElement("option");',
-      '        opt.value = p.nome+"|"+p.dn;',
+      '        opt.value = p.id+"|"+p.nome+"|"+(p.dn||"");',
       '        opt.textContent = p.nome;',
       '        sel.appendChild(opt);',
       '      });',
-      '      document.getElementById("statusPac").textContent = pacs.length+" pacientes carregados da planilha";',
+      '      document.getElementById("statusPac").textContent = pacs.length+" pacientes do prontuário";',
       '    })',
       '    .catch(function(){',
-      '      document.getElementById("statusPac").textContent = "Não foi possível carregar a planilha — preencha manualmente";',
+      '      document.getElementById("statusPac").textContent = "Não foi possível carregar o cadastro — preencha manualmente";',
       '    });',
       '  document.getElementById("pacSelect").addEventListener("change", function(){',
-      '    if(!this.value) return;',
       '    var parts = this.value.split("|");',
-      '    document.getElementById("fNome").value = parts[0]||"";',
-      '    document.getElementById("fDN").value   = parts[1]||"";',
+      '    document.getElementById("fProntId").value = parts[0]||"";',
+      '    document.getElementById("fNome").value     = parts[1]||"";',
+      '    document.getElementById("fDN").value       = parts[2]||"";',
       '  });',
       '})();',
     ].join('\n');
@@ -610,13 +610,14 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
         <div id="statusPac" class="mut" style="margin-bottom:10px">Carregando pacientes…</div>
 
-        <label>Selecionar da planilha</label>
+        <label>Selecionar do prontuário</label>
         <select id="pacSelect"
           style="width:100%;padding:10px;border-radius:8px;border:1px solid #2a2f39;background:#0f1116;color:#e7e9ee;font-size:14px;margin-bottom:16px">
           <option value="">— escolha um paciente ou preencha manualmente —</option>
         </select>
 
         <form method="POST" action="/lab/admin/pacientes">
+          <input type="hidden" id="fProntId" name="pront_id">
           <label>Nome completo</label>
           <input id="fNome" name="full_name" required placeholder="Nome completo do paciente">
           <label>Data de nascimento</label>
@@ -641,6 +642,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       const full_name  = (req.body?.full_name  || '').trim();
       const birth_date = (req.body?.birth_date || '').trim();
       const notes      = (req.body?.notes      || '').trim() || null;
+      const pront_id   = parseInt(req.body?.pront_id, 10) || null;
 
       if (!full_name || !birth_date) {
         return res.status(400).send(renderShell('Erro', `
@@ -651,9 +653,19 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
 
       await client.query('BEGIN');
 
+      // Se este paciente do prontuário já tem um lab_patient, reaproveita (não duplica)
+      if (pront_id) {
+        const { rows: jaLigado } = await client.query(
+          'SELECT id FROM lab_patients WHERE pront_id=$1 LIMIT 1', [pront_id]);
+        if (jaLigado.length) {
+          await client.query('COMMIT');
+          return res.redirect(`/lab/admin/pacientes/${jaLigado[0].id}`);
+        }
+      }
+
       const { rows: [patient] } = await client.query(
-        'INSERT INTO lab_patients (full_name, birth_date, notes) VALUES ($1, $2, $3) RETURNING id',
-        [full_name, birth_date, notes]
+        'INSERT INTO lab_patients (full_name, birth_date, notes, pront_id) VALUES ($1, $2, $3, $4) RETURNING id',
+        [full_name, birth_date, notes, pront_id]
       );
 
       // Gera chave única (tenta até 10 vezes para evitar colisão)

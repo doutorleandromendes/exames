@@ -174,12 +174,64 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
   });
 
   // ───────────────────────── admin (super): gerenciar SCIH ────────────────
+  // ───────────────────────── público: solicitar acesso (Prontuário) ─────────
+  app.get('/pront/solicitar', (req, res) => {
+    res.send(page('Solicitar acesso — Prontuário', `
+      <div class="card">
+        <h1>Solicitar acesso ao prontuário</h1>
+        <p class="mut">Seu pedido será revisado pelo Dr. Leandro; ao ser aprovado, você receberá um link para definir sua senha.</p>
+        <form method="POST" action="/pront/solicitar" class="mt">
+          <label>Nome completo</label><input name="full_name" required>
+          <label>E-mail</label><input name="email" type="email" required>
+          <button class="mt">Enviar solicitação</button>
+        </form>
+      </div>`));
+  });
+
+  app.post('/pront/solicitar', async (req, res) => {
+    try {
+      const full_name = String(req.body?.full_name || '').trim();
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      if (!full_name || !email || !email.includes('@')) {
+        return res.status(400).send(page('Dados inválidos',
+          `<div class="card"><h1>Dados inválidos</h1><a href="/pront/solicitar">Voltar</a></div>`));
+      }
+      const dom = (process.env.ALLOWED_EMAIL_DOMAIN || '').toLowerCase();
+      if (dom && !email.endsWith('@' + dom)) {
+        return res.status(400).send(page('Domínio não permitido',
+          `<div class="card"><h1>Domínio de e-mail não permitido</h1><p class="mut">Use um endereço @${esc(dom)}.</p><a href="/pront/solicitar">Voltar</a></div>`));
+      }
+      const dup = await pool.query(
+        `SELECT 1 FROM access_requests WHERE LOWER(email)=$1 AND status='pending' AND kind='pront' LIMIT 1`, [email]);
+      if (!dup.rowCount) {
+        await pool.query(
+          `INSERT INTO access_requests(full_name,email,kind,justification,status)
+           VALUES ($1,$2,'pront','Acesso ao prontuário','pending')`, [full_name, email]);
+      }
+      res.send(page('Solicitação enviada', `
+        <div class="card">
+          <h1>Solicitação enviada</h1>
+          <p>Obrigado, <strong>${esc(full_name)}</strong>. Seu pedido foi registrado.</p>
+          <p class="mut">Assim que for aprovado, você receberá um link para definir sua senha e acessar o prontuário.</p>
+        </div>`));
+    } catch (err) {
+      console.error('[pront] solicitar:', err);
+      res.status(500).send(page('Erro', `<div class="card"><h1>Falha ao enviar solicitação</h1><p class="mut">${esc(err.message)}</p></div>`));
+    }
+  });
+
   app.get('/atb/admin/scih', adminSuper, async (req, res) => {
     try {
       const pend = (await pool.query(
         `SELECT id, full_name, email, created_at
            FROM access_requests
           WHERE status='pending' AND kind='scih'
+          ORDER BY created_at ASC`)).rows;
+
+      const pendPront = (await pool.query(
+        `SELECT id, full_name, email, created_at
+           FROM access_requests
+          WHERE status='pending' AND kind='pront'
           ORDER BY created_at ASC`)).rows;
 
       const usuarios = (await pool.query(
@@ -196,6 +248,17 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           <td class="mut">${new Date(r.created_at).toLocaleDateString('pt-BR')}</td>
           <td class="row">
             <form method="POST" action="/atb/admin/scih/aprovar/${r.id}" class="inline"><button>Aprovar</button></form>
+            <form method="POST" action="/atb/admin/scih/rejeitar/${r.id}" class="inline" onsubmit="return confirm('Rejeitar este pedido?')"><button class="danger">Rejeitar</button></form>
+          </td>
+        </tr>`).join('') || `<tr><td colspan="4" class="mut">Nenhum pedido pendente.</td></tr>`;
+
+      const linhasPendPront = pendPront.map(r => `
+        <tr>
+          <td>${esc(r.full_name)}</td>
+          <td>${esc(r.email)}</td>
+          <td class="mut">${new Date(r.created_at).toLocaleDateString('pt-BR')}</td>
+          <td class="row">
+            <form method="POST" action="/atb/admin/scih/pront-aprovar/${r.id}" class="inline"><button>Aprovar</button></form>
             <form method="POST" action="/atb/admin/scih/rejeitar/${r.id}" class="inline" onsubmit="return confirm('Rejeitar este pedido?')"><button class="danger">Rejeitar</button></form>
           </td>
         </tr>`).join('') || `<tr><td colspan="4" class="mut">Nenhum pedido pendente.</td></tr>`;
@@ -222,10 +285,18 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         </div>
 
         <div class="card">
-          <h2>Pedidos pendentes</h2>
+          <h2>Pedidos pendentes — SCIH</h2>
           <table>
             <thead><tr><th>Nome</th><th>E-mail</th><th>Data</th><th>Ações</th></tr></thead>
             <tbody>${linhasPend}</tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Pedidos de acesso ao prontuário</h2>
+          <table>
+            <thead><tr><th>Nome</th><th>E-mail</th><th>Data</th><th>Ações</th></tr></thead>
+            <tbody>${linhasPendPront}</tbody>
           </table>
         </div>
 
@@ -302,6 +373,56 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch {}
       console.error('[scih] aprovar:', err);
+      res.status(500).send(page('Erro', `<div class="card"><h1>Falha ao aprovar</h1><p class="mut">${esc(err.message)}</p></div>`));
+    } finally { client.release(); }
+  });
+
+  // aprova um pedido de acesso ao PRONTUÁRIO: cria/atualiza usuário com pront=true e gera link de senha
+  app.post('/atb/admin/scih/pront-aprovar/:id', adminSuper, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const r = (await client.query(
+        `SELECT id, full_name, email FROM access_requests
+          WHERE id=$1 AND status='pending' AND kind='pront' FOR UPDATE`, [id])).rows[0];
+      if (!r) { await client.query('ROLLBACK'); return res.status(404).send(page('Não encontrado', `<div class="card"><h1>Pedido não encontrado ou já processado</h1><a href="/atb/admin/scih">Voltar</a></div>`)); }
+
+      const email = r.email.toLowerCase().trim();
+      const token = novoToken();
+      const expira = new Date(Date.now() + TOKEN_TTL_DIAS * 86400000);
+
+      const existing = (await client.query('SELECT id FROM users WHERE email=$1', [email])).rows[0];
+      let userId;
+      if (existing) {
+        userId = existing.id;
+        await client.query(
+          `UPDATE users SET full_name=COALESCE($1,full_name), pront=true, set_pw_token=$2, set_pw_expires=$3 WHERE id=$4`,
+          [r.full_name || null, token, expira, userId]);
+      } else {
+        userId = (await client.query(
+          `INSERT INTO users(full_name,email,pront,set_pw_token,set_pw_expires) VALUES($1,$2,true,$3,$4) RETURNING id`,
+          [r.full_name, email, token, expira])).rows[0].id;
+      }
+
+      await client.query(`UPDATE access_requests SET status='approved', processed_at=now() WHERE id=$1`, [id]);
+      await client.query('COMMIT');
+
+      const link = `${baseUrl(req)}/definir-senha?token=${token}`;
+      res.send(page('Pedido aprovado', `
+        <div class="card">
+          <h1>Acesso ao prontuário aprovado</h1>
+          <p><strong>${esc(r.full_name)}</strong> (${esc(email)}) agora tem acesso ao prontuário.</p>
+          <p class="mut">Envie este link para a pessoa definir a senha (expira em ${TOKEN_TTL_DIAS} dias e só funciona uma vez):</p>
+          <div class="linkbox" id="lk">${esc(link)}</div>
+          <div class="row mt">
+            <button class="ghost" onclick="navigator.clipboard.writeText(document.getElementById('lk').innerText).then(()=>{this.innerText='Copiado!'})">Copiar link</button>
+            <a href="/atb/admin/scih">Voltar ao painel</a>
+          </div>
+        </div>`));
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch {}
+      console.error('[pront] aprovar:', err);
       res.status(500).send(page('Erro', `<div class="card"><h1>Falha ao aprovar</h1><p class="mut">${esc(err.message)}</p></div>`));
     } finally { client.release(); }
   });

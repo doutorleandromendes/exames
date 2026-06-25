@@ -154,6 +154,15 @@ function resumoAcoes(a){
 }
 
 export function registerRegrasRoutes(app, pool, scihRequired) {
+  // Instituição por requisição: tenant-lock > ?inst= > default HUSF (legado idêntico).
+  const instReq = (req) =>
+    req.atbTenant ||
+    String((req.query && req.query.inst) || 'HUSF').replace(/[^A-Za-z0-9_]/g, '') ||
+    'HUSF';
+  // Escopo de fichas por instituição (inclui fichas legadas sem instituição no HUSF).
+  const escopoFichaSql = (idx) =>
+    `(f.instituicao_id = (SELECT id FROM atb_instituicoes WHERE sigla=$${idx}) OR (f.instituicao_id IS NULL AND $${idx}='HUSF'))`;
+
   // super-admin (ou break-glass)
   const soSuper = [scihRequired, (req,res,next)=>{
     if (req.user?.super_admin || req.cookies?.adm === '1') return next();
@@ -162,8 +171,9 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
 
   // ── Lista ────────────────────────────────────────────────────────────────
   app.get('/atb/admin/regras', soSuper, async (req,res)=>{
+    const inst = instReq(req);
     try{
-      const regras = (await pool.query('SELECT * FROM atb_triagem_regras ORDER BY prioridade ASC, id ASC')).rows;
+      const regras = (await pool.query('SELECT * FROM atb_triagem_regras WHERE instituicao=$1 ORDER BY prioridade ASC, id ASC',[inst])).rows;
       const linhas = regras.map(r=>`
         <tr>
           <td><strong>${esc(r.nome)}</strong>${r.descricao?`<br><span class="nota">${esc(r.descricao)}</span>`:''}</td>
@@ -192,7 +202,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
 
   // ── Editor (nova / editar) ────────────────────────────────────────────────
   async function editor(req,res,regra){
-    const CAMPOS = await catalogoCampos(pool);
+    const CAMPOS = await catalogoCampos(pool, instReq(req));
     const dados = JSON.stringify({ campos:CAMPOS, ops:OPERADORES, iras:IRAS_VALORES, vereditos:PARECER_VEREDITOS, regra });
     res.send(page(regra?'Editar regra':'Nova regra',`
       <div class="card"><h1>${regra?'Editar regra':'Nova regra'}</h1>
@@ -341,13 +351,14 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
 
   app.get('/atb/admin/regras/nova', soSuper, (req,res)=> editor(req,res,null).catch(e=>{ console.error('[regras] editor:',e.message); res.status(500).send(page('Erro','<div class="card"><h1>Falha ao abrir o editor</h1></div>')); }));
   app.get('/atb/admin/regras/:id', soSuper, async (req,res)=>{
-    const r=(await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1',[parseInt(req.params.id,10)])).rows[0];
+    const r=(await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1 AND instituicao=$2',[parseInt(req.params.id,10), instReq(req)])).rows[0];
     if(!r) return res.status(404).send(page('Não encontrada','<div class="card"><h1>Regra não encontrada</h1><a href="/atb/admin/regras">Voltar</a></div>'));
     editor(req,res,r).catch(e=>{ console.error('[regras] editor:',e.message); res.status(500).send(page('Erro','<div class="card"><h1>Falha ao abrir o editor</h1></div>')); });
   });
 
   // ── Salvar ─────────────────────────────────────────────────────────────────
   async function salvar(req,res,id){
+    const inst = instReq(req);
     try{
       const b=req.body||{};
       const nome=(b.nome||'').trim();
@@ -357,9 +368,9 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const vals=[nome, b.descricao||null, Number(b.prioridade)||100, b.ativo!==false,
                   JSON.stringify(b.condicoes||{}), JSON.stringify(b.acoes||{})];
       if(id){
-        await pool.query(`UPDATE atb_triagem_regras SET nome=$1,descricao=$2,prioridade=$3,ativo=$4,condicoes=$5::jsonb,acoes=$6::jsonb,updated_at=now() WHERE id=$7`, [...vals, id]);
+        await pool.query(`UPDATE atb_triagem_regras SET nome=$1,descricao=$2,prioridade=$3,ativo=$4,condicoes=$5::jsonb,acoes=$6::jsonb,updated_at=now() WHERE id=$7 AND instituicao=$8`, [...vals, id, inst]);
       }else{
-        await pool.query(`INSERT INTO atb_triagem_regras (nome,descricao,prioridade,ativo,condicoes,acoes,created_by) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7)`, [...vals, req.user?.id||null]);
+        await pool.query(`INSERT INTO atb_triagem_regras (nome,descricao,prioridade,ativo,condicoes,acoes,created_by,instituicao) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8)`, [...vals, req.user?.id||null, inst]);
       }
       res.json({ok:true});
     }catch(e){ console.error('[regras] salvar:',e.message); res.status(500).json({ok:false,error:e.message}); }
@@ -368,26 +379,27 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
   app.post('/atb/admin/regras/salvar/:id', soSuper, (req,res)=> salvar(req,res,parseInt(req.params.id,10)));
 
   app.post('/atb/admin/regras/:id/toggle', soSuper, async (req,res)=>{
-    try{ await pool.query('UPDATE atb_triagem_regras SET ativo=NOT ativo, updated_at=now() WHERE id=$1',[parseInt(req.params.id,10)]); }
+    try{ await pool.query('UPDATE atb_triagem_regras SET ativo=NOT ativo, updated_at=now() WHERE id=$1 AND instituicao=$2',[parseInt(req.params.id,10), instReq(req)]); }
     catch(e){ console.error('[regras] toggle:',e.message); }
     res.redirect('/atb/admin/regras');
   });
   app.post('/atb/admin/regras/:id/excluir', soSuper, async (req,res)=>{
-    try{ await pool.query('DELETE FROM atb_triagem_regras WHERE id=$1',[parseInt(req.params.id,10)]); }
+    try{ await pool.query('DELETE FROM atb_triagem_regras WHERE id=$1 AND instituicao=$2',[parseInt(req.params.id,10), instReq(req)]); }
     catch(e){ console.error('[regras] excluir:',e.message); }
     res.redirect('/atb/admin/regras');
   });
 
   // ── Dry-run contra o histórico ──────────────────────────────────────────────
   app.post('/atb/admin/regras/testar', soSuper, async (req,res)=>{
+    const inst = instReq(req);
     try{
       const cond = req.body?.condicoes;
       const irasRegra = req.body?.acoes?.iras || null;
       if(!cond || (!cond.all && !cond.any)) return res.json({ok:true, total:0, casam:0, ja_iras:0, vazias:0, divergentes:null});
-      const COLS_BANCO = (await catalogoCampos(pool)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
+      const COLS_BANCO = (await catalogoCampos(pool, inst)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
       const cols = ['id','paciente_dn','data_referencia','jotform_created_at','created_at', ...COLS_BANCO]
         .filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
-      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id`);
+      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}`, [inst]);
       let casam=0, ja=0, vaz=0, div=0;
       for(const f of rows){
         const ctx = contextoFicha(f);
@@ -405,14 +417,15 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
   // Só fichas AINDA NÃO triadas (sem triagem_regra_id) e onde ESTA é a 1ª regra a
   // casar (respeita prioridade). Preenche Parecer/IrAS apenas em campo vazio, via
   // aplicarRegras (mesmo motor da criação). Requer contextoFicha já corrigido.
-  async function coletarBackfill(regra, de, ate){
+  async function coletarBackfill(regra, de, ate, inst){
     const ativas = (await pool.query(
-      'SELECT id, condicoes FROM atb_triagem_regras WHERE ativo=true ORDER BY prioridade ASC, id ASC'
+      'SELECT id, condicoes FROM atb_triagem_regras WHERE ativo=true AND instituicao=$1 ORDER BY prioridade ASC, id ASC',[inst]
     )).rows;
-    const COLS_BANCO = (await catalogoCampos(pool)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
+    const COLS_BANCO = (await catalogoCampos(pool, inst)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
     const base = ['id','paciente_nome','setor','data_internacao','paciente_dn','data_referencia','jotform_created_at','created_at'];
     const cols = [...base, ...COLS_BANCO].filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
     const filtros = ['f.deletado_em IS NULL'], params = [];
+    params.push(inst); filtros.push(escopoFichaSql(params.length));
     const dataCanon = 'COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)';
     if(de){  params.push(de);  filtros.push(`${dataCanon} >= $${params.length}::date`); }
     if(ate){ params.push(ate); filtros.push(`${dataCanon} < ($${params.length}::date + interval '1 day')`); }
@@ -436,13 +449,14 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
 
   // preview (não altera nada)
   app.get('/atb/admin/regras/:id/backfill', soSuper, async (req,res)=>{
+    const inst = instReq(req);
     try{
       const id = parseInt(req.params.id,10);
-      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1',[id])).rows[0];
+      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1 AND instituicao=$2',[id, inst])).rows[0];
       if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1><a href="/atb/admin/regras">Voltar</a></div>`));
       const de = req.query.de === undefined ? new Date(Date.now()-90*864e5).toISOString().slice(0,10) : String(req.query.de||'');
       const ate = String(req.query.ate||'');
-      const { candidatos, amostra, casamTotal, jaTriada, outraRegra } = await coletarBackfill(regra, de, ate);
+      const { candidatos, amostra, casamTotal, jaTriada, outraRegra } = await coletarBackfill(regra, de, ate, inst);
       const tab = amostra.map(a=>`<tr><td>#${a.id}</td><td>${esc(a.nome||'')}</td><td>${esc(a.setor||'')}</td></tr>`).join('');
       res.send(page('Backfill — '+regra.nome,`
         <div class="card"><h1>Backfill: ${esc(regra.nome)}</h1>
@@ -470,12 +484,13 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
 
   // aplicar (recalcula candidatos e roda aplicarRegras em cada)
   app.post('/atb/admin/regras/:id/backfill/aplicar', soSuper, async (req,res)=>{
+    const inst = instReq(req);
     try{
       const id = parseInt(req.params.id,10);
-      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1',[id])).rows[0];
+      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1 AND instituicao=$2',[id, inst])).rows[0];
       if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1></div>`));
       const de = String(req.body?.de||''); const ate = String(req.body?.ate||'');
-      const { candidatos } = await coletarBackfill(regra, de, ate);
+      const { candidatos } = await coletarBackfill(regra, de, ate, inst);
       let aplicadas=0, outras=0;
       for(const fid of candidatos){
         const r = await aplicarRegras(pool, fid);

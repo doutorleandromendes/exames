@@ -513,17 +513,27 @@ function paginaEditorPreench(schema, { idx, juncao, conds, complexo, raw, campo,
 //  Rotas
 // ════════════════════════════════════════════════════════════════════════════
 export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF') {
+  // Resolve a instituição POR REQUISIÇÃO: tenant-lock (req.atbTenant) > ?inst= > default.
+  // Antes o 'inst' era fixo no closure (sempre HUSF), o que impedia editar a ficha do H2.
+  // Em modo legado (sem tenant e sem ?inst) cai no default 'HUSF' — idêntico ao atual.
+  const instReq = (req) =>
+    req.atbTenant ||
+    String((req.query && req.query.inst) || inst).replace(/[^A-Za-z0-9_]/g, '') ||
+    inst;
+
   const soSuper = [authRequired, (req, res, next) => {
     if (req.user?.super_admin || req.cookies?.adm === '1') return next();
     res.status(403).send('Acesso restrito ao administrador.');
   }];
 
   app.get('/atb/admin/regras-form', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try { res.send(paginaLista(await getFormSchema(pool, inst))); }
     catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
   });
 
   app.get('/atb/admin/regras-form/editar', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const schema = await getFormSchema(pool, inst);
       const alvo = req.query.alvo ? String(req.query.alvo) : '';
@@ -541,6 +551,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
   });
 
   app.post('/atb/admin/regras-form/salvar', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const b = req.body || {};
       if (!b.alvo) return res.redirect('/atb/admin/regras-form');
@@ -568,6 +579,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
   });
 
   app.post('/atb/admin/regras-form/excluir', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const b = req.body || {};
       const schema = await getFormSchema(pool, inst);
@@ -581,6 +593,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
 
   // torna um campo "sempre obrigatório" opcional (remove required:true)
   app.post('/atb/admin/regras-form/required-off', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const key = String((req.body || {}).campo || '').trim();
       const schema = await getFormSchema(pool, inst);
@@ -592,6 +605,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
 
   // ── Preenchimento condicional ──────────────────────────────────────────────
   app.get('/atb/admin/regras-form/preench', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const schema = await getFormSchema(pool, inst);
       const lista = Array.isArray(schema.preenchimentos) ? schema.preenchimentos : [];
@@ -609,6 +623,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
   });
 
   app.post('/atb/admin/regras-form/preench/salvar', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const b = req.body || {};
       const campo = String(b.campo_alvo || '').trim();
@@ -636,6 +651,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
   });
 
   app.post('/atb/admin/regras-form/preench/excluir', soSuper, async (req, res) => {
+    const inst = instReq(req);
     try {
       const i = parseInt(String((req.body || {}).idx || ''), 10);
       const schema = await getFormSchema(pool, inst);

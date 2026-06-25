@@ -202,8 +202,9 @@ function _sel(name, value, opcoes, placeholder) {
   return `<select name="${name}" class="gf-in">${opts}</select>`;
 }
 
-export function gridControlsUI(query, pager) {
+export function gridControlsUI(query, pager, opts = {}) {
   const q = query || {};
+  const tenantLocked = !!(opts && opts.tenantLocked);
   const val = k => _safe(q[k] || '');
   const colsAtivas = []
     .concat(q.cols || [])
@@ -223,10 +224,10 @@ export function gridControlsUI(query, pager) {
   // ── painel de FILTROS ──────────────────────────────────────────────────────
   const filtrosForm = `
     <form method="GET" action="/atb/admin/grid" class="gf-panel" id="gf-filtros" style="display:none">
-      ${hidden(filtroKeys.concat(['inst','cols']))}
+      ${hidden(filtroKeys.concat(tenantLocked ? ['cols'] : ['inst','cols']))}
       <input type="hidden" name="cols" value="${_safe(q.cols || '')}">
       <div class="gf-grid">
-        <label>Hospital ${_sel('inst', q.inst, OPC.inst, 'Todos')}</label>
+        ${tenantLocked ? '' : `<label>Hospital ${_sel('inst', q.inst, OPC.inst, 'Todos')}</label>`}
         <label>Setor ${_sel('setor', q.setor, OPC.setor, 'Todos')}</label>
         <label>Tipo de terapia ${_sel('tipo_terapia', q.tipo_terapia, OPC.tipo_terapia, 'Todos')}</label>
         <label>Sepse ${_sel('sepse', q.sepse === 'sim' ? 'Sim' : q.sepse === 'nao' ? 'Não' : '', ['Sim','Não'], 'Todos').replace('value="Sim"', 'value="sim"').replace('value="Não"', 'value="nao"')}</label>

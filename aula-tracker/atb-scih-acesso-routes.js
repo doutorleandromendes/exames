@@ -59,6 +59,12 @@ export async function ensureScihAcessoSchema(pool) {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS set_pw_token TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS set_pw_expires TIMESTAMPTZ`);
   await pool.query(`CREATE INDEX IF NOT EXISTS users_set_pw_token_idx ON users(set_pw_token)`);
+  // Fase 3: vínculo de instituição. Usuários SCIH/micro atuais → HUSF (operam o
+  // portal do HUSF idêntico a hoje). super_admin fica sem vínculo (cruza tudo).
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS instituicao TEXT`);
+  await pool.query(`UPDATE users SET instituicao='HUSF'
+                     WHERE instituicao IS NULL AND (scih=true OR micro=true)`);
+  await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS instituicao TEXT`);
 }
 
 function novoToken() { return crypto.randomBytes(24).toString('hex'); }
@@ -157,9 +163,10 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       const dup = await pool.query(
         `SELECT 1 FROM access_requests WHERE LOWER(email)=$1 AND status='pending' AND kind='scih' LIMIT 1`, [email]);
       if (!dup.rowCount) {
+        const instSolic = req.atbTenant || 'HUSF';  // subdomínio define a unidade do pedido
         await pool.query(
-          `INSERT INTO access_requests(full_name,email,kind,justification,status)
-           VALUES ($1,$2,'scih','Equipe SCIH','pending')`, [full_name, email]);
+          `INSERT INTO access_requests(full_name,email,kind,justification,status,instituicao)
+           VALUES ($1,$2,'scih','Equipe SCIH','pending',$3)`, [full_name, email, instSolic]);
       }
       res.send(page('Solicitação enviada', `
         <div class="card">
@@ -333,11 +340,12 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     try {
       await client.query('BEGIN');
       const r = (await client.query(
-        `SELECT id, full_name, email FROM access_requests
+        `SELECT id, full_name, email, instituicao FROM access_requests
           WHERE id=$1 AND status='pending' AND kind='scih' FOR UPDATE`, [id])).rows[0];
       if (!r) { await client.query('ROLLBACK'); return res.status(404).send(page('Não encontrado', `<div class="card"><h1>Pedido não encontrado ou já processado</h1><a href="/atb/admin/scih">Voltar</a></div>`)); }
 
       const email = r.email.toLowerCase().trim();
+      const inst = r.instituicao || 'HUSF';   // unidade do pedido (default HUSF)
       const token = novoToken();
       const expira = new Date(Date.now() + TOKEN_TTL_DIAS * 86400000);
 
@@ -346,13 +354,13 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       if (existing) {
         userId = existing.id;
         await client.query(
-          `UPDATE users SET full_name=COALESCE($1,full_name), scih=true, set_pw_token=$2, set_pw_expires=$3 WHERE id=$4`,
-          [r.full_name || null, token, expira, userId]);
+          `UPDATE users SET full_name=COALESCE($1,full_name), scih=true, instituicao=COALESCE(instituicao,$2), set_pw_token=$3, set_pw_expires=$4 WHERE id=$5`,
+          [r.full_name || null, inst, token, expira, userId]);
       } else {
         // sem password_hash ainda: a pessoa define no link. password_hash NULL = login impossível até definir.
         userId = (await client.query(
-          `INSERT INTO users(full_name,email,scih,set_pw_token,set_pw_expires) VALUES($1,$2,true,$3,$4) RETURNING id`,
-          [r.full_name, email, token, expira])).rows[0].id;
+          `INSERT INTO users(full_name,email,scih,instituicao,set_pw_token,set_pw_expires) VALUES($1,$2,true,$3,$4,$5) RETURNING id`,
+          [r.full_name, email, inst, token, expira])).rows[0].id;
       }
 
       await client.query(`UPDATE access_requests SET status='approved', processed_at=now() WHERE id=$1`, [id]);

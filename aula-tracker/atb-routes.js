@@ -31,7 +31,7 @@ import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
 import { registerFormTestRoutes } from './atb-form-test-routes.js';
-import { tenantLock, tenantMode } from './atb-tenant.js';
+import { tenantLock, tenantMode, getTenantLogo } from './atb-tenant.js';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -109,7 +109,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     let html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');
     // injeta instituição + logo antes do bootstrap do motor
-    const inject = `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_LOGO=${JSON.stringify(ATB_LOGO)};</script>`;
+    const logoTenant = getTenantLogo(inst) || ATB_LOGO;   // por-tenant; HUSF cai no atb-logo.b64
+    const inject = `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_LOGO=${JSON.stringify(logoTenant)};</script>`;
     html = html.replace(
       `<script>window.ATB_INSTITUICAO = window.ATB_INSTITUICAO || 'HUSF';</script>`,
       inject

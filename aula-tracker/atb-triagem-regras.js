@@ -34,11 +34,44 @@ export async function ensureTriagemRegrasSchema(pool) {
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS triagem_regra_id INTEGER`);
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS triagem_regra_at TIMESTAMPTZ`);
 
-  // Seed: a regra do exemplo (idempotente por nome).
+  // ── Tenant (2b): instituição por regra ────────────────────────────────────
+  // Coluna de escopo (sigla). Linhas existentes viram HUSF → triagem do HUSF
+  // continua idêntica. A unicidade do nome passa a ser POR instituição, para que
+  // HUSF e H2 possam ter regras de mesmo nome. Tudo idempotente.
+  await pool.query(`ALTER TABLE atb_triagem_regras ADD COLUMN IF NOT EXISTS instituicao TEXT`);
+  await pool.query(`UPDATE atb_triagem_regras SET instituicao='HUSF' WHERE instituicao IS NULL`);
+  // Remove qualquer UNIQUE antigo que seja SOMENTE sobre (nome), descobrindo o nome
+  // real do constraint via catálogo — não assume o nome padrão. O composto
+  // (instituicao, nome) tem 2 colunas e nunca é encontrado por esta busca.
+  try {
+    const antigos = (await pool.query(`
+      SELECT con.conname
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+       WHERE rel.relname = 'atb_triagem_regras'
+         AND con.contype = 'u'
+         AND con.conkey = ARRAY[(SELECT attnum FROM pg_attribute
+                                   WHERE attrelid = rel.oid AND attname = 'nome' AND NOT attisdropped)]::smallint[]
+    `)).rows;
+    for (const { conname } of antigos) {
+      await pool.query(`ALTER TABLE atb_triagem_regras DROP CONSTRAINT IF EXISTS "${conname}"`);
+    }
+  } catch (e) {
+    console.warn('[triagem] aviso ao remover unique antigo de nome:', e.message);
+  }
+  // Unicidade do nome agora é POR instituição (idempotente).
+  try {
+    await pool.query(`ALTER TABLE atb_triagem_regras
+      ADD CONSTRAINT atb_triagem_regras_inst_nome_key UNIQUE (instituicao, nome)`);
+  } catch (e) {
+    if (!/already exists|duplicate|exists/i.test(e.message || '')) throw e; // idempotente
+  }
+
+  // Seed: a regra do exemplo (idempotente por instituição+nome). É clínica do HUSF.
   await pool.query(`
-    INSERT INTO atb_triagem_regras (nome, descricao, prioridade, ativo, condicoes, acoes, modo)
-    VALUES ($1,$2,$3,true,$4::jsonb,$5::jsonb,'auto')
-    ON CONFLICT (nome) DO NOTHING
+    INSERT INTO atb_triagem_regras (instituicao, nome, descricao, prioridade, ativo, condicoes, acoes, modo)
+    VALUES ('HUSF',$1,$2,$3,true,$4::jsonb,$5::jsonb,'auto')
+    ON CONFLICT (instituicao, nome) DO NOTHING
   `, [
     'RN <2d UTI Neo + Gentamicina',
     'Recém-nascido com menos de 2 dias de vida em UTI Neo, em gentamicina: esquema empírico de sepse neonatal precoce — Parecer "Sim", IrAS "Descartado".',
@@ -167,11 +200,18 @@ function vereditoVazio(recomendacao_scih) {
 // Retorna { regra_id, nome } aplicada, ou null. Auto-tratada (nunca lança).
 export async function aplicarRegras(pool, fichaId) {
   try {
-    const f = (await pool.query('SELECT * FROM atb_fichas WHERE id=$1', [fichaId])).rows[0];
+    const f = (await pool.query(
+      `SELECT f.*, i.sigla AS _inst_sigla
+         FROM atb_fichas f
+         LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
+        WHERE f.id = $1`, [fichaId])).rows[0];
     if (!f) return null;
+    // Instituição da ficha (sigla). Ficha legada sem instituição → HUSF (preserva o atual).
+    const _sigla = f._inst_sigla || 'HUSF';
 
     const regras = (await pool.query(
-      'SELECT id, nome, condicoes, acoes FROM atb_triagem_regras WHERE ativo=true ORDER BY prioridade ASC, id ASC'
+      'SELECT id, nome, condicoes, acoes FROM atb_triagem_regras WHERE ativo=true AND instituicao=$1 ORDER BY prioridade ASC, id ASC',
+      [_sigla]
     )).rows;
     if (!regras.length) return null;
 

@@ -213,7 +213,7 @@ export function registerConsultaRoutes(app, pool) {
         WHERE f.deletado_em IS NULL
           AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'${escopo}
         ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`, params);
-      const hc = await getLatestHealthcheck(pool).catch(() => null);
+      const hc = await getLatestHealthcheck(pool, inst || 'HUSF').catch(() => null);
       res.send(paginaConsulta(rows, renderHealthCard(hc)));
     } catch (e) {
       console.error('[atb] consulta error:', e.message);

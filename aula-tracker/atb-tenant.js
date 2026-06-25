@@ -79,6 +79,10 @@ export function tenantFromReq(req) {
 
 export function isLocked(req) { return !!tenantFromReq(req); }
 
+// Tenant fixo do deploy por env (ATB_TENANT), ou null. Para jobs de fundo
+// (schedules) que não têm requisição/host — ex.: regras-check periódico.
+export function envTenant() { return ENV_TENANT || null; }
+
 // Para diagnóstico/observabilidade no boot.
 export function tenantMode() {
   if (ENV_TENANT) return { modo: 'env', tenant: ENV_TENANT };

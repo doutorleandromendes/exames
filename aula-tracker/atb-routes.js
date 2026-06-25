@@ -509,7 +509,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
                        background:#0f1116;color:#e7e9ee;font-size:13px">
                 <option value="">Todos</option>
                 <option value="HUSF" ${inst==='HUSF'?'selected':''}>HUSF</option>
-                <option value="H2"   ${inst==='H2'  ?'selected':''}>H2</option>
+                <option value="SCMI" ${inst==='SCMI' ?'selected':''}>SCMI</option>
               </select>
             </div>
             <button style="padding:9px 18px;background:#4f8cff;color:#fff;border:0;
@@ -1324,7 +1324,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <div style="margin-top:10px">
             <label class="mut" style="font-size:12px">Instituição: </label>
             <a href="/atb/admin/form?inst=HUSF" style="margin-right:10px;${inst==='HUSF'?'font-weight:700':''}">HUSF</a>
-            <a href="/atb/admin/form?inst=H2" style="${inst==='H2'?'font-weight:700':''}">H2</a>
+            <a href="/atb/admin/form?inst=SCMI" style="${inst==='SCMI'?'font-weight:700':''}">SCMI</a>
           </div>
         </div>
         ${blocos.join('')}

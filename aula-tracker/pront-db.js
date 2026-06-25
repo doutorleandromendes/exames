@@ -86,6 +86,7 @@ export async function runProntMigrations(pool) {
     criado_em   TIMESTAMPTZ DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_pront_cons_pac ON pront_consultas (paciente_id, data);
+  ALTER TABLE pront_consultas ADD COLUMN IF NOT EXISTS transcricao TEXT;            -- transcript bruto, quando a consulta deriva de áudio
 
   -- documentos emitidos pelo gerador (receita/pedido/relatório/atestado), guardados na ficha
   CREATE TABLE IF NOT EXISTS pront_docs_emitidos (

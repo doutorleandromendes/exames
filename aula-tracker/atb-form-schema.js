@@ -297,6 +297,19 @@ export function buildSCMI() {
   setSetorIn(campo('dispositivos','dispositivos_invasivos').requiredCond, ['UTI 1','UTI 2']);
 
   // (oxacilina mantém o gatilho equipe=='Pediatria' — SCMI tem equipe Pediatria)
+
+  // 8. Prescritor: SCMI NÃO valida CRM contra banco. CRM e Nome do prescritor viram
+  //    texto obrigatório de preenchimento manual — sem lookup nem autopreenchimento.
+  const presc = sec('prescritor');
+  const crmF  = presc.campos.find(c => c.key === 'crm');
+  crmF.type = 'text';
+  crmF.required = true;
+  crmF.placeholder = 'Digite o CRM';
+  const nomeF = presc.campos.find(c => c.key === 'prescritor_nome');
+  delete nomeF.readonly;   // passa a ser editável (não é mais autopreenchido)
+  delete nomeF.hint;       // remove "Preenchido automaticamente após validação do CRM"
+  nomeF.required = true;
+
   return d;
 }
 
@@ -336,6 +349,17 @@ export async function ensureFormSchemaTable(pool) {
     `UPDATE atb_form_schema SET instituicao='SCMI', definicao=$1
        WHERE instituicao='H2'
          AND NOT EXISTS (SELECT 1 FROM atb_form_schema WHERE instituicao='SCMI')`,
+    [JSON.stringify(buildSCMI())]
+  );
+
+  // Sincroniza o schema do SCMI (versão semeada por código) com o buildSCMI() atual.
+  // Necessário porque a definição vive em código e ainda não há editor de UI: mudanças
+  // no buildSCMI precisam alcançar a linha SCMI já existente. Idempotente — só escreve
+  // se divergir — e atinge apenas a v1 ativa, então uma futura edição de UI (v2+) fica intacta.
+  await pool.query(
+    `UPDATE atb_form_schema SET definicao=$1::jsonb
+       WHERE instituicao='SCMI' AND versao=1 AND ativo=true
+         AND definicao IS DISTINCT FROM $1::jsonb`,
     [JSON.stringify(buildSCMI())]
   );
 }

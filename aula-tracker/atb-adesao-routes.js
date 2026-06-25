@@ -247,7 +247,14 @@ function paginaAdesao(rows, mes, somentePendentes) {
 </body></html>`;
 }
 
-async function buscarNegativosMes(pool, ano, m) {
+async function buscarNegativosMes(pool, ano, m, inst) {
+  const params = [ano, m];
+  let escopo = '';
+  if (inst) {
+    params.push(inst);
+    escopo = ` AND (f.instituicao_id = (SELECT id FROM atb_instituicoes WHERE sigla=$${params.length})`
+           + ` OR (f.instituicao_id IS NULL AND $${params.length}='HUSF'))`;
+  }
   const { rows } = await pool.query(`
     SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
            f.atb_solicitado, f.adesao_desfecho, f.adesao_troca_atb,
@@ -256,8 +263,8 @@ async function buscarNegativosMes(pool, ano, m) {
     WHERE jsonb_typeof(f.recomendacao_scih)='array'
       AND f.recomendacao_scih @> '["Não"]'::jsonb
       AND EXTRACT(YEAR FROM ${DATA_PARECER_SQL}) = $1
-      AND EXTRACT(MONTH FROM ${DATA_PARECER_SQL}) = $2
-    ORDER BY ${DATA_PARECER_SQL} DESC`, [ano, m]);
+      AND EXTRACT(MONTH FROM ${DATA_PARECER_SQL}) = $2${escopo}
+    ORDER BY ${DATA_PARECER_SQL} DESC`, params);
   return rows;
 }
 
@@ -270,7 +277,7 @@ export function registerAdesaoRoutes(app, pool, adminRequired) {
       const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : mesAtual;
       const [ano, m] = mes.split('-').map(Number);
       const somentePendentes = req.query.status === 'pendente';
-      const rows = await buscarNegativosMes(pool, ano, m);
+      const rows = await buscarNegativosMes(pool, ano, m, req.atbTenant);
 
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.send(paginaAdesao(rows, mes, somentePendentes));
@@ -286,7 +293,7 @@ export function registerAdesaoRoutes(app, pool, adminRequired) {
       const mesAtual = agora.getFullYear() + '-' + String(agora.getMonth() + 1).padStart(2, '0');
       const mes = /^\d{4}-\d{2}$/.test(req.query.mes || '') ? req.query.mes : mesAtual;
       const [ano, m] = mes.split('-').map(Number);
-      const rows = await buscarNegativosMes(pool, ano, m);
+      const rows = await buscarNegativosMes(pool, ano, m, req.atbTenant);
 
       const esc = v => { const s = String(v ?? ''); return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
       const dt = d => d ? new Date(d).toLocaleDateString('pt-BR') : '';
@@ -315,11 +322,20 @@ export function registerAdesaoRoutes(app, pool, adminRequired) {
       if (troca && !ATB_TROCA.includes(troca)) return res.status(400).json({ ok: false, error: 'ATB de troca inválido' });
       if (desfecho !== 'Suspenso_troca') troca = '';  // troca só faz sentido em Suspenso_troca
 
-      await pool.query(`
+      // Escopo por instituição: em modo travado, não atualiza ficha de outro hospital.
+      const inst = req.atbTenant;
+      const params = [desfecho || null, troca || null, req.user?.id || null, id];
+      let escopo = '';
+      if (inst) {
+        params.push(inst);
+        escopo = ` AND (instituicao_id = (SELECT id FROM atb_instituicoes WHERE sigla=$${params.length})`
+               + ` OR (instituicao_id IS NULL AND $${params.length}='HUSF'))`;
+      }
+      const r = await pool.query(`
         UPDATE atb_fichas
            SET adesao_desfecho = $1, adesao_troca_atb = $2, adesao_por = $3, adesao_em = now()
-         WHERE id = $4`,
-        [desfecho || null, troca || null, req.user?.id || null, id]);
+         WHERE id = $4${escopo}`, params);
+      if (inst && r.rowCount === 0) return res.status(404).json({ ok: false, error: 'ficha não encontrada' });
 
       res.json({ ok: true });
     } catch (e) {

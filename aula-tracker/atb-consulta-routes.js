@@ -196,14 +196,23 @@ export function registerConsultaRoutes(app, pool) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     if (!temAcesso(req)) return res.send(paginaRestrito(req));
     try {
+      // Tenant do deploy (subdomínio/env). Null = sem trava = sem filtro (atual).
+      const inst = req.atbTenant;
+      const params = [];
+      let escopo = '';
+      if (inst) {
+        params.push(inst);
+        escopo = ` AND (f.instituicao_id = (SELECT id FROM atb_instituicoes WHERE sigla=$${params.length})`
+               + ` OR (f.instituicao_id IS NULL AND $${params.length}='HUSF'))`;
+      }
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
                f.atb_solicitado, f.recomendacao_scih, f.recomendacoes_especificacao,
                COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) AS data_ficha
         FROM atb_fichas f
         WHERE f.deletado_em IS NULL
-          AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'
-        ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`);
+          AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'${escopo}
+        ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`, params);
       const hc = await getLatestHealthcheck(pool).catch(() => null);
       res.send(paginaConsulta(rows, renderHealthCard(hc)));
     } catch (e) {

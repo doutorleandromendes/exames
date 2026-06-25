@@ -18,6 +18,7 @@
 import { getFormSchema } from './atb-form-schema.js';
 import { validarObrigatoriosServidor } from './atb-regras-form-routes.js';
 import { parseFormPayload } from './atb-parser.js';
+import { envTenant } from './atb-tenant.js';
 
 // ── helpers de geração (espelham o harness do navegador) ─────────────────────
 function fieldMap(schema) {
@@ -110,8 +111,9 @@ function resolverServer(schema, map, seed) {
 }
 
 // ── execução + persistência ──────────────────────────────────────────────────
-export async function runHealthcheck(pool) {
-  const schema = await getFormSchema(pool, 'HUSF');
+export async function runHealthcheck(pool, inst = 'HUSF') {
+  const schema = await getFormSchema(pool, inst);
+  if (!schema) return null;            // instituição sem schema — nada a checar
   const map = fieldMap(schema);
   const regras = coletarRegras(schema);
 
@@ -136,10 +138,10 @@ export async function runHealthcheck(pool) {
   }
   const total = casos.length, ok = failed === 0;
   const { rows: [row] } = await pool.query(
-    `INSERT INTO atb_healthcheck (ok, total, passed, failed, detalhe)
-     VALUES ($1,$2,$3,$4,$5) RETURNING id, ran_at, ok, total, passed, failed`,
-    [ok, total, passed, failed, JSON.stringify(detalhe)]);
-  return Object.assign(row, { detalhe });
+    `INSERT INTO atb_healthcheck (instituicao, ok, total, passed, failed, detalhe)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, ran_at, ok, total, passed, failed`,
+    [inst, ok, total, passed, failed, JSON.stringify(detalhe)]);
+  return Object.assign(row, { detalhe, instituicao: inst });
 }
 
 export async function ensureHealthcheckTable(pool) {
@@ -153,18 +155,34 @@ export async function ensureHealthcheckTable(pool) {
       failed  INTEGER     NOT NULL,
       detalhe JSONB
     )`);
+  // Escopo por instituição. Resultados existentes → HUSF (preserva o atual).
+  await pool.query(`ALTER TABLE atb_healthcheck ADD COLUMN IF NOT EXISTS instituicao TEXT`);
+  await pool.query(`UPDATE atb_healthcheck SET instituicao='HUSF' WHERE instituicao IS NULL`);
 }
 
-export async function getLatestHealthcheck(pool) {
+export async function getLatestHealthcheck(pool, inst = 'HUSF') {
   const { rows: [row] } = await pool.query(
-    'SELECT id, ran_at, ok, total, passed, failed, detalhe FROM atb_healthcheck ORDER BY ran_at DESC LIMIT 1');
+    `SELECT id, ran_at, ok, total, passed, failed, detalhe FROM atb_healthcheck
+      WHERE instituicao = $1 ORDER BY ran_at DESC LIMIT 1`, [inst]);
   return row || null;
 }
 
 export function startHealthcheckSchedule(pool) {
-  const run = () => runHealthcheck(pool)
-    .then(r => console.log('[healthcheck]', r.ok ? 'NORMAL' : 'SUSPENSO', r.passed + '/' + r.total))
-    .catch(e => console.error('[healthcheck] erro:', e.message));
+  // Mesmo padrão do regras-check: por-env (ATB_TENANT) checa só esse tenant; sem env
+  // (subdomínio/legado) checa CADA instituição ativa, com resultado tagueado.
+  const run = async () => {
+    try {
+      const fixo = envTenant();
+      const alvos = fixo
+        ? [fixo]
+        : (await pool.query('SELECT sigla FROM atb_instituicoes WHERE ativo=true ORDER BY id')).rows.map(r => r.sigla);
+      for (const sigla of alvos) {
+        await runHealthcheck(pool, sigla)
+          .then(r => r && console.log('[healthcheck]', sigla, r.ok ? 'NORMAL' : 'SUSPENSO', r.passed + '/' + r.total))
+          .catch(e => console.error('[healthcheck]', sigla, 'erro:', e.message));
+      }
+    } catch (e) { console.error('[healthcheck] schedule:', e.message); }
+  };
   setTimeout(run, 30 * 1000);             // ~30s após o boot
   setInterval(run, 8 * 60 * 60 * 1000);  // a cada 8 horas
 }
@@ -173,21 +191,23 @@ export function registerHealthcheckRoutes(app, pool, adminRequired) {
   // dispara manualmente (sem esperar 24h) e mostra o resumo
   app.get('/atb/admin/healthcheck/run', adminRequired, async (req, res) => {
     try {
-      const r = await runHealthcheck(pool);
+      const r = await runHealthcheck(pool, req.atbTenant || 'HUSF');
+      if (!r) return res.json({ vazio: true });
       res.json({ ok: r.ok, total: r.total, passed: r.passed, failed: r.failed,
                  falhas: (r.detalhe || []).filter(d => !d.ok) });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
   // último resultado (JSON)
   app.get('/atb/admin/healthcheck', adminRequired, async (req, res) => {
-    try { res.json((await getLatestHealthcheck(pool)) || { vazio: true }); }
+    try { res.json((await getLatestHealthcheck(pool, req.atbTenant || 'HUSF')) || { vazio: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
   });
   // painel HTML: card de status + falhas + botao "rodar agora" (?run=1)
   app.get('/atb/admin/healthcheck/painel', adminRequired, async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     try {
-      const hc = req.query.run === '1' ? await runHealthcheck(pool) : await getLatestHealthcheck(pool);
+      const inst = req.atbTenant || 'HUSF';
+      const hc = req.query.run === '1' ? await runHealthcheck(pool, inst) : await getLatestHealthcheck(pool, inst);
       const esc = (v) => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
       const falhas = ((hc && hc.detalhe) || []).filter(d => !d.ok);
       const linhas = falhas.map(d =>

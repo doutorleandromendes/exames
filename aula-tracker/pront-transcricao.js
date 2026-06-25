@@ -132,20 +132,21 @@ Transcrição:
 
 Responda SOMENTE com JSON: {"texto":"<as notas clínicas formatadas com ## título / # seção / - itens>","data":"<AAAA-MM-DD se uma data foi dita, senão vazio>"}`;
 
-const PROMPT_CONSULTA = (t) => `Você recebe a transcrição de uma CONSULTA inteira (médico e paciente; pode haver rótulos de quem falou). Produza NOTAS CLÍNICAS FIDEDIGNAS, em PROSA NARRATIVA (terceira pessoa, postura de relator), como uma evolução de prontuário. NÃO é um resumo nem um formulário SOAP.
+const PROMPT_CONSULTA = (t) => `Você recebe a transcrição de uma CONSULTA inteira (médico e paciente; pode haver rótulos de quem falou). Produza NOTAS CLÍNICAS FIDEDIGNAS, em PROSA NARRATIVA (terceira pessoa, postura de relator), como uma evolução de prontuário entre pares. NÃO é um resumo, NÃO é formato SOAP, e NÃO é explicação ao leigo.
 
-Estilo:
-- Narre em terceira pessoa, atribuindo falas e ações. Ao médico: "o médico questionou / examinou / ponderou / explicou / orientou / solicitou / prescreveu..." (use o nome dele — ex.: "o Dr. Leandro" — se ele aparecer na transcrição). Ao paciente: "o paciente relatou / referiu / negou / queixou-se...".
-- Escreva em parágrafos de prosa clínica, não em tópicos secos. Use "- " apenas para listas discretas (ex.: medicações prescritas, exames solicitados).
-- Siga o fio da consulta: o que o paciente trouxe, o que o médico perguntou e examinou, o raciocínio e as hipóteses, e a conduta/orientações. Organize em poucas seções se ajudar (ex.: Relato, Exame, Avaliação, Conduta); se a consulta for curta, um único bloco narrativo basta.
-- Conserve TODO o conteúdo clínico e o raciocínio — é uma nota fiel, não um resumo.
+Estilo e registro:
+- Narre em terceira pessoa, atribuindo falas e ações. Ao médico: "o médico constatou / questionou / examinou / ponderou / orientou / solicitou / prescreveu..." (use o nome dele — ex.: "o Dr. Leandro" — se ele aparecer na transcrição). Ao paciente: "o paciente relatou / referiu / negou / queixou-se...".
+- REGISTRO TÉCNICO de prontuário, não explicação ao paciente. Use a terminologia clínica equivalente ao que foi dito (ex.: "inflamação na bexiga" → cistite; "próstata grande" → próstata aumentada de volume; "procalcitonina acima do normal" → procalcitonina elevada). Mas NÃO aumente a especificidade nem mude o sentido — não troque um termo pelo diagnóstico mais específico do que o que foi dito, e não acrescente o que não foi falado.
+- Parágrafos de prosa clínica, não tópicos secos. Use "- " só para listas discretas (medicações, doses, exames).
+- Siga o fio da consulta: relato/queixas, exame e achados, raciocínio e hipóteses, conduta e orientações. Seções leves se ajudarem; consulta curta pode ser um único bloco.
+- Conserve TODO o conteúdo clínico e o raciocínio — nota fiel, não resumo.
 
 ${REGRAS}
 
 Transcrição:
 """${t}"""
 
-Responda SOMENTE com JSON: {"texto":"<as notas clínicas em prosa narrativa, com ## título e # seções quando úteis>","data":"<AAAA-MM-DD se uma data foi dita, senão vazio>"}`;
+Formato (NÃO inverta a hierarquia): "## " é só o TÍTULO, uma vez no topo (ex.: "## Consulta — nome do paciente"); "# " marca cada SEÇÃO (ex.: "# Relato", "# Avaliação", "# Conduta"); "- " só para itens de lista. Se uma data de consulta foi dita, a 1ª linha (antes do título) deve ser exatamente "DATA: AAAA-MM-DD". Responda apenas com as notas, sem comentários nem JSON.`;
 
 function salvarJSON(s) {
   if (!s) return null;
@@ -159,14 +160,24 @@ export function ollamaStructurer(opts = {}) {
   return {
     nome: "ollama:" + model,
     async estruturar(transcript, { modo = "resumo" } = {}) {
-      const prompt = (modo === "consulta" ? PROMPT_CONSULTA : PROMPT_RESUMO)(transcript);
-      const body = { model, stream: false, options: { temperature: 0.1, num_ctx: 16384 },
-        format: "json", messages: [{ role: "user", content: prompt }] };
+      const ehConsulta = modo === "consulta";
+      const prompt = (ehConsulta ? PROMPT_CONSULTA : PROMPT_RESUMO)(transcript);
+      const body = { model, stream: false, options: { temperature: 0.1, num_ctx: 16384, num_predict: 4096 },
+        messages: [{ role: "user", content: prompt }] };
+      if (!ehConsulta) body.format = "json";   // resumo: JSON curto. consulta: texto livre (prosa narrativa colapsa sob format:json).
       const r = await fetch(base + "/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!r.ok) throw new Error("Ollama HTTP " + r.status);
       const data = await r.json();
-      const j = salvarJSON(data.message?.content || "") || {};
-      return { texto: (j.texto || data.message?.content || "").trim(), data_sugerida: (j.data || "").slice(0, 10) || null };
+      const content = data.message?.content || "";
+      if (ehConsulta) {
+        // texto livre; data opcional numa 1ª linha "DATA: AAAA-MM-DD"
+        let texto = content.trim(), data_sugerida = null;
+        const m = texto.match(/^\s*DATA:\s*(\d{4}-\d{2}-\d{2})\b[^\n]*\n?/i);
+        if (m) { data_sugerida = m[1]; texto = texto.slice(m[0].length).trim(); }
+        return { texto, data_sugerida };
+      }
+      const j = salvarJSON(content) || {};
+      return { texto: (j.texto || content).trim(), data_sugerida: (j.data || "").slice(0, 10) || null };
     }
   };
 }

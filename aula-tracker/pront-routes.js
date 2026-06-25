@@ -210,6 +210,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
             ${ncol ? `<a href="/pront/paciente/${id}/exames"><button type="button">Exames (${ncol})</button></a>` : ""}
             <a href="/pront/paciente/${id}/exames/importar"><button type="button" style="background:#0369a1">Importar exames</button></a>
             <a href="/pront/paciente/${id}/upload"><button type="button" style="background:#0e9f6e">Enviar exame</button></a>
+            ${p.nome ? `<a href="${safe('http://localhost:3000/api/buscar?nome=' + String(p.nome).trim().replace(/\s+/g,'+'))}" target="_blank"><button type="button" style="background:#0891b2">🔬 LIS</button></a>` : ""}
             ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>` : ""}
             ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>` : ""}
             <a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>

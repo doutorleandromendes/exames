@@ -35,7 +35,7 @@ const OPC = {
   acesso_dialise: ['FAV','CDL (Shilley)','Perm-cath','PTFE'],
   foco: ['Corrente sanguínea (bacteremia)','Pneumonia','Infecção do trato urinário','Infecção do sítio cirúrgico','Meningite/Encefalite','Abdominal','Osteoarticular','Pele/Partes moles','Neutropenia Febril'],
   status: ['pendente','em_avaliacao','avaliado','arquivado'],
-  inst: ['HUSF','H2'],
+  inst: ['HUSF','SCMI'],
 };
 
 function _safe(s) {

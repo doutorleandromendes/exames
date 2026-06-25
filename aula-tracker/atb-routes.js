@@ -31,6 +31,7 @@ import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
 import { registerFormTestRoutes } from './atb-form-test-routes.js';
+import { tenantLock, tenantMode } from './atb-tenant.js';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,6 +43,13 @@ function safe(s) {
 }
 
 export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridRequired) {
+
+  // ── Tenant-lock (chokepoint único) ────────────────────────────────────
+  // Em modo travado (ATB_TENANT ou ATB_TENANT_MAP), separa os dashboards por
+  // hospital sobre o banco compartilhado. Sem env, é no-op (comportamento atual).
+  // Montado ANTES de qualquer rota /atb para rodar primeiro na cadeia.
+  app.use(tenantLock(pool));
+  try { console.log('[atb] tenant-lock:', JSON.stringify(tenantMode())); } catch {}
 
   // ── Webhook (sem auth) ────────────────────────────────────────────────
   app.post('/atb/webhook', handleWebhook(pool));
@@ -1012,7 +1020,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${vig.obitos}</div><div class="ml">Óbitos no recorte</div></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}${tabSem}</div>
-        ${gridControlsUI(req.query, pager)}
+        ${gridControlsUI(req.query, pager, { tenantLocked: !!req.atbTenant })}
         <div class="grid-wrap">
           <table class="atb-grid">
             <thead><tr>

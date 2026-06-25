@@ -34,7 +34,14 @@ const __sslConfig = (__pgSslMode === 'disable')
 const app = express();
 app.set('trust proxy', 1);
 
-app.use(express.json({ limit: '2mb' }));
+// JSON pequeno (2mb) por padrão; as rotas de upload grande (áudio, exames, conferência)
+// têm o próprio parser de 25mb (jsonGrande), então o global PULA essas rotas pra não barrá-las antes.
+const jsonPequeno = express.json({ limit: '2mb' });
+const ROTAS_UPLOAD_GRANDE = /\/(consulta\/audio|upload|exames\/importar\/(previa|gravar)|exames\/resultado\/editar|conferencia\/[^/]+\/confirmar(-consulta)?)$/;
+app.use((req, res, next) => {
+  if (req.method === 'POST' && ROTAS_UPLOAD_GRANDE.test(req.path)) return next();
+  return jsonPequeno(req, res, next);
+});
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use(cookieParser());
 app.use(express.static(__dirname));

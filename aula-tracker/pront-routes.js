@@ -321,7 +321,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const head = ordemExib.map(ci => {
       const c = coletas[ci];
       const inf = /inferido/i.test(c.laboratorio || "");
-      return `<th style="text-align:right;white-space:nowrap">${toBR(c.data)}${inf ? ' <span title="ano inferido na migração — confirmar">⚠</span>' : ""}</th>`;
+      return `<th style="text-align:right;white-space:nowrap">${toBR(c.data)}${inf ? ' <span title="ano inferido na migração — confirmar">⚠</span>' : ""}${req.user?.super_admin ? `<form method="POST" action="/pront/paciente/${id}/coleta/${c.id}/excluir" style="display:inline;margin-left:5px" onsubmit="return confirm('Excluir a coleta de ${toBR(c.data)} e TODOS os resultados dela? Esta ação não pode ser desfeita.')"><button type="submit" title="Excluir esta coluna" style="border:0;background:none;color:#b91c1c;cursor:pointer;padding:0;font-size:.9em">✕</button></form>` : ""}</th>`;
     }).join("");
 
     const corpo = linhasOrd.map((L, i) => {
@@ -492,6 +492,17 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   });
 
   // edição inline de uma célula do grid: re-tipa o valor, cria/atualiza, e limpa flag 'revisar'
+  // exclui uma coleta inteira (uma coluna da grid). pront_resultados cai por ON DELETE CASCADE. Restrito ao médico.
+  app.post("/pront/paciente/:id/coleta/:coletaId/excluir", medicoRequired, async (req, res) => {
+    try {
+      await pool.query(`DELETE FROM pront_coletas WHERE id=$1 AND paciente_id=$2`, [req.params.coletaId, req.params.id]);
+      res.redirect(`/pront/paciente/${req.params.id}/exames`);
+    } catch (e) {
+      console.error("EXCLUIR COLETA ERROR", e);
+      res.status(500).send("Falha ao excluir a coleta");
+    }
+  });
+
   app.post("/pront/paciente/:id/exames/resultado/editar", authRequired, jsonGrande, async (req, res) => {
     try {
       const { coleta_id, canonico, rotulo, valor } = req.body || {};

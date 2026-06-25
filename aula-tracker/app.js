@@ -180,13 +180,20 @@ const scihRequired = async (req,res,next)=>{
     return res.redirect('/');
   }
   try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,instituicao FROM users WHERE id=$1',[uid]);
     const user = rows[0];
     if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
     const exp = parseISO(user.expires_at);
     if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
     req.user = user;
-    if(user.scih || user.super_admin || adm) return next();
+    if(user.scih || user.super_admin || adm){
+      // Fase 3: vínculo de instituição. super_admin e break-glass (adm) cruzam tudo.
+      // Só restringe com portal travado (req.atbTenant) e usuário vinculado a OUTRO hospital.
+      // Sem trava ou sem vínculo → não restringe (idêntico ao atual).
+      if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
+        return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
+      return next();
+    }
     return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao SCIH</h1><p class="mut">Sua conta não tem permissão para esta área. Fale com a coordenação.</p><a href="/inicio">Início</a></div>`));
   }catch{ return res.redirect('/'); }
 };
@@ -197,13 +204,19 @@ const gridRequired = async (req,res,next)=>{
   const uid = req.cookies?.uid;
   if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
   try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,instituicao FROM users WHERE id=$1',[uid]);
     const user = rows[0];
     if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
     const exp = parseISO(user.expires_at);
     if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
     req.user = user;
-    if(user.scih || user.super_admin || user.micro || adm) return next();
+    if(user.scih || user.super_admin || user.micro || adm){
+      // Fase 3: vínculo de instituição (super_admin e break-glass cruzam tudo). micro
+      // segue a mesma regra. Só restringe com portal travado e vínculo a outro hospital.
+      if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
+        return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
+      return next();
+    }
     return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito</h1><p class="mut">Sua conta não tem permissão para a grade.</p><a href="/inicio">Início</a></div>`));
   }catch{ return res.redirect('/'); }
 };

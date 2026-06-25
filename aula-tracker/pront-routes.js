@@ -695,7 +695,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           const analitos=trs.map(tr=>{const i=+tr.dataset.i;const a={...raw[i]};
             a.incluir=tr.querySelector('.inc').checked; const v=tr.querySelector('.val').value.trim();
             if(a.tipo_valor==='qualitativo'||a.tipo_valor==='texto'){a.resultado=v;}
-            else{const m=v.match(/(-?[\\d.,]+)/);a.valor=m?parseFloat(m[1].replace('.','').replace(',','.')):a.valor;}
+            else{const mm=v.match(/-?[\\d.,]+/);let s=mm?mm[0]:'';const hc=s.includes(','),hd=s.includes('.');if(hc&&hd)s=s.replace(/\\./g,'').replace(',','.');else if(hc)s=s.replace(',','.');else if(hd){const af=s.split('.').pop();if(af.length===3)s=s.replace(/\\./g,'');}const n=parseFloat(s);a.valor=Number.isFinite(n)?n:a.valor;}
             return a;}).filter(a=>a.incluir);
           msg.textContent='Salvando…';
           const r=await fetch('/pront/conferencia/${d.id}/confirmar',{method:'POST',headers:{'Content-Type':'application/json'},

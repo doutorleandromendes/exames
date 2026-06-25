@@ -132,13 +132,20 @@ Transcrição:
 
 Responda SOMENTE com JSON: {"texto":"<as notas clínicas formatadas com ## título / # seção / - itens>","data":"<AAAA-MM-DD se uma data foi dita, senão vazio>"}`;
 
-const PROMPT_CONSULTA = (t) => `Você recebe a transcrição de uma CONSULTA inteira (médico e paciente; pode haver rótulos de quem falou).
-Produza a evolução em formato SOAP, atribuindo: relato/queixas do paciente em "# Subjetivo"; achados ditos pelo médico em "# Objetivo"; impressão em "# Avaliação"; e o que o médico determinou em "# Conduta". ${REGRAS}
+const PROMPT_CONSULTA = (t) => `Você recebe a transcrição de uma CONSULTA inteira (médico e paciente; pode haver rótulos de quem falou). Produza NOTAS CLÍNICAS FIDEDIGNAS, em PROSA NARRATIVA (terceira pessoa, postura de relator), como uma evolução de prontuário. NÃO é um resumo nem um formulário SOAP.
+
+Estilo:
+- Narre em terceira pessoa, atribuindo falas e ações. Ao médico: "o médico questionou / examinou / ponderou / explicou / orientou / solicitou / prescreveu..." (use o nome dele — ex.: "o Dr. Leandro" — se ele aparecer na transcrição). Ao paciente: "o paciente relatou / referiu / negou / queixou-se...".
+- Escreva em parágrafos de prosa clínica, não em tópicos secos. Use "- " apenas para listas discretas (ex.: medicações prescritas, exames solicitados).
+- Siga o fio da consulta: o que o paciente trouxe, o que o médico perguntou e examinou, o raciocínio e as hipóteses, e a conduta/orientações. Organize em poucas seções se ajudar (ex.: Relato, Exame, Avaliação, Conduta); se a consulta for curta, um único bloco narrativo basta.
+- Conserve TODO o conteúdo clínico e o raciocínio — é uma nota fiel, não um resumo.
+
+${REGRAS}
 
 Transcrição:
 """${t}"""
 
-Responda SOMENTE com JSON: {"texto":"<a evolução em ## Consulta + # Subjetivo/# Objetivo/# Avaliação/# Conduta>","data":"<AAAA-MM-DD se dita, senão vazio>"}`;
+Responda SOMENTE com JSON: {"texto":"<as notas clínicas em prosa narrativa, com ## título e # seções quando úteis>","data":"<AAAA-MM-DD se uma data foi dita, senão vazio>"}`;
 
 function salvarJSON(s) {
   if (!s) return null;

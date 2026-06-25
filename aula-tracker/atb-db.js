@@ -16,11 +16,21 @@ export async function runAtbMigrations(pool) {
     )
   `);
 
+  // Renomeia o placeholder H2 → SCMI (Santa Casa de Itatiba). Roda ANTES do seed,
+  // para o INSERT seguinte ver SCMI já existindo e não criar linha duplicada.
+  // Preserva o id da linha (e portanto as FKs de fichas). Idempotente.
+  await pool.query(`
+    UPDATE atb_instituicoes
+       SET sigla='SCMI', nome='Irmandade da Santa Casa de Misericórdia de Itatiba'
+     WHERE sigla='H2'
+       AND NOT EXISTS (SELECT 1 FROM atb_instituicoes WHERE sigla='SCMI')
+  `);
+
   // Seed inicial (idempotente)
   await pool.query(`
     INSERT INTO atb_instituicoes (nome, sigla) VALUES
       ('Hospital União São Francisco', 'HUSF'),
-      ('Hospital 2', 'H2')
+      ('Irmandade da Santa Casa de Misericórdia de Itatiba', 'SCMI')
     ON CONFLICT (sigla) DO NOTHING
   `);
 

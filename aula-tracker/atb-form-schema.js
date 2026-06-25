@@ -253,6 +253,53 @@ export const SEMENTE_HUSF = {
   ]
 };
 
+// ── SCMI (Irmandade da Santa Casa de Misericórdia de Itatiba) ─────────────────
+// Schema do SCMI = SEMENTE_HUSF adaptado: setores/equipes próprios, sem o campo
+// "atendimento" (SCMI só usa Prontuário), e as condições que referenciam setor/
+// equipe remapeadas para a realidade do SCMI. Derivado por clonagem profunda para
+// herdar automaticamente qualquer evolução estrutural do HUSF.
+export const SETORES_SCMI = ['PS','Emergência','UTI 1','UTI 2','UTI Neo / Infantil','Pediatria','Enfermaria/Bloco','Apartamento','Executivo','Maternidade','Hemodiálise'];
+export const EQUIPES_SCMI = ['Clínica Médica','Cirurgia Geral','Ortopedia','Neurocirurgia','Urologia','Vascular','GO','Pediatria'];
+
+export function buildSCMI() {
+  const d = JSON.parse(JSON.stringify(SEMENTE_HUSF));
+  d.instituicao = 'SCMI';
+
+  const sec   = id => d.secoes.find(s => s.id === id);
+  const campo = (secId, key) => sec(secId).campos.find(c => c.key === key);
+  // substitui o valor de qualquer nó {campo:'setor', op:'in'} dentro de um cond
+  const setSetorIn = (node, lista) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.campo === 'setor' && node.op === 'in') { node.valor = lista; return; }
+    for (const k of ['all','any']) if (Array.isArray(node[k])) node[k].forEach(x => setSetorIn(x, lista));
+  };
+
+  // 1. Identificação: SCMI só tem Prontuário (remove "atendimento")
+  const ident = sec('identificacao');
+  ident.campos = ident.campos.filter(c => c.key !== 'atendimento');
+
+  // 2. Setores e 3. Equipes do SCMI
+  campo('internacao','setor').options  = [...SETORES_SCMI];
+  campo('internacao','equipe').options = [...EQUIPES_SCMI];
+
+  // 4. Data de admissão na UTI → UTIs do SCMI
+  campo('internacao','data_uti').cond = { campo:'setor', op:'in', valor:['UTI 1','UTI 2','UTI Neo / Infantil'] };
+
+  // 5. Gestante / Lactante → setor Maternidade OU equipe GO
+  const gestCond = () => ({ any:[ { campo:'setor', op:'eq', valor:'Maternidade' }, { campo:'equipe', op:'eq', valor:'GO' } ] });
+  campo('internacao','gestante').cond = gestCond();
+  campo('internacao','lactante').cond = gestCond();
+
+  // 6. SOFA: gatilho por setor crítico
+  setSetorIn(sec('sofa').cond, ['UTI 1','UTI 2','PS','Emergência']);
+
+  // 7. Dispositivos invasivos obrigatórios nas UTIs adultas (espelha UTI/UTI C do HUSF)
+  setSetorIn(campo('dispositivos','dispositivos_invasivos').requiredCond, ['UTI 1','UTI 2']);
+
+  // (oxacilina mantém o gatilho equipe=='Pediatria' — SCMI tem equipe Pediatria)
+  return d;
+}
+
 // ── Tabela + persistência ─────────────────────────────────────────────────────
 export async function ensureFormSchemaTable(pool) {
   await pool.query(`
@@ -268,21 +315,29 @@ export async function ensureFormSchemaTable(pool) {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_form_schema_inst_idx ON atb_form_schema(instituicao, ativo)`);
 
-  // Semeia HUSF e H2 se ainda não houver definição
+  // Semeia HUSF e SCMI se a tabela estiver vazia (instalação nova)
   const { rows:[{ n }] } = await pool.query(`SELECT COUNT(*) n FROM atb_form_schema`);
   if (parseInt(n,10) === 0) {
     await pool.query(
       `INSERT INTO atb_form_schema (instituicao, versao, definicao, ativo) VALUES ($1,$2,$3,true)`,
       ['HUSF', 1, JSON.stringify(SEMENTE_HUSF)]
     );
-    // H2 começa como cópia derivada do HUSF (forms independentes, mas H2 deriva do HUSF)
-    const defH2 = { ...SEMENTE_HUSF, instituicao:'H2' };
     await pool.query(
       `INSERT INTO atb_form_schema (instituicao, versao, definicao, ativo) VALUES ($1,$2,$3,true)`,
-      ['H2', 1, JSON.stringify(defH2)]
+      ['SCMI', 1, JSON.stringify(buildSCMI())]
     );
-    console.log('[atb-form-schema] semeado: HUSF + H2 (v1)');
+    console.log('[atb-form-schema] semeado: HUSF + SCMI (v1)');
   }
+
+  // Migração (produção): a linha placeholder 'H2' (cópia do HUSF) vira o schema real
+  // do SCMI. Idempotente — após renomear não há mais linha 'H2'. Não sobrescreve um
+  // SCMI já existente (instalação nova já semeou SCMI acima).
+  await pool.query(
+    `UPDATE atb_form_schema SET instituicao='SCMI', definicao=$1
+       WHERE instituicao='H2'
+         AND NOT EXISTS (SELECT 1 FROM atb_form_schema WHERE instituicao='SCMI')`,
+    [JSON.stringify(buildSCMI())]
+  );
 }
 
 export async function getFormSchema(pool, sigla) {

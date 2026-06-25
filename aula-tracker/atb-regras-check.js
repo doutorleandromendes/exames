@@ -17,6 +17,7 @@ import { getFormSchema } from './atb-form-schema.js';
 import { avaliaCondServer, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { contextoFicha, avaliaCond } from './atb-triagem-regras.js';
 import { getLatestHealthcheck, renderHealthCard } from './atb-healthcheck.js';
+import { envTenant } from './atb-tenant.js';
 
 // ── helpers de schema/síntese (form) ─────────────────────────────────────────
 function fieldMap(schema) {
@@ -143,15 +144,16 @@ function sintetizarTriagem(cond, ficha, ref, info){
 // ════════════════════════════════════════════════════════════════════════════
 //  CHECK 2 (automático): triagem + obrigatoriedade condicional
 // ════════════════════════════════════════════════════════════════════════════
-export async function runRegrasCheck(pool) {
-  const schema = await getFormSchema(pool, 'HUSF');
+export async function runRegrasCheck(pool, inst = 'HUSF') {
+  const schema = await getFormSchema(pool, inst);
   const map = fieldMap(schema);
   const detalhe = [];
   let passed = 0, failed = 0;
 
   // 1) Regras de triagem: sintetiza ficha que satisfaz → exige disparo
   const regras = (await pool.query(
-    'SELECT id, nome, condicoes FROM atb_triagem_regras WHERE ativo=true ORDER BY prioridade ASC, id ASC'
+    'SELECT id, nome, condicoes FROM atb_triagem_regras WHERE ativo=true AND instituicao=$1 ORDER BY prioridade ASC, id ASC',
+    [inst]
   )).rows;
   for (const rg of regras) {
     const caso = 'Triagem: ' + (rg.nome || ('#' + rg.id));
@@ -230,17 +232,17 @@ export async function runRegrasCheck(pool) {
 
   const total = detalhe.length, ok = failed === 0;
   const { rows: [row] } = await pool.query(
-    `INSERT INTO atb_regras_check (ok, total, passed, failed, detalhe)
-     VALUES ($1,$2,$3,$4,$5) RETURNING id, ran_at, ok, total, passed, failed`,
-    [ok, total, passed, failed, JSON.stringify(detalhe)]);
+    `INSERT INTO atb_regras_check (ok, total, passed, failed, detalhe, instituicao)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, ran_at, ok, total, passed, failed`,
+    [ok, total, passed, failed, JSON.stringify(detalhe), inst]);
   return Object.assign(row, { detalhe });
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 //  VISIBILIDADE (opt-in): auditoria das condições de visibilidade
 // ════════════════════════════════════════════════════════════════════════════
-export async function runVisibilidadeCheck(pool) {
-  const schema = await getFormSchema(pool, 'HUSF');
+export async function runVisibilidadeCheck(pool, inst = 'HUSF') {
+  const schema = await getFormSchema(pool, inst);
   const map = fieldMap(schema);
   const keys = new Set(Object.keys(map));
   const detalhe = [];
@@ -279,14 +281,36 @@ export async function ensureRegrasCheckTable(pool) {
       failed  INTEGER     NOT NULL,
       detalhe JSONB
     )`);
+  // Tenant (2c): resultados por instituição. Linhas existentes = HUSF.
+  await pool.query(`ALTER TABLE atb_regras_check ADD COLUMN IF NOT EXISTS instituicao TEXT`);
+  await pool.query(`UPDATE atb_regras_check SET instituicao='HUSF' WHERE instituicao IS NULL`);
 }
-export async function getLatestRegrasCheck(pool) {
+export async function getLatestRegrasCheck(pool, inst = 'HUSF') {
   const { rows: [row] } = await pool.query(
-    'SELECT id, ran_at, ok, total, passed, failed, detalhe FROM atb_regras_check ORDER BY ran_at DESC LIMIT 1');
+    'SELECT id, ran_at, ok, total, passed, failed, detalhe FROM atb_regras_check WHERE instituicao=$1 ORDER BY ran_at DESC LIMIT 1',
+    [inst]);
   return row || null;
 }
 export function startRegrasCheckSchedule(pool) {
-  const run = () => runRegrasCheck(pool).catch(e => console.error('[atb] regras-check run:', e.message));
+  // Job de fundo. Modelos suportados:
+  //  • por-env (ATB_TENANT setado): checa só esse tenant.
+  //  • por-subdomínio / legado (sem env): checa CADA instituição ativa, cada uma
+  //    com seu resultado tagueado (getLatest é escopado, cada painel vê só o seu).
+  //    No HUSF de hoje isso inclui HUSF; o check do HUSF continua igual ao atual.
+  const run = async () => {
+    try {
+      const fixo = envTenant();
+      const alvos = fixo
+        ? [fixo]
+        : (await pool.query('SELECT sigla FROM atb_instituicoes WHERE ativo=true ORDER BY id')).rows.map(r => r.sigla);
+      for (const sigla of alvos) {
+        await runRegrasCheck(pool, sigla)
+          .catch(e => console.error('[atb] regras-check run', sigla, '-', e.message));
+      }
+    } catch (e) {
+      console.error('[atb] regras-check schedule:', e.message);
+    }
+  };
   setTimeout(run, 45 * 1000);             // ~45s após o boot
   setInterval(run, 8 * 60 * 60 * 1000);   // a cada 8 horas
 }
@@ -323,11 +347,18 @@ function _tabelaFalhas(detalhe){
 
 // ── rotas: painel combinado (Envio + Lógica) + run + visibilidade (opt-in) ───
 export function registerRegrasCheckRoutes(app, pool, adminRequired) {
+  // Instituição por requisição: tenant-lock > ?inst= > HUSF (legado idêntico).
+  const instReq = (req) =>
+    req.atbTenant ||
+    String((req.query && req.query.inst) || 'HUSF').replace(/[^A-Za-z0-9_]/g, '') ||
+    'HUSF';
+
   // painel combinado para o /scih
   app.get('/atb/admin/regras-check/painel', adminRequired, async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const inst = instReq(req);
     try {
-      const rc = req.query.run === '1' ? await runRegrasCheck(pool) : await getLatestRegrasCheck(pool);
+      const rc = req.query.run === '1' ? await runRegrasCheck(pool, inst) : await getLatestRegrasCheck(pool, inst);
       const hc = await getLatestHealthcheck(pool).catch(() => null);
       res.send(`<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1"><title>Saúde do sistema</title></head>
@@ -357,7 +388,7 @@ export function registerRegrasCheckRoutes(app, pool, adminRequired) {
   app.get('/atb/admin/regras-check/visibilidade', adminRequired, async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     try {
-      const vc = await runVisibilidadeCheck(pool);
+      const vc = await runVisibilidadeCheck(pool, instReq(req));
       const card = vc.ok
         ? `<div style="margin:12px 0;padding:12px 16px;border:1px solid #bfe6cf;background:#f1faf4;border-radius:10px;color:#1a8a52;font-weight:700">Visibilidade OK — ${vc.passed}/${vc.total} condições válidas</div>`
         : `<div style="margin:12px 0;padding:12px 16px;border:1px solid #f3c2c2;background:#fdf2f2;border-radius:10px;color:#c0392b;font-weight:700">${vc.failed} de ${vc.total} condições com problema</div>`;

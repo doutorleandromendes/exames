@@ -164,7 +164,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1><a href="/pront">← Pacientes</a></div>`));
 
     const consultas = (await pool.query(
-      `SELECT id, data, texto, criado_por FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
+      `SELECT id, data, texto, criado_por, transcricao FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
     const ncol = (await pool.query(`SELECT count(*)::int n FROM pront_coletas WHERE paciente_id=$1`, [id])).rows[0].n;
 
     // coletas do laboratório ligadas a este paciente (via lab_patients.pront_id); guardado se o lab não existir
@@ -198,6 +198,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           ${req.user?.super_admin ? `<a class="mut" style="font-size:.85em" href="/pront/paciente/${id}/consulta/${c.id}/editar">editar</a>` : ""}
         </div>
         <div class="mt" style="line-height:1.5">${renderConsulta(c.texto)}</div>
+        ${(c.transcricao && req.user?.super_admin) ? `<details class="mt"><summary class="mut" style="cursor:pointer;font-size:.85em">Ver transcrição do áudio</summary><div class="mut mt" style="white-space:pre-wrap;font-size:.9em;line-height:1.5">${safe(c.transcricao)}</div></details>` : ""}
       </div>`).join("");
 
     res.send(renderShell(`Prontuário — ${safe(p.nome)}`, `
@@ -739,9 +740,11 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     try {
       const { paciente_id, data, texto } = req.body || {};
       if (!paciente_id || !texto || !texto.trim()) return res.status(400).json({ erro: "paciente e texto são obrigatórios" });
+      const doc = (await pool.query(`SELECT transcricao FROM pront_documentos WHERE id=$1`, [req.params.docId])).rows[0];
+      const transcricao = (doc && doc.transcricao) ? doc.transcricao : null;   // anexa a transcrição bruta do áudio à consulta
       const c = (await pool.query(
-        `INSERT INTO pront_consultas(paciente_id,data,texto,criado_por) VALUES($1,COALESCE(NULLIF($2,'')::date,current_date),$3,$4) RETURNING id`,
-        [paciente_id, data || "", texto.trim(), quem(req)])).rows[0];
+        `INSERT INTO pront_consultas(paciente_id,data,texto,criado_por,transcricao) VALUES($1,COALESCE(NULLIF($2,'')::date,current_date),$3,$4,$5) RETURNING id`,
+        [paciente_id, data || "", texto.trim(), quem(req), transcricao])).rows[0];
       await pool.query(`UPDATE pront_documentos SET status='confirmado', paciente_id=$2, processado_em=now() WHERE id=$1`, [req.params.docId, paciente_id]);
       res.json({ ok: true, consultaId: c.id });
     } catch (e) { res.status(500).json({ erro: String(e.message || e) }); }

@@ -11,6 +11,7 @@
 
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
+import { tenantMode, tenantFromReq } from './atb-tenant.js';
 
 const TOKEN_TTL_DIAS = 7;
 
@@ -129,6 +130,38 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
           ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema')}
         </div>
+        ${(() => {
+          // Atalhos para as OUTRAS instituições do ATB_TENANT_MAP (links absolutos,
+          // pois cada tenant é um subdomínio). Inerte no modo legado/env (sem mapa).
+          const { mapa } = tenantMode();
+          if (!mapa) return '';
+          const atual = tenantFromReq(req);
+          const baseDe = (sig) => {
+            const hosts = Object.keys(mapa).filter(h => mapa[h] === sig);
+            const pub = hosts.find(h => !/onrender\.com$/i.test(h)) || hosts[0];
+            return pub ? `https://${pub}` : null;
+          };
+          const outras = [...new Set(Object.values(mapa))].filter(s => s && s !== atual);
+          return outras.map(sig => {
+            const b = baseDe(sig);
+            if (!b) return '';
+            return `
+        <div class="sec">Atalhos ${esc(sig)} <span class="mut" style="font-weight:400">— abre em nova aba</span></div>
+        <div class="hub">
+          ${card(b + '/atb/admin/grid', '📋', 'Grade de controle', true)}
+          ${card(b + '/atb/admin/ficha-retrospectiva', '➕', 'Nova ficha retrospectiva', true)}
+          ${card(b + '/consulta', '🔎', 'Consulta / Farmácia', true)}
+          ${card(b + '/atb/admin/adesao', '📈', 'Adesão aos pareceres', true)}
+          ${card(b + '/atb/admin/scih', '👥', 'Aprovar acessos', true)}
+          ${card(b + '/atb/admin/regras', '🧠', 'Regras de triagem', true)}
+          ${card(b + '/atb/admin/form', '🧩', 'Editar opções do formulário', true)}
+          ${card(b + '/atb/admin/regras-form', '🔀', 'Regras do formulário', true)}
+          ${card(b + '/atb/admin/parecer-frases', '💬', 'Frases do Parecer', true)}
+          ${card(b + '/atb/admin/config', '⚙️', 'Configurar ATB', true)}
+          ${card(b + '/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema', true)}
+        </div>`;
+          }).join('');
+        })()}
       </div>`));
   });
 

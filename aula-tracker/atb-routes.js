@@ -1009,13 +1009,22 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           ${pageNum<totalPages?`<a href="${mkUrl(pageNum+1)}">→</a>`:'<span style="color:#ccc">→</span>'}
         </div>`:`<span style="color:#80868b;font-size:13px">${total} fichas</span>`;
 
+      // Identidade visual do tenant no cabeçalho (evita confundir HUSF × SCMI).
+      // Só quando há tenant travado; em modo legado fica idêntico a hoje.
+      const _sigla = req.atbTenant || '';
+      const _instTit  = _sigla ? ` <span style="color:#00469e;font-weight:600">— ${safe(_sigla)}</span>` : '';
+      const _instLogo = _sigla
+        ? `<img src="${getTenantLogo(_sigla)}" alt="${safe(_sigla)}" style="height:40px;width:auto;max-width:230px;object-fit:contain;align-self:center">`
+        : '';
+
       const html = `
         <div class="atb-light">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;margin-bottom:14px">
           <div style="display:flex;align-items:baseline;gap:14px">
-            <h1 style="margin:0;color:#202124">Controle ATB</h1>
+            <h1 style="margin:0;color:#202124">Controle ATB${_instTit}</h1>
             <span style="color:#80868b;font-size:13px">Vigilância · avaliação · stewardship</span>
           </div>
+          ${_instLogo}
           <div style="display:flex;gap:14px"><a href="/atb/admin/ficha-retrospectiva">+ Ficha retrospectiva</a><a href="/atb/admin/adesao">Adesão</a><a href="/atb/admin">Resumo</a><a href="/atb/admin/config">Configurar</a></div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
@@ -1207,7 +1216,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         n.style.cssText='background:#e6f1fb;color:#0c447c;border:1px solid #b5d4f4;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px';
         var w=document.querySelector('.wrap')||document.body; w.insertBefore(n,w.firstChild);
       });</script>` : '';
-      res.send(renderShell('ATB · Controle', html + microLock));
+      res.send(renderShell(`ATB · Controle${_sigla ? ' · ' + _sigla : ''}`, html + microLock));
     } catch (e) {
       console.error('[atb] grid error:', e);
       res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(e.message)}</p></div>`));

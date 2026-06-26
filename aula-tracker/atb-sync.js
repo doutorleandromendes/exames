@@ -10,6 +10,9 @@ const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 
 async function normalizarNome(nomeRaw) {
   if (!nomeRaw?.trim()) return nomeRaw || null;
+  // Sem chave de API (ou skip explícito) → devolve o nome cru, sem chamada externa.
+  // (usado na importação histórica: nomes entram crus e são normalizados em lote depois)
+  if (process.env.ATB_NOME_SKIP_API === '1' || !process.env.ANTHROPIC_API_KEY) return nomeRaw.trim();
   try {
     const res = await fetch(ANTHROPIC_API, {
       method: 'POST',

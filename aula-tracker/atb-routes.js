@@ -106,7 +106,11 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
   // ── Formulário do prescritor (público, motor schema-driven) ────────────
   const servirFicha = (req, res) => {
-    const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
+    // Instituição pelo tenant do subdomínio (req.atbTenant, setado pelo tenantLock em
+    // toda requisição). /ficha não começa com /atb, então o tenantLock NÃO força
+    // req.query.inst aqui — por isso lemos req.atbTenant direto (senão o logo cairia
+    // no HUSF). Em modo legado (sem tenant) cai no query/HUSF, idêntico a antes.
+    const inst = (req.atbTenant || req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     let html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');
     // injeta instituição + logo antes do bootstrap do motor
     const logoTenant = getTenantLogo(inst) || ATB_LOGO;   // por-tenant; HUSF cai no atb-logo.b64

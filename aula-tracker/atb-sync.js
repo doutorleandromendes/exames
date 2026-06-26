@@ -114,7 +114,7 @@ return JSON.parse(clean);
 
 // ── Inserção/atualização de ficha no banco ────────────────────────────────
 
-async function upsertFicha(pool, submissionId, parsed, instituicaoId, payloadRaw, criadaEm) {
+export async function upsertFicha(pool, submissionId, parsed, instituicaoId, payloadRaw, criadaEm) {
   try {
     const espelho = await pool.query('SELECT 1 FROM atb_fichas WHERE jotform_mirror_id = $1 LIMIT 1', [submissionId]);
     if (espelho.rowCount) return { id: null, inserted: false };

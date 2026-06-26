@@ -61,7 +61,18 @@ function ipCliente(req) {
   return req.ip;
 }
 
-function temAcesso(req) { return ehAdmin(req) || ipDoHospital(ipCliente(req)); }
+// tenants isentos da restrição de IP no /consulta (env removível; ex.: SCMI por enquanto).
+// CONSULTA_IP_LIVRE = siglas separadas por vírgula. Vazio → ninguém isento (igual a hoje).
+function tenantIpLivre(req) {
+  const livres = (process.env.CONSULTA_IP_LIVRE || '')
+    .split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+  const t = req && req.atbTenant ? String(req.atbTenant).toUpperCase() : null;
+  return !!(t && livres.includes(t));
+}
+function temAcesso(req) {
+  if (tenantIpLivre(req)) return true;             // tenant isento da checagem de IP (por config)
+  return ehAdmin(req) || ipDoHospital(ipCliente(req));
+}
 
 function _safe(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')

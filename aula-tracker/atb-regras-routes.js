@@ -51,6 +51,7 @@ const EXTRAS = [
   { key:'idade_anos', label:'Idade (anos)', tipo:'numero', calc:true },
   { key:'dias_internacao', label:'Dias desde a internação', tipo:'numero', calc:true },
   { key:'dias_uti', label:'Dias desde admissão na UTI', tipo:'numero', calc:true },
+  { key:'fichas_72h_mesmo_setor', label:'Outras fichas (mesmo prontuário+setor, 72h)', tipo:'numero', calc:true },
   { key:'dias_desde_submissao', label:'Dias desde a submissão', tipo:'numero', calc:true },
 ];
 // Chaves CALCULADAS em contextoFicha (sem coluna real em atb_fichas): aparecem no

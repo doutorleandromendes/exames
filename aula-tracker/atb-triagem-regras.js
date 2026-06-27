@@ -218,6 +218,30 @@ export async function aplicarRegras(pool, fichaId) {
     if (!regras.length) return null;
 
     const ctx = contextoFicha(f);
+
+    // Campo derivado por CONSULTA (cross-ficha): nº de OUTRAS fichas não-deletadas do
+    // MESMA INSTITUIÇÃO (tenant) + MESMO prontuário + MESMO setor, nas 72h ANTERIORES a esta (exclui a própria).
+    // Permite uma regra "IrAS Repetida" (condição: fichas_72h_mesmo_setor >= 1).
+    ctx.fichas_72h_mesmo_setor = 0;
+    if (f.prontuario && f.setor) {
+      const refData = f.data_referencia || f.jotform_created_at || f.created_at || null;
+      if (refData) {
+        const rc = await pool.query(
+          `SELECT COUNT(*)::int AS n
+             FROM atb_fichas o
+            WHERE o.id <> $1
+              AND o.deletado_em IS NULL
+              AND o.instituicao_id IS NOT DISTINCT FROM $5   -- mesmo tenant (prontuário é por-hospital)
+              AND o.prontuario = $2
+              AND o.setor = $3
+              AND COALESCE(o.data_referencia, o.jotform_created_at, o.created_at) >= ($4::timestamptz - interval '72 hours')
+              AND COALESCE(o.data_referencia, o.jotform_created_at, o.created_at) <  $4::timestamptz`,
+          [fichaId, f.prontuario, f.setor, refData, f.instituicao_id]
+        );
+        ctx.fichas_72h_mesmo_setor = rc.rows[0] ? rc.rows[0].n : 0;
+      }
+    }
+
     const regra = regras.find((r) => avaliaCond(r.condicoes, ctx));
     if (!regra) return null;
 

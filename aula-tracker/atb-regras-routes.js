@@ -19,6 +19,18 @@
 
 import { PARECER_VEREDITOS } from './atb-parecer-edit-routes.js';
 import { avaliaCond, contextoFicha, aplicarRegras } from './atb-triagem-regras.js';
+
+// Subquery correlacionada: nº de OUTRAS fichas (mesmo tenant + prontuário + setor) nas
+// 72h ANTERIORES à própria. Espelha fichas_72h_mesmo_setor do aplicarRegras (cross-ficha),
+// para que /testar e o backfill avaliem regras que usam esse campo derivado.
+const SUB_FICHAS_72H = `(
+  SELECT COUNT(*)::int FROM atb_fichas o
+   WHERE o.id <> f.id AND o.deletado_em IS NULL
+     AND o.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+     AND o.prontuario = f.prontuario AND o.setor = f.setor
+     AND COALESCE(o.data_referencia,o.jotform_created_at,o.created_at) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at) - interval '72 hours')
+     AND COALESCE(o.data_referencia,o.jotform_created_at,o.created_at) <  COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)
+)`;
 import { getFormSchema } from './atb-form-schema.js';
 
 const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
@@ -400,10 +412,11 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const COLS_BANCO = (await catalogoCampos(pool, inst)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
       const cols = ['id','paciente_dn','data_referencia','jotform_created_at','created_at', ...COLS_BANCO]
         .filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
-      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}`, [inst]);
+      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras, ${SUB_FICHAS_72H} AS _fichas72h FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}`, [inst]);
       let casam=0, ja=0, vaz=0, div=0;
       for(const f of rows){
         const ctx = contextoFicha(f);
+        ctx.fichas_72h_mesmo_setor = f._fichas72h || 0;
         if(avaliaCond(cond, ctx)){
           casam++;
           const temIras = f._iras!=null && String(f._iras).trim()!=='';
@@ -431,13 +444,14 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
     if(de){  params.push(de);  filtros.push(`${dataCanon} >= $${params.length}::date`); }
     if(ate){ params.push(ate); filtros.push(`${dataCanon} < ($${params.length}::date + interval '1 day')`); }
     const { rows } = await pool.query(
-      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid
+      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid, ${SUB_FICHAS_72H} AS _fichas72h
          FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
         WHERE ${filtros.join(' AND ')}`, params);
     const primeira = (ctx)=> ativas.find(r=>avaliaCond(r.condicoes, ctx));
     const candidatos=[], amostra=[]; let casamTotal=0, jaTriada=0, outraRegra=0;
     for(const f of rows){
       const ctx = contextoFicha(f);
+      ctx.fichas_72h_mesmo_setor = f._fichas72h || 0;
       if(!avaliaCond(regra.condicoes, ctx)) continue;
       casamTotal++;
       if(f._trid != null){ jaTriada++; continue; }

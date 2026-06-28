@@ -340,6 +340,11 @@ function paginaParecer(f, safe, frases) {
   .toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);padding:11px 20px;border-radius:8px;
     font-size:13px;font-weight:600;z-index:50;display:none}
   .toast.ok{background:#1a6b3a;color:#fff} .toast.erro{background:var(--vermelho);color:#fff}
+  .pos-save{max-width:560px;margin:14px auto 0;padding:12px 16px;border:1px solid #cde3d3;background:#f3faf5;border-radius:10px;font-size:13px;color:#1a4b2e}
+  .pos-save .ps-passo{margin:3px 0;line-height:1.5} .pos-save .ps-passo b{margin-right:4px}
+  .ps-acoes{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+  .ps-btn{padding:9px 14px;border:0;border-radius:8px;background:#1a6b3a;color:#fff;font-weight:600;font-size:13px;cursor:pointer}
+  .ps-btn.alt{background:#555} .ps-btn:disabled{opacity:.6;cursor:default}
 </style></head>
 <body>
   <div class="cab">
@@ -371,7 +376,18 @@ function paginaParecer(f, safe, frases) {
   <div class="rodape">
     <button class="salvar" id="btnSalvar">Salvar parecer</button>
   </div>
+
+  <div class="pos-save" id="posSave" style="display:none">
+    <div class="ps-passo"><b>1.</b> Prontuário <span id="psPront"></span> copiado — cole no Tasy para localizar o paciente.</div>
+    <div class="ps-passo"><b>2.</b> Depois, copie a imagem do parecer e cole como evolução:</div>
+    <div class="ps-acoes">
+      <button type="button" class="ps-btn" id="btnCopiarImg">🖼️ Copiar imagem do parecer</button>
+      <button type="button" class="ps-btn alt" id="btnCopiarPront" style="display:none">📋 Copiar prontuário</button>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
+  <div id="pe-img-fonte" style="position:fixed;left:-99999px;top:0;pointer-events:none"></div>
 
 <script>
 (function(){
@@ -381,6 +397,30 @@ function paginaParecer(f, safe, frases) {
   var veredito = document.getElementById('veredito');
   var btn = document.getElementById('btnSalvar');
   var toast = document.getElementById('toast');
+  var PRONT = ${JSON.stringify(f.prontuario || '')};
+  var FID = ${f.id};
+  var posSave = document.getElementById('posSave');
+  var psPront = document.getElementById('psPront');
+  var btnCopiarImg = document.getElementById('btnCopiarImg');
+  var btnCopiarPront = document.getElementById('btnCopiarPront');
+
+  var _h2c = null;
+  function carregarH2C(){
+    if(window.html2canvas) return Promise.resolve();
+    if(_h2c) return _h2c;
+    _h2c = new Promise(function(res, rej){
+      var sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      sc.onload = res; sc.onerror = rej;
+      document.head.appendChild(sc);
+    });
+    return _h2c;
+  }
+  function copiarPront(){
+    if(!PRONT) return Promise.reject();
+    if(!(navigator.clipboard && navigator.clipboard.writeText)) return Promise.reject();
+    return navigator.clipboard.writeText(PRONT);
+  }
 
   insere.addEventListener('change', function(){
     if(insere.value === '') return;
@@ -406,9 +446,51 @@ function paginaParecer(f, safe, frases) {
       body: JSON.stringify({ veredito: veredito.value, especificacao: ta.value.trim() })
     }).then(function(r){return r.json();}).then(function(j){
       btn.disabled = false;
-      if(j && j.ok) showToast('Parecer salvo.', true);
+      if(j && j.ok){ showToast('Parecer salvo.', true); aposSalvar(); }
       else showToast((j && j.error) || 'Falha ao salvar.', false);
     }).catch(function(){ btn.disabled=false; showToast('Erro de rede.', false); });
+  });
+
+  function aposSalvar(){
+    posSave.style.display = 'block';
+    psPront.textContent = PRONT ? ('('+PRONT+')') : '';
+    carregarH2C().catch(function(){});           // pré-carrega p/ a imagem sair rápido
+    // Passo 1: copia o prontuário automaticamente (writeText aguenta o pós-fetch
+    // dentro da ativação do clique). Se falhar, oferece botão manual.
+    copiarPront().then(function(){ btnCopiarPront.style.display = 'none'; })
+                 .catch(function(){ btnCopiarPront.style.display = ''; });
+    try { btnCopiarImg.focus(); } catch(e){}
+  }
+
+  btnCopiarPront.addEventListener('click', function(){
+    copiarPront().then(function(){
+      var o = btnCopiarPront.textContent; btnCopiarPront.textContent = '✓ copiado';
+      setTimeout(function(){ btnCopiarPront.textContent = o; }, 1200);
+    }).catch(function(){ showToast('Não foi possível copiar o prontuário.', false); });
+  });
+
+  function abrirPopupImg(){ window.open('/atb/admin/parecer/' + FID + '/imagem', 'parecer', 'width=1060,height=940'); }
+
+  // Passo 2: imagem precisa do PRÓPRIO clique (o gesto do save já expirou). Padrão
+  // robusto: clipboard.write síncrono no gesto, com Promise<Blob> dentro do ClipboardItem.
+  btnCopiarImg.addEventListener('click', function(){
+    if(!(navigator.clipboard && window.ClipboardItem)){ abrirPopupImg(); return; }
+    var orig = btnCopiarImg.textContent; btnCopiarImg.disabled = true; btnCopiarImg.textContent = '⏳ gerando…';
+    var blobPromise = carregarH2C()
+      .then(function(){ return fetch('/atb/admin/parecer/' + FID + '/imagem.json'); })
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j || !j.ok) throw new Error('fragmento');
+        var fonte = document.getElementById('pe-img-fonte');
+        fonte.innerHTML = '<style>' + j.css + '</style>' + j.html;
+        var card = fonte.querySelector('.parecer-card');
+        return window.html2canvas(card, { scale: 2, backgroundColor: null, useCORS: true, logging: false });
+      })
+      .then(function(canvas){ return new Promise(function(res, rej){ canvas.toBlob(function(b){ b ? res(b) : rej(new Error('blob')); }, 'image/png'); }); });
+    navigator.clipboard.write([ new ClipboardItem({ 'image/png': blobPromise }) ])
+      .then(function(){ btnCopiarImg.textContent = '✓ imagem copiada'; showToast('Imagem copiada — cole como evolução no Tasy.', true);
+        setTimeout(function(){ btnCopiarImg.textContent = orig; btnCopiarImg.disabled = false; }, 1500); })
+      .catch(function(){ btnCopiarImg.textContent = orig; btnCopiarImg.disabled = false; abrirPopupImg(); });
   });
 })();
 </script>

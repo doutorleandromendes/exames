@@ -211,6 +211,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
             <a href="/pront/paciente/${id}/exames/importar"><button type="button" style="background:#0369a1">Importar exames</button></a>
             <a href="/pront/paciente/${id}/upload"><button type="button" style="background:#0e9f6e">Enviar exame</button></a>
             ${p.nome ? `<a href="${safe('http://localhost:3000/api/buscar?nome=' + String(p.nome).trim().replace(/\s+/g,'+'))}" target="_blank"><button type="button" style="background:#0891b2">🔬 LIS</button></a>` : ""}
+            <a href="/pront/paciente/${id}/orcamento" target="_blank"><button type="button" style="background:#0d9488">Orçamento</button></a>
             ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>` : ""}
             ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>` : ""}
             <a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>
@@ -995,6 +996,21 @@ window.__READY=1;`;
       }catch(e){if(w)w.close();m.style.color='#b91c1c';m.textContent='Erro: '+e.message;d.disabled=false;}
     };
   })();</script>`;
+
+  // orçamento de exames complementares: injeta o nome do paciente no campo e serve a página
+  app.get("/pront/paciente/:id/orcamento", authRequired, async (req, res) => {
+    const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
+    try {
+      let html = await readFile(new URL("./orcamento_extra.html", import.meta.url), "utf8");
+      const nomeAttr = String(p.nome || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+      html = html.replace('<input id="nome" type="text"/>', `<input id="nome" type="text" value="${nomeAttr}"/>`);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (e) {
+      res.status(500).send(renderShell("Erro", `<div class="card"><h1>Orçamento indisponível</h1><div class="mut">${safe(e.message)}</div></div>`));
+    }
+  });
 
   app.get("/pront/paciente/:id/documento", medicoRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];

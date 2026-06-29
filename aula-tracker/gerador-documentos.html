@@ -374,7 +374,8 @@ function footerBlock(){
   <div class="grp"><h3>Assinatura</h3>
     <label class="f"><span>Modelo</span><select id="assina">
       <option value="imagem"${S.assina==="imagem"?" selected":""}>Imagem digitalizada (carimbo)</option>
-      <option value="linha"${S.assina==="linha"?" selected":""}>Linha em branco (assinar à mão)</option></select></label>
+      <option value="linha"${S.assina==="linha"?" selected":""}>Linha em branco (assinar à mão)</option>
+      <option value="nenhuma"${S.assina==="nenhuma"?" selected":""}>Sem assinatura</option></select></label>
     <div class="row">
       <label class="f"><span>CRM</span><input type="text" id="crm" value="${esc(S.crm)}"></label>
       <label class="f"><span>RQE</span><input type="text" id="rqe" value="${esc(S.rqe)}"></label></div>
@@ -690,6 +691,7 @@ function gerarAtestado(){
 
 /* ===== Documento ============================================== */
 function signBlock(){
+  if(S.assina==="nenhuma")return "";
   const ld=`${esc(S.local)}, ${dataExtenso(S.data)}`;
   let inner;
   if(S.assina==="imagem"){

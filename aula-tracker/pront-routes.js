@@ -844,6 +844,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           <div><label>CPF</label><input name="cpf" value="${safe(p.cpf || "")}"/></div>
           <div><label>Telefone</label><input name="telefone" value="${safe(p.telefone || "")}"/></div>
         </div>
+        <label class="mt">Endereço</label>
+        <input name="endereco" value="${safe(p.endereco || "")}" placeholder="Rua, nº, bairro, cidade"/>
         <label class="mt">Observações</label>
         <textarea name="obs" rows="3">${safe(p.obs || "")}</textarea>
         <div class="mt2"><button type="submit">Salvar</button></div>
@@ -855,11 +857,11 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     res.send(renderShell("Novo paciente", `<div class="admin-back-top"><a href="/pront">← Prontuário</a></div>${formPaciente({}, "/pront/novo", "Novo paciente")}`)));
 
   app.post("/pront/novo", authRequired, async (req, res) => {
-    const { nome, dn, sexo, cpf, telefone, obs } = req.body || {};
+    const { nome, dn, sexo, cpf, telefone, endereco, obs } = req.body || {};
     if (!nome || !nome.trim()) return res.send(renderShell("Novo paciente", `<div class="card"><p>Nome é obrigatório.</p><a href="/pront/novo">Voltar</a></div>`));
     const r = (await pool.query(
-      `INSERT INTO pront_pacientes(nome,dn,sexo,cpf,telefone,obs,criado_por) VALUES($1,NULLIF($2,'')::date,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7) RETURNING id`,
-      [nome.trim(), dn || "", sexo || "", cpf || "", telefone || "", obs || "", quem(req)])).rows[0];
+      `INSERT INTO pront_pacientes(nome,dn,sexo,cpf,telefone,endereco,obs,criado_por) VALUES($1,NULLIF($2,'')::date,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),$8) RETURNING id`,
+      [nome.trim(), dn || "", sexo || "", cpf || "", telefone || "", endereco || "", obs || "", quem(req)])).rows[0];
     res.redirect(`/pront/paciente/${r.id}`);
   });
 
@@ -871,11 +873,11 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   });
 
   app.post("/pront/paciente/:id/editar", authRequired, async (req, res) => {
-    const { nome, dn, sexo, cpf, telefone, obs } = req.body || {};
+    const { nome, dn, sexo, cpf, telefone, endereco, obs } = req.body || {};
     if (!nome || !nome.trim()) return res.redirect(`/pront/paciente/${req.params.id}/editar`);
     await pool.query(
-      `UPDATE pront_pacientes SET nome=$2, dn=NULLIF($3,'')::date, sexo=NULLIF($4,''), cpf=NULLIF($5,''), telefone=NULLIF($6,''), obs=NULLIF($7,''), atualizado_em=now() WHERE id=$1`,
-      [req.params.id, nome.trim(), dn || "", sexo || "", cpf || "", telefone || "", obs || ""]);
+      `UPDATE pront_pacientes SET nome=$2, dn=NULLIF($3,'')::date, sexo=NULLIF($4,''), cpf=NULLIF($5,''), telefone=NULLIF($6,''), endereco=NULLIF($7,''), obs=NULLIF($8,''), atualizado_em=now() WHERE id=$1`,
+      [req.params.id, nome.trim(), dn || "", sexo || "", cpf || "", telefone || "", endereco || "", obs || ""]);
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 
@@ -1014,12 +1016,14 @@ window.__READY=1;`;
   });
 
   app.get("/pront/paciente/:id/documento", medicoRequired, async (req, res) => {
-    const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    const p = (await pool.query(`SELECT id, nome, endereco FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
     try {
       let html = await geradorBase();
       const nomeJS = JSON.stringify(p.nome).replace(/</g, "\\u003c");   // injeta nome no estado inicial
       html = html.replace('paciente:""', `paciente:${nomeJS}`);
+      const endJS = JSON.stringify(p.endereco || "").replace(/</g, "\\u003c");   // injeta endereço (receituário de controle)
+      html = html.replace('pacEnd:""', `pacEnd:${endJS}`);
       const saveUrl = `/pront/paciente/${p.id}/documento/salvar`;
       const ppUrl = `/pront/paciente/${p.id}/documento/pdf-timbrado`;
       html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};</script>${SAVE_UI}</body>`);

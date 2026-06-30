@@ -210,6 +210,7 @@
     <button data-paper="A5" aria-pressed="false">A5</button>
   </div>
   <button class="btn" id="btnClear">Limpar</button>
+  <button class="btn" id="btnNovo" title="Limpa o documento mas mantém o paciente, para emitir outro">Novo documento</button>
   <button class="btn btn-print" id="btnPrint">Imprimir / Salvar PDF</button>
 </div>
 
@@ -855,6 +856,17 @@ $("#btnClear").addEventListener("click",()=>{
   S.rel={titulo:S.rel.titulo,corpo:""};
   S.ate={modelo:"afastamento",dias:1,atividade:"laborais",pdata:today,hi:"",hf:"",acompanhante:"",cid:"",cidDesc:"",incluirCid:false,texto:"",dirty:false};
   renderPanel();renderDoc();});
+function novoDocumento(){
+  // mantém o paciente e os padrões (nome/CRM/local/assinatura/papel); zera só o conteúdo do documento
+  S.data=today;
+  S.rx={tipo:S.rx.tipo,continuo:false,itens:[{med:"",pos:"",qtd:""}]};
+  S.ped={indicacao:"",cid:"",cidDesc:"",outros:"",sel:[],tuss:{}};
+  S.rel={titulo:S.rel.titulo,corpo:""};
+  S.ate={modelo:"afastamento",dias:1,atividade:"laborais",pdata:today,hi:"",hf:"",acompanhante:"",cid:"",cidDesc:"",incluirCid:false,texto:"",dirty:false};
+  renderPanel();renderDoc();
+}
+window.novoDocumento=novoDocumento;
+$("#btnNovo")&&$("#btnNovo").addEventListener("click",novoDocumento);
 window.addEventListener("resize",fitPreview);
 
 /* ===== Init =================================================== */

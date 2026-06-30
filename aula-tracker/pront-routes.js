@@ -362,6 +362,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
 
   // ===== UPLOAD -> FILA =====
   const jsonGrande = express.json({ limit: "25mb" });
+  const jsonAudio = express.json({ limit: "50mb" });   // áudio (base64 infla ~33%) — comporta consulta inteira do iPhone
 
   // form de upload (foto/PDF) a partir do paciente
   app.get("/pront/paciente/:id/upload", authRequired, async (req, res) => {
@@ -771,7 +772,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       <div class="admin-back-top"><a href="/pront/paciente/${p.id}">← ${safe(p.nome)}</a></div>
       <div class="card">
         <h1 style="margin-top:0">Áudio da consulta</h1>
-        <p class="mut">Exporte o áudio do PlaudNote (WAV/MP3) e envie aqui. A transcrição roda na máquina da clínica — o áudio não vai pra nuvem. Vira um rascunho que você revisa antes de salvar.</p>
+        <p class="mut">Envie o áudio da consulta — serve o Gravador de Voz do iPhone (.m4a), o PlaudNote, ou WAV/MP3. A transcrição roda na máquina da clínica — o áudio não vai pra nuvem. Vira um rascunho que você revisa antes de salvar.</p>
         <label>Modo</label>
         <div class="row" style="grid-template-columns:1fr 1fr">
           <label style="font-weight:400;border:1px solid var(--bd);border-radius:10px;padding:10px;cursor:pointer"><input type="radio" name="modo" value="resumo" checked style="width:auto"/> <b>Resumo ditado</b><div class="mut" style="font-size:.85em">você narra o resumo; uma voz</div></label>
@@ -779,7 +780,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         </div>
         <label class="mt" id="diarwrap" style="display:none"><input type="checkbox" id="diar" style="width:auto"/> Tentar separar quem falou (diarização)</label>
         <label class="mt">Arquivo de áudio</label>
-        <input type="file" id="arq" accept="audio/*"/>
+        <input type="file" id="arq" accept="audio/*,.m4a,.mp3,.wav,.aac,.caf"/>
         <div class="mt"><button type="button" id="env">Enviar para transcrição</button></div>
         <div id="msg" class="mt mut"></div>
       </div>
@@ -789,7 +790,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         const arq=document.getElementById('arq'),msg=document.getElementById('msg'),bt=document.getElementById('env');
         bt.onclick=async()=>{
           const f=arq.files[0]; if(!f){msg.textContent='Escolha um arquivo de áudio.';return;}
-          if(f.size>24*1024*1024){msg.textContent='Arquivo grande demais (máx 24MB). Exporte em MP3 ou divida o áudio.';return;}
+          if(f.size>35*1024*1024){msg.textContent='Arquivo grande demais (máx 35 MB). Grave em qualidade "Comprimida" no iPhone, exporte em MP3, ou divida o áudio.';return;}
           bt.disabled=true; msg.textContent='Enviando…';
           const b64=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=er;r.readAsDataURL(f);});
           const modo=document.querySelector('input[name=modo]:checked').value;
@@ -802,12 +803,12 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       </script>`));
   });
 
-  app.post("/pront/paciente/:id/consulta/audio", medicoRequired, jsonGrande, async (req, res) => {
+  app.post("/pront/paciente/:id/consulta/audio", medicoRequired, jsonAudio, async (req, res) => {
     try {
       const { data, contentType, nome, modo, diarizar } = req.body || {};
       if (!data) return res.status(400).json({ erro: "sem dados" });
       const buffer = Buffer.from(data, "base64");
-      if (buffer.length > 25e6) return res.status(413).json({ erro: "arquivo grande demais" });
+      if (buffer.length > 38e6) return res.status(413).json({ erro: "arquivo grande demais" });
       const ext = (nome || "").match(/\.[a-z0-9]+$/i)?.[0] || ".m4a";
       const r2key = `pront/audio/${req.params.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
       await uploadToR2(r2key, buffer, contentType || "application/octet-stream");

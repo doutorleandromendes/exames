@@ -16,6 +16,10 @@ export async function runProntMigrations(pool) {
     criado_em     TIMESTAMPTZ DEFAULT now(),
     atualizado_em TIMESTAMPTZ DEFAULT now()
   );
+  ALTER TABLE pront_pacientes ADD COLUMN IF NOT EXISTS endereco TEXT;   -- endereço estruturado (receituário de controle)
+  UPDATE pront_pacientes
+     SET endereco = btrim((regexp_match(obs, 'Endereço:[ ]*(.*)', 'n'))[1])
+   WHERE endereco IS NULL AND obs LIKE '%Endereço:%';   -- backfill: extrai do obs migrado do JotForm
   CREATE INDEX IF NOT EXISTS idx_pront_pac_nome ON pront_pacientes (lower(nome));
   CREATE INDEX IF NOT EXISTS idx_pront_pac_cpf  ON pront_pacientes (cpf);
 

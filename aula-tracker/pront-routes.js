@@ -975,7 +975,7 @@ window.__READY=1;`;
       try{
         var r=await fetch(window.__SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
         var j=await r.json();
-        if(r.ok&&j.ok){m.style.color='#0e7a4b';m.textContent='Salvo na ficha ✓';}
+        if(r.ok&&j.ok){m.style.color='#0e7a4b';m.innerHTML="Salvo na ficha ✓ &nbsp;<a href='#' id='__novo' style='color:#0c447c;font-weight:600'>Novo documento</a>";var nv=document.getElementById('__novo');if(nv)nv.onclick=function(ev){ev.preventDefault();if(window.novoDocumento)window.novoDocumento();m.textContent='';b.disabled=false;};}
         else{m.style.color='#b91c1c';m.textContent='Falha: '+(j.erro||r.status);b.disabled=false;}
       }catch(e){m.style.color='#b91c1c';m.textContent='Erro: '+e.message;b.disabled=false;}
     };

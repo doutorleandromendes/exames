@@ -538,6 +538,255 @@
     );
   }
 
+  // ── Auxílio de dose — Vancomicina (alvo AUC 400–600) ──────────────────────
+  // Widget de apoio ao prescritor. Lê peso real e ClCr atual (chaves reais
+  // 'peso'/'clcr', que persistem), foco e CIM (estado local). Sugere ataque,
+  // manutenção e intervalo, estima a AUC24 a priori e alerta por CIM. Botão
+  // "aplicar na posologia" grava dose+intervalo na linha da Vancomicina.
+  // Estimativa populacional — SEMPRE refinar por nível/AUC bayesiano real.
+  var VANCO_CL_COEF = 0.048; // CL vanco (L/h) ≈ 0,048 × ClCr(mL/min) — a priori
+  var VANCO_FOCOS = [
+    { v:'Bacteremia / sepse',            grave:true,  mgkg:20 },
+    { v:'Endocardite',                   grave:true,  mgkg:20 },
+    { v:'SNC / meningite',               grave:true,  mgkg:20 },
+    { v:'Osteoarticular',                grave:true,  mgkg:20 },
+    { v:'Pneumonia',                     grave:true,  mgkg:20 },
+    { v:'ICS relacionada a cateter',     grave:true,  mgkg:20 },
+    { v:'Pele e partes moles',           grave:false, mgkg:15 },
+    { v:'ITU',                           grave:false, mgkg:15 },
+    { v:'Outro / não especificado',      grave:false, mgkg:15 }
+  ];
+  function _vNum(v) { var n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) ? n : NaN; }
+  function _vRound250(mg) { return Math.round(mg / 250) * 250; }
+  function _vFmtG(mg) {
+    if (!isFinite(mg)) return '—';
+    var g = mg / 1000, s = (Math.round(g * 100) / 100).toString().replace('.', ',');
+    return s + ' g';
+  }
+  function _vIntervaloHoras(clcr, aggressive) {
+    if (!isFinite(clcr)) return null;
+    if (clcr >= 90) return { horas: aggressive ? 8 : 12, label: aggressive ? '8/8h' : '12/12h', aplica: aggressive ? '8/8h' : '12/12h', nota: aggressive ? 'intervalo encurtado (foco grave / CIM 2)' : '' };
+    if (clcr >= 50) return { horas:12, label:'12/12h',  aplica:'12/12h', nota:'' };
+    if (clcr >= 30) return { horas:24, label:'24/24h',  aplica:'24/24h', nota:'' };
+    if (clcr >= 15) return { horas:null, label:'24–48h', aplica:'24/24h', nota:'guiar por nível — sem cálculo automático de dose', guiado:true };
+    return { horas:null, label:'pós-HD / por nível', aplica:'', nota:'ataque + reposição pós-diálise; guiar por nível', guiado:true };
+  }
+  // Núcleo. Dois modos:
+  //  • HD intermitente alto fluxo (HUSF): remove ~30–50%/sessão → carga 20–25 mg/kg
+  //    + manutenção ~10 mg/kg APÓS cada sessão, guiada por nível pré-HD (alvo 15–20).
+  //    Não calcula AUC (targeting por nível pré-HD é o padrão prático em HD).
+  //  • Não-HD: AUC-driven (dose calculada p/ AUC-alvo dado o ClCr; foco/CIM encurtam
+  //    intervalo). Teto por dose 2 g e diário 4,5 g. IMC≥30 dispara avisos de obesidade.
+  function computeVanco(peso, clcr, foco, tipoTerapia, mic, altura, hd) {
+    var r = { ok:false, avisos:[] };
+    var pesoN = _vNum(peso), clcrN = _vNum(clcr), altN = _vNum(altura);
+    r.pesoOk = isFinite(pesoN) && pesoN > 0;
+    r.clcrOk = isFinite(clcrN) && clcrN >= 0;
+    var focoDef = null, i;
+    for (i = 0; i < VANCO_FOCOS.length; i++) if (VANCO_FOCOS[i].v === foco) focoDef = VANCO_FOCOS[i];
+    r.grave = !!(focoDef && focoDef.grave);
+    var profilaxia = tipoTerapia === 'Profilaxia cirúrgica';
+    r.profilaxia = profilaxia;
+
+    // IMC / obesidade
+    if (r.pesoOk && isFinite(altN) && altN > 0) {
+      r.imc = pesoN / Math.pow(altN / 100, 2);
+      r.obeso = r.imc >= 30;
+    }
+
+    // Ataque (mg/kg peso real, teto 3 g) — suprimido em profilaxia cirúrgica
+    if (r.pesoOk && !profilaxia) {
+      r.ataqueMg = Math.min(_vRound250(25 * pesoN), 3000);
+      r.ataqueFaixa = r.obeso ? '20–25 mg/kg' : '25–30 mg/kg';
+    }
+
+    // ── Modo HD intermitente alto fluxo ─────────────────────────────────────
+    if (hd) {
+      r.hd = true;
+      if (r.pesoOk) {
+        r.doseMg = _vRound250(10 * pesoN);           // ~7,5–10 mg/kg
+        if (r.doseMg < 500) r.doseMg = 500;
+        if (r.doseMg > 1500) r.doseMg = 1500;
+        r.doseTxt = _vFmtG(r.doseMg);
+        r.mgkg = Math.round(r.doseMg / pesoN);
+      }
+      r.intervalo = { label:'após cada sessão de HD', aplica:'após cada HD' };
+      r.alvoTxt = 'nível pré-HD 15–20 µg/mL';
+      r.avisos.push('Alto fluxo remove ~30–50% da vancomicina por sessão — administrar a manutenção APÓS a HD.');
+      r.avisos.push('Guiar pelo nível PRÉ-HD (alvo 15–20 µg/mL): segurar a dose se pré-HD > 20–25 µg/mL. TDM antes de cada sessão até estabilizar; depois semanal.');
+      r.avisos.push('Rebote 3–6h pós-HD: se colher nível pós-HD, aguardar 4–6h para não subestimar.');
+      if (mic === '2') { r.micFlag = 'atencao'; r.avisos.push('CIM 2: alvo difícil de atingir com segurança. Considerar alternativa (daptomicina/linezolida).'); }
+      else if (mic === '≥ 4') { r.micFlag = 'critico'; r.avisos.push('CIM ≥4: vancomicina inadequada. Trocar a droga.'); }
+      else r.micFlag = 'ok';
+      r.podeAplicar = !!(r.doseTxt);
+      r.ok = r.pesoOk;
+      return r;
+    }
+
+    // ── Modo não-HD: AUC-driven ─────────────────────────────────────────────
+    var aggressive = r.grave || mic === '2';
+    var aucAlvo = r.grave ? 500 : 450;
+    if (mic === '2') aucAlvo = 600;
+    r.aucAlvo = aucAlvo;
+
+    r.intervalo = r.clcrOk ? _vIntervaloHoras(clcrN, aggressive) : null;
+
+    if (r.clcrOk && clcrN > 0 && r.intervalo && r.intervalo.horas) {
+      var cl = VANCO_CL_COEF * clcrN;                 // L/h
+      var freq = 24 / r.intervalo.horas;
+      var perDose = (aucAlvo * cl) / freq;
+      var dose = _vRound250(perDose);
+      if (dose < 250) dose = 250;
+      if (dose > 2000) { dose = 2000; r.avisos.push('Dose por administração limitada a 2 g — considerar intervalo menor ou monitorização por nível.'); }
+      // Teto diário ~4,5 g
+      if (dose * freq > 4500) {
+        dose = Math.max(250, _vRound250(4500 / freq));
+        r.avisos.push('Dose diária limitada a ~4,5 g — ajustar por nível/AUC real.');
+      }
+      r.doseMg = dose;
+      r.doseTxt = _vFmtG(dose);
+      var tddReal = dose * freq;
+      r.auc = tddReal / cl;
+      if (r.pesoOk) r.mgkg = Math.round(dose / pesoN);
+      if (r.auc < 400) { r.aucFlag = 'baixo'; r.avisos.push('AUC estimada < 400 — considerar dose maior ou intervalo menor.'); }
+      else if (r.auc > 600) { r.aucFlag = 'alto'; r.avisos.push('AUC estimada > 600 — risco de nefrotoxicidade; considerar reduzir.'); }
+      else r.aucFlag = 'alvo';
+    } else if (r.clcrOk && r.intervalo && r.intervalo.guiado) {
+      r.guiado = true;
+    }
+
+    if (r.obeso) {
+      r.avisos.push('Obesidade (IMC ' + Math.round(r.imc) + '): risco aumentado de nefrotoxicidade e acúmulo. A dose acima é baseada no clearance (evita a superdose do mg/kg linear); confirmar AUC/nível em 24–48h e monitorizar de perto.');
+    }
+
+    if (mic === '2') { r.micFlag = 'atencao'; r.avisos.push('CIM 2: atingir AUC/CIM ≥400 exigiria AUC ≈800 (nefrotóxico). Considerar alternativa (daptomicina/linezolida) ou monitorização rigorosa.'); }
+    else if (mic === '≥ 4') { r.micFlag = 'critico'; r.avisos.push('CIM ≥4: vancomicina inadequada. Trocar a droga.'); }
+    else r.micFlag = 'ok';
+
+    r.podeAplicar = !!(r.doseTxt && r.intervalo && r.intervalo.aplica);
+    r.ok = r.pesoOk && r.clcrOk;
+    return r;
+  }
+
+  function CampoDoseVanco(p) {
+    var f = p.campo;
+    var V = p.valores || {};
+    var focoSt = useState(''), foco = focoSt[0], setFoco = focoSt[1];
+    var micSt = useState('não disponível'), mic = micSt[0], setMic = micSt[1];
+    var aplSt = useState(false), aplicado = aplSt[0], setAplicado = aplSt[1];
+
+    // HD detectada pelos campos existentes da ficha (diálise / setor)
+    var hd = V['dialise'] === 'Sim' || /hemodial/i.test(String(V['setor'] || ''));
+    var res = computeVanco(V['peso'], V['clcr'], foco, V['tipo_terapia'], mic, V['altura'], hd);
+
+    var box = { background:'#f4f8ff', border:'1px solid #cfe0f7', borderRadius:'10px', padding:'14px', marginTop:'6px' };
+    var grpStyle = { fontWeight:600, color:'#0c447c', margin:'2px 0 8px', fontSize:'13px' };
+    var linha = { display:'flex', flexWrap:'wrap', gap:'10px', marginBottom:'10px' };
+    var mini = { fontSize:'12px', color:'#456', display:'block', marginBottom:'3px' };
+    var inp = { width:'96px', padding:'7px 8px', border:'1px solid #b9cae6', borderRadius:'7px', fontSize:'14px' };
+    var sel = { padding:'7px 8px', border:'1px solid #b9cae6', borderRadius:'7px', fontSize:'14px', background:'#fff' };
+
+    function setKey(k) { return function (v) { p.set(k, v); setAplicado(false); }; }
+    var setPeso = setKey('peso'), setClcr = setKey('clcr'), setAltura = setKey('altura');
+
+    function aplicar() {
+      var atb = Array.isArray(V['atb_solicitado']) ? V['atb_solicitado'] : [];
+      var idx = atb.indexOf('Vancomicina');
+      if (idx < 0 || !res.podeAplicar) return;
+      var pos = Array.isArray(V['posologia']) ? V['posologia'].slice() : [];
+      pos[idx] = Object.assign({}, pos[idx], {
+        droga: 'Vancomicina',
+        dose: res.doseTxt,
+        intervalo: res.intervalo.aplica || res.intervalo.label
+      });
+      p.set('posologia', pos);
+      setAplicado(true);
+    }
+
+    var aucCor = res.aucFlag === 'alvo' ? '#1c7c3c' : (res.aucFlag ? '#a4700a' : '#556');
+
+    var resultado = [];
+    if (res.ok) {
+      if (res.ataqueMg) resultado.push(e('div', { key:'atq', style:{ marginBottom:'6px' } },
+        e('b', null, 'Ataque: '), _vFmtG(res.ataqueMg),
+        e('span', { style:{ color:'#667', fontSize:'12px' } }, '  (' + (res.ataqueFaixa || '25–30 mg/kg') + ', dose única — prescrever à parte)')));
+      if (res.profilaxia) resultado.push(e('div', { key:'prof', style:{ marginBottom:'6px', color:'#667', fontSize:'12px' } },
+        'Profilaxia cirúrgica: dose única de 15 mg/kg pré-incisão (sem ataque).'));
+
+      if (res.hd) {
+        resultado.push(e('div', { key:'hdman', style:{ marginBottom:'6px' } },
+          e('b', null, 'Manutenção: '), (res.doseTxt || '—') + (res.mgkg ? ' (≈ ' + res.mgkg + ' mg/kg)' : ''),
+          e('span', null, '  —  após cada sessão de HD')));
+        resultado.push(e('div', { key:'hdalvo', style:{ marginBottom:'6px', color:'#1c7c3c', fontWeight:600 } },
+          'Alvo: ' + res.alvoTxt));
+      } else if (res.guiado) {
+        resultado.push(e('div', { key:'guiado', style:{ marginBottom:'6px' } },
+          e('b', null, 'Intervalo: '), res.intervalo.label,
+          e('div', { style:{ color:'#667', fontSize:'12px', marginTop:'3px' } }, 'Função renal baixa — dose guiada por nível sérico (sem cálculo automático de dose).')));
+      } else if (res.doseTxt) {
+        resultado.push(e('div', { key:'man', style:{ marginBottom:'6px' } },
+          e('b', null, 'Manutenção: '), res.doseTxt + (res.mgkg ? ' (≈ ' + res.mgkg + ' mg/kg)' : ''),
+          res.intervalo ? e('span', null, '  —  ' + res.intervalo.label) : null));
+        if (res.intervalo && res.intervalo.nota) resultado.push(e('div', { key:'intn', style:{ color:'#667', fontSize:'12px', marginBottom:'6px' } }, res.intervalo.nota));
+        if (res.auc) resultado.push(e('div', { key:'auc', style:{ marginBottom:'6px', color:aucCor, fontWeight:600 } },
+          'AUC24 estimada: ≈ ' + Math.round(res.auc) + ' mg·h/L  (alvo ' + res.aucAlvo + ', faixa 400–600)'));
+      }
+    } else {
+      resultado.push(e('div', { key:'faltam', style:{ color:'#a4700a', fontSize:'13px' } },
+        hd ? 'Informe o peso para calcular.' : 'Informe peso e ClCr para calcular.'));
+    }
+
+    var avisos = res.avisos.map(function (a, i) {
+      var crit = /inadequada|Trocar|> 600/.test(a);
+      return e('div', { key:'av' + i, style:{ background: crit ? '#fdecec' : '#fff6e5', border:'1px solid ' + (crit ? '#f1c2c2' : '#f0d9a8'), color: crit ? '#8a1414' : '#7a5300', borderRadius:'7px', padding:'8px 10px', fontSize:'12.5px', marginTop:'6px' } }, a);
+    });
+
+    var cabecalho = res.hd
+      ? 'HD intermitente alto fluxo · manutenção pós-HD guiada por nível pré-HD (15–20 µg/mL)'
+      : 'Alvo AUC 400–600 · estimativa a priori — refinar por nível/AUC bayesiano';
+
+    var badges = [];
+    if (res.hd) badges.push(e('span', { key:'bhd', style:{ background:'#e6f0fb', color:'#0c447c', border:'1px solid #cfe0f7', borderRadius:'20px', padding:'2px 10px', fontSize:'11.5px', fontWeight:600 } }, 'HD alto fluxo'));
+    if (res.obeso) badges.push(e('span', { key:'bob', style:{ background:'#fff2e0', color:'#8a5300', border:'1px solid #f0d9a8', borderRadius:'20px', padding:'2px 10px', fontSize:'11.5px', fontWeight:600, marginLeft:'6px' } }, 'IMC ' + Math.round(res.imc)));
+
+    return e('div', { className:'campo' },
+      e(Rotulo, { texto: f.label || 'Auxílio de dose — Vancomicina', required:false }),
+      e('div', { style: box },
+        e('div', { style:{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:'6px', marginBottom:'8px' } },
+          e('span', { style: grpStyle }, cabecalho), badges),
+        e('div', { style: linha },
+          e('div', null, e('span', { style: mini }, 'Peso real (kg)'),
+            e('input', { style: inp, type:'number', inputMode:'decimal', value: V['peso'] || '', placeholder:'kg', onChange:function (ev) { setPeso(ev.target.value); } })),
+          e('div', null, e('span', { style: mini }, 'Altura (cm)'),
+            e('input', { style: inp, type:'number', inputMode:'decimal', value: V['altura'] || '', placeholder:'cm', onChange:function (ev) { setAltura(ev.target.value); } })),
+          hd ? null : e('div', null, e('span', { style: mini }, 'ClCr atual (mL/min)'),
+            e('input', { style: inp, type:'number', inputMode:'decimal', value: V['clcr'] || '', placeholder:'mL/min', onChange:function (ev) { setClcr(ev.target.value); } }))
+        ),
+        e('div', { style: linha },
+          e('div', null, e('span', { style: mini }, 'Foco'),
+            e('select', { style: sel, value: foco, onChange:function (ev) { setFoco(ev.target.value); setAplicado(false); } },
+              e('option', { value:'' }, '— selecione —'),
+              VANCO_FOCOS.map(function (o) { return e('option', { key:o.v, value:o.v }, o.v); }))),
+          e('div', null, e('span', { style: mini }, 'CIM de Vanco'),
+            e('select', { style: sel, value: mic, onChange:function (ev) { setMic(ev.target.value); setAplicado(false); } },
+              ['não disponível', '≤ 1', '2', '≥ 4'].map(function (o) { return e('option', { key:o, value:o }, o); })))
+        ),
+        e('div', { style:{ borderTop:'1px dashed #cfe0f7', margin:'4px 0 10px' } }),
+        resultado,
+        avisos,
+        e('button', {
+          type:'button',
+          disabled: !res.podeAplicar,
+          onClick: aplicar,
+          style:{ marginTop:'12px', padding:'9px 14px', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:600, cursor: res.podeAplicar ? 'pointer' : 'not-allowed', background: res.podeAplicar ? (aplicado ? '#1c7c3c' : '#0c447c') : '#c3ccd8', color:'#fff' }
+        }, aplicado ? '✓ Aplicado na posologia' : 'Aplicar na posologia'),
+        e('div', { style:{ color:'#889', fontSize:'11.5px', marginTop:'8px' } },
+          'Apoio à decisão. Ataque é dose única (prescrever à parte). Não substitui o julgamento clínico nem a monitorização por nível/AUC.')
+      ),
+      f.hint ? e('div', { className:'dica' }, f.hint) : null
+    );
+  }
+
   // ── Despachante de campo por tipo ─────────────────────────────────────────
   function Campo(p) {
     var t = p.campo.type;
@@ -549,6 +798,7 @@
     if (t === 'matrix')   return e(CampoMatriz, p);
     if (t === 'crm')      return e(CampoCRM, p);
     if (t === 'sofa')     return e(CampoSofa, p);
+    if (t === 'dose_vanco') return e(CampoDoseVanco, p);
     return null;
   }
 

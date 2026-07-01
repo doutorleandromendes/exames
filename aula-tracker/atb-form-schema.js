@@ -220,6 +220,9 @@ export const SEMENTE_HUSF = {
           cond:{ campo:'atb_solicitado', op:'contains', valor:'Polimixina E (colestimetato)' } },
         { key:'altura', type:'number', label:'Altura (cm)', required:true,
           cond:{ campo:'atb_solicitado', op:'contains', valor:'Polimixina E (colestimetato)' } },
+        { key:'dose_vanco', type:'dose_vanco', label:'Auxílio de dose — Vancomicina',
+          hint:'Apoio à decisão (alvo AUC 400–600). Preencha peso, ClCr, foco e CIM; use "Aplicar na posologia".',
+          cond:{ campo:'atb_solicitado', op:'contains', valor:'Vancomicina' } },
         { key:'posologia', type:'matrix', label:'Posologia', required:true,
           sincronizaCom:'atb_solicitado', maxLinhas:3, linhaLabel:'ATB',
           colunas:[
@@ -310,6 +313,15 @@ export function buildSCMI() {
   delete nomeF.hint;       // remove "Preenchido automaticamente após validação do CRM"
   nomeF.required = true;
 
+  // 9. Auxílio de dose da Vancomicina ('dose_vanco') é EXCLUSIVO do HUSF por ora.
+  //    Remove o campo herdado da SEMENTE para que o SCMI não o exiba. (O sync de
+  //    boot re-grava buildSCMI() na linha SCMI, então isto também o retira caso
+  //    tenha entrado antes.)
+  const secAtb = sec('atb_solicitado');
+  if (secAtb && Array.isArray(secAtb.campos)) {
+    secAtb.campos = secAtb.campos.filter(c => c.key !== 'dose_vanco');
+  }
+
   return d;
 }
 
@@ -362,6 +374,34 @@ export async function ensureFormSchemaTable(pool) {
          AND definicao IS DISTINCT FROM $1::jsonb`,
     [JSON.stringify(buildSCMI())]
   );
+
+  // Migração idempotente: garante o campo 'dose_vanco' (auxílio de dose da
+  // Vancomicina) na seção 'atb_solicitado' do schema ativo do HUSF, se ainda não o
+  // tiver. RESTRITO AO HUSF — o SCMI não recebe (buildSCMI remove o campo). Não-clobber.
+  await _garantirDoseVanco(pool);
+}
+
+// Injeta o campo 'dose_vanco' (modelo extraído da própria SEMENTE_HUSF, garantindo
+// identidade com o seed) antes da 'posologia'. RESTRITO AO HUSF — o SCMI não recebe
+// (o buildSCMI já o remove). Idempotente e não-clobber.
+async function _garantirDoseVanco(pool) {
+  const secSem = SEMENTE_HUSF.secoes.find(s => s.id === 'atb_solicitado');
+  const modeloRaw = secSem && secSem.campos.find(c => c.key === 'dose_vanco');
+  if (!modeloRaw) return;
+  const { rows } = await pool.query(`SELECT id, definicao FROM atb_form_schema WHERE ativo=true AND instituicao='HUSF'`);
+  for (const row of rows) {
+    const def = row.definicao;
+    if (!def || !Array.isArray(def.secoes)) continue;
+    const sec = def.secoes.find(s => s.id === 'atb_solicitado');
+    if (!sec || !Array.isArray(sec.campos)) continue;
+    if (sec.campos.some(c => c.key === 'dose_vanco')) continue; // idempotente
+    const modelo = JSON.parse(JSON.stringify(modeloRaw));
+    const iPos = sec.campos.findIndex(c => c.key === 'posologia');
+    if (iPos >= 0) sec.campos.splice(iPos, 0, modelo); else sec.campos.push(modelo);
+    await pool.query(`UPDATE atb_form_schema SET definicao=$1::jsonb WHERE id=$2`,
+      [JSON.stringify(def), row.id]);
+    console.log(`[atb-form-schema] dose_vanco injetado no schema id=${row.id} (${def.instituicao || '?'})`);
+  }
 }
 
 export async function getFormSchema(pool, sigla) {

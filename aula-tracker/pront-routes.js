@@ -1092,7 +1092,9 @@ window.__READY=1;`;
         const drow = (await pool.query(`SELECT state_json FROM pront_docs_emitidos WHERE id=$1 AND paciente_id=$2`, [req.query.dup, p.id])).rows[0];
         if (drow && drow.state_json) dupJson = JSON.stringify(drow.state_json).replace(/</g, "\\u003c");
       }
-      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};window.__ASSINA_STATUS_URL="/pront/assinatura/status";window.__ASSINA_ABRIR_URL="/pront/assinatura/abrir";window.__ASSINA_PDF_URL=${JSON.stringify(assinaPdfUrl)};window.__DUP_STATE=${dupJson};</script>${SAVE_UI}${SIGN_UI}</body>`);
+      // __DUP_STATE precisa estar setado ANTES do script principal (o init roda applyDupState em microtask, antes do fim do body)
+      html = html.replace("<body>", `<body><script>window.__DUP_STATE=${dupJson};</script>`);
+      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};window.__ASSINA_STATUS_URL="/pront/assinatura/status";window.__ASSINA_ABRIR_URL="/pront/assinatura/abrir";window.__ASSINA_PDF_URL=${JSON.stringify(assinaPdfUrl)};</script>${SAVE_UI}${SIGN_UI}</body>`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (e) {

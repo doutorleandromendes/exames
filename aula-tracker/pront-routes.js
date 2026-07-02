@@ -7,7 +7,7 @@
 // authRequired  -> secretária e médico (qualquer usuário logado)
 // adminRequired -> médico (ações sensíveis: apagar, etc.)
 import express from "express";
-import { uploadToR2, fetchR2Stream } from "./lab-storage.js";
+import { uploadToR2, fetchR2Stream, deleteFromR2 } from "./lab-storage.js";
 import { readFile } from "node:fs/promises";
 import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
 import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
@@ -184,7 +184,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
 
     // documentos emitidos pelo gerador (receita/pedido/relatório/atestado)
     const docsEmitidos = (await pool.query(
-      `SELECT id, tipo, paper, to_char(criado_em,'YYYY-MM-DD') data
+      `SELECT id, tipo, paper, assinado, secret_code, verif_token, descricao, to_char(criado_em,'YYYY-MM-DD') data
          FROM pront_docs_emitidos WHERE paciente_id=$1 ORDER BY criado_em DESC`, [id])).rows;
     const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado" };
 
@@ -241,16 +241,37 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       <h2 class="mt2" style="margin-bottom:0">Documentos emitidos <span class="mut" style="font-weight:400">(${docsEmitidos.length})</span></h2>
       <div class="card mt">
         <table>
-          <thead><tr><th>Data</th><th>Tipo</th><th>Papel</th><th></th></tr></thead>
+          <thead><tr><th>Data</th><th>Documento</th><th>Papel</th><th>Assinatura</th><th>Ações</th></tr></thead>
           <tbody>${docsEmitidos.map(d => `
             <tr>
               <td>${toBR(d.data)}</td>
-              <td>${TIPO_DOC[d.tipo] || safe(d.tipo)}</td>
+              <td><b>${TIPO_DOC[d.tipo] || safe(d.tipo)}</b>${d.descricao ? `<div class="mut" style="font-size:.88em;line-height:1.3;margin-top:2px;max-width:38ch">${safe(d.descricao)}</div>` : ""}</td>
               <td class="mut">${safe(d.paper || "")}</td>
-              <td><a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a></td>
+              <td>${d.assinado
+                ? `<span style="color:#0e7a4b;font-weight:600">✔ ICP-Brasil</span>${d.secret_code ? ` · <span class="mut">código:</span> <code style="font-weight:700;letter-spacing:.5px">${safe(d.secret_code)}</code>` : ""}${d.verif_token ? ` · <a href="/verificar/${d.verif_token}" target="_blank">verificar</a>` : ""}`
+                : `<span class="mut">—</span>`}</td>
+              <td style="white-space:nowrap">
+                <a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a>
+                · <a href="/pront/paciente/${id}/documento?dup=${d.id}">duplicar</a>
+                · <a href="#" class="doc-del" data-del="${d.id}" data-desc="${safe((TIPO_DOC[d.tipo] || d.tipo) + (d.descricao ? " — " + d.descricao : ""))}" style="color:#b91c1c">excluir</a>
+              </td>
             </tr>`).join("")}</tbody>
         </table>
-      </div>` : ""}
+      </div>
+      <script>(function(){
+        document.querySelectorAll('a.doc-del').forEach(function(a){
+          a.addEventListener('click',function(ev){
+            ev.preventDefault();
+            var did=a.getAttribute('data-del'), desc=a.getAttribute('data-desc')||'este documento';
+            if(!confirm('Excluir '+desc+' ?\\n\\nRemove o documento da ficha. Esta ação não pode ser desfeita.'))return;
+            a.textContent='excluindo…';a.style.pointerEvents='none';
+            fetch('/pront/documento-emitido/'+did,{method:'DELETE'}).then(function(r){
+              if(r.ok){var tr=a.closest('tr');if(tr)tr.parentNode.removeChild(tr);}
+              else{a.textContent='falhou';a.style.color='#b91c1c';a.style.pointerEvents='';}
+            }).catch(function(){a.textContent='erro';a.style.pointerEvents='';});
+          });
+        });
+      })();</script>` : ""}
       <h2 class="mt2" style="margin-bottom:0">Consultas <span class="mut" style="font-weight:400">(${consultas.length})</span></h2>
       ${timeline || `<div class="card mt mut">Sem consultas registradas.</div>`}
     `));
@@ -976,6 +997,8 @@ window.__READY=1;`;
     document.body.appendChild(b);document.body.appendChild(d);document.body.appendChild(m);
     b.onclick=async function(){
       if(!window.__GETSTATE){m.style.color='#b91c1c';m.textContent='Estado indisponível';return;}
+      var __st0=window.__GETSTATE();
+      if(__st0&&__st0.assina==='digital'){m.style.color='#b45309';m.innerHTML='Documento com assinatura digital — use <b>“Baixar PDF assinado (ICP-Brasil)”</b>: ele salva na ficha com o código de acesso.';return;}
       b.disabled=true;m.style.color='#0c447c';m.textContent='Salvando…';
       try{
         var r=await fetch(window.__SAVE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
@@ -1028,10 +1051,11 @@ window.__READY=1;`;
         say('#0e7a4b','Assinando…');
         var r=await fetch(window.__ASSINA_PDF_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
         if(!r.ok){var j=await r.json().catch(function(){return{};});if(w)w.close();say('#b91c1c','Falha: '+(j.erro||r.status));s.disabled=false;return;}
+        var vcode=r.headers.get('X-Verif-Code')||'';
         var blob=await r.blob();var url=URL.createObjectURL(blob);
         if(w){w.location=url;}else{var a=document.createElement('a');a.href=url;a.download='documento-assinado.pdf';document.body.appendChild(a);a.click();a.remove();}
         setTimeout(function(){URL.revokeObjectURL(url);},120000);
-        say('#0e7a4b','PDF assinado ✓ — valide em validar.iti.gov.br');s.disabled=false;
+        say('#0e7a4b','PDF assinado ✓ salvo na ficha'+(vcode?(' — código de acesso: '+vcode):'')+' · valide em validar.iti.gov.br');s.disabled=false;
       }catch(e){say('#b91c1c','Erro: '+e.message);s.disabled=false;}
     };
   })();</script>`;
@@ -1063,7 +1087,12 @@ window.__READY=1;`;
       const saveUrl = `/pront/paciente/${p.id}/documento/salvar`;
       const ppUrl = `/pront/paciente/${p.id}/documento/pdf-timbrado`;
       const assinaPdfUrl = `/pront/paciente/${p.id}/documento/pdf-assinado`;
-      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};window.__ASSINA_STATUS_URL="/pront/assinatura/status";window.__ASSINA_ABRIR_URL="/pront/assinatura/abrir";window.__ASSINA_PDF_URL=${JSON.stringify(assinaPdfUrl)};</script>${SAVE_UI}${SIGN_UI}</body>`);
+      let dupJson = "null";                                   // duplicação: pré-carrega o estado de um doc emitido
+      if (req.query.dup) {
+        const drow = (await pool.query(`SELECT state_json FROM pront_docs_emitidos WHERE id=$1 AND paciente_id=$2`, [req.query.dup, p.id])).rows[0];
+        if (drow && drow.state_json) dupJson = JSON.stringify(drow.state_json).replace(/</g, "\\u003c");
+      }
+      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};window.__ASSINA_STATUS_URL="/pront/assinatura/status";window.__ASSINA_ABRIR_URL="/pront/assinatura/abrir";window.__ASSINA_PDF_URL=${JSON.stringify(assinaPdfUrl)};window.__DUP_STATE=${dupJson};</script>${SAVE_UI}${SIGN_UI}</body>`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (e) {
@@ -1079,6 +1108,8 @@ window.__READY=1;`;
       if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
       const state = req.body && req.body.state;
       if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+      if (state.assina === "digital")
+        return res.status(409).json({ ok: false, erro: "documento em modo de assinatura digital — use 'Baixar PDF assinado' para salvar a versão assinada com código", use_assinado: true });
       state.impressao = "digital";   // a cópia da ficha mantém SEMPRE o timbrado digital
 
       const html = await geradorBase();
@@ -1090,9 +1121,9 @@ window.__READY=1;`;
       await uploadToR2(r2key, pdf, "application/pdf");
 
       const { rows: [row] } = await pool.query(
-        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por)
-         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-        [id, tipo, paper, r2key, quem(req)]);
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, descricao, state_json)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id`,
+        [id, tipo, paper, r2key, quem(req), resumoDocumento(state), JSON.stringify(state)]);
       res.json({ ok: true, id: row.id });
     } catch (e) {
       console.error("SALVAR DOC ERROR", e);
@@ -1138,10 +1169,51 @@ window.__READY=1;`;
       res.status(500).send("Falha ao abrir o documento");
     }
   });
+
+  // exclui um documento emitido: remove do R2 (best-effort) e da ficha
+  app.delete("/pront/documento-emitido/:id", medicoRequired, async (req, res) => {
+    try {
+      const d = (await pool.query(`SELECT r2_key FROM pront_docs_emitidos WHERE id=$1`, [req.params.id])).rows[0];
+      if (!d) return res.status(404).json({ ok: false, erro: "não encontrado" });
+      await pool.query(`DELETE FROM pront_docs_emitidos WHERE id=$1`, [req.params.id]);
+      try { if (d.r2_key) await deleteFromR2(d.r2_key); } catch (e) { console.error("R2 del", e.message); }
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("DEL DOC ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
   // ===== ASSINATURA DIGITAL ICP-BRASIL (Bird ID) =====
   const _sessoesBird = new Map();                       // userKey -> { access_token, expira_em, alias, pem }
   const userKey = req => String(req.user?.id || req.user?.email || "medico");
   const gerarSecretCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let x = ""; for (let i = 0; i < 6; i++) x += A[Math.floor(Math.random() * A.length)]; return x; };
+
+  // resumo curto do documento (meds da receita / exames pedidos) p/ exibir na ficha
+  function resumoDocumento(state) {
+    try {
+      const trunc = (s) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > 200 ? s.slice(0, 197) + "…" : s; };
+      const d = state && state.doc;
+      if (d === "receituario") {
+        const meds = ((state.rx && state.rx.itens) || []).map(i => String((i && i.med) || "").trim()).filter(Boolean);
+        return trunc(meds.join(", ")) || "Receituário";
+      }
+      if (d === "pedido") {
+        const sel = (state.ped && Array.isArray(state.ped.sel)) ? state.ped.sel : [];
+        const outros = String((state.ped && state.ped.outros) || "").split("\n").map(s => s.trim()).filter(Boolean);
+        return trunc([...sel, ...outros].join(", ")) || "Pedido de exames";
+      }
+      if (d === "relatorio") return trunc((state.rel && state.rel.titulo) || "") || "Relatório médico";
+      if (d === "atestado") {
+        const a = state.ate || {};
+        if (a.modelo === "afastamento") { const n = Number(a.dias) || 0; return `Afastamento — ${n} dia${n === 1 ? "" : "s"}`; }
+        if (a.modelo === "retorno") return "Retorno às atividades";
+        if (a.modelo === "comp_pac") return "Comparecimento do paciente";
+        if (a.modelo === "comp_acomp") return "Comparecimento de acompanhante";
+        return "Atestado";
+      }
+      return "";
+    } catch (e) { return ""; }
+  }
 
   app.get("/pront/assinatura/status", medicoRequired, (req, res) => {
     const sx = _sessoesBird.get(userKey(req));
@@ -1196,9 +1268,9 @@ window.__READY=1;`;
       const r2key = `pront/docs-assinados/${id}/${Date.now()}-${tipo}.pdf`;
       await uploadToR2(r2key, assinado, "application/pdf");
       await pool.query(
-        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado, secret_code)
-         VALUES ($1,$2,$3,$4,$5,$6,true,$7)`,
-        [id, tipo, paper, r2key, quem(req), token, secretCode]);
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado, secret_code, descricao, state_json)
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9::jsonb)`,
+        [id, tipo, paper, r2key, quem(req), token, secretCode, resumoDocumento(state), JSON.stringify(state)]);
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${tipo}-assinado.pdf"`);

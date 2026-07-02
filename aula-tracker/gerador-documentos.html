@@ -195,7 +195,7 @@
   body.paper-a5 .doc .signzone{width:58mm;margin:5mm 1mm 0 auto}
   body.paper-a5 .doc .signzone .localdata{font-size:8.5pt;margin:0 0 3mm}
   body.paper-a5 .doc .signzone .sigimg{width:36mm}
-  body.paper-a5 .doc .signzone.signdig{max-width:100%;margin:5mm auto 0}
+  body.paper-a5 .doc .signzone.signdig{width:auto;max-width:100%;margin:5mm auto 0}
   body.paper-a5 .doc .signdig .sd-box{gap:3mm;padding:2mm 3mm}
   body.paper-a5 .doc .signdig .sd-qr,body.paper-a5 .doc .signdig .sd-qr svg{width:18mm;height:18mm}
   body.paper-a5 .doc .signdig .sd-nm{font-size:10pt}
@@ -3228,11 +3228,33 @@ window.novoDocumento=novoDocumento;
 $("#btnNovo")&&$("#btnNovo").addEventListener("click",novoDocumento);
 window.addEventListener("resize",fitPreview);
 
+function applyDupState(){
+  try{
+    var d=window.__DUP_STATE;
+    if(!d||typeof d!=="object")return;
+    if(d.doc)S.doc=d.doc;
+    if(d.paper)S.paper=d.paper;
+    if(typeof d.pacEnd==="string")S.pacEnd=d.pacEnd;
+    if(d.assina)S.assina=d.assina;
+    S.data=today;                                   // documento novo herda a data de hoje
+    if(d.rx&&typeof d.rx==="object")S.rx=Object.assign({tipo:"simples",continuo:false,itens:[{med:"",pos:"",qtd:""}]},d.rx);
+    if(d.ped&&typeof d.ped==="object")S.ped=Object.assign({indicacao:"",cid:"",cidDesc:"",outros:"",sel:[],tuss:{}},d.ped);
+    if(d.rel&&typeof d.rel==="object")S.rel=Object.assign({titulo:"RELATÓRIO MÉDICO",corpo:""},d.rel);
+    if(d.ate&&typeof d.ate==="object")S.ate=Object.assign({modelo:"afastamento",dias:1,atividade:"laborais",pdata:today,hi:"",hf:"",acompanhante:"",cid:"",cidDesc:"",incluirCid:false,texto:"",dirty:false},d.ate);
+    if(!Array.isArray(S.rx.itens)||!S.rx.itens.length)S.rx.itens=[{med:"",pos:"",qtd:""}];
+    if(!Array.isArray(S.ped.sel))S.ped.sel=[];
+    if(!S.ped.tuss||typeof S.ped.tuss!=="object")S.ped.tuss={};
+    document.querySelectorAll("#tabs .tab").forEach(function(t){t.setAttribute("aria-selected",t.dataset.doc===S.doc?"true":"false");});
+    document.querySelectorAll("#paperseg button").forEach(function(b){b.setAttribute("aria-pressed",b.dataset.paper===S.paper?"true":"false");});
+  }catch(e){console.error("applyDupState",e);}
+}
+
 /* ===== Init =================================================== */
 (async function(){
   loadBases();
   await loadDefaults();
   await loadPoso();
+  applyDupState();
   renderPanel();applyPaper();
   setTimeout(fitPreview,80);
 })();

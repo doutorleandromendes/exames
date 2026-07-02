@@ -106,6 +106,8 @@ export async function runProntMigrations(pool) {
   ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS verif_token UUID;      -- token do QR (capability p/ /verificar)
   ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS assinado BOOLEAN DEFAULT false;  -- assinado ICP-Brasil?
   ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS secret_code TEXT;  -- código de acesso do QR (protocolo VALIDAR/ITI)
+  ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS descricao TEXT;    -- resumo (meds/exames) exibido na ficha
+  ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS state_json JSONB;  -- estado do gerador p/ duplicar/editar
   CREATE UNIQUE INDEX IF NOT EXISTS idx_pront_docs_verif ON pront_docs_emitidos (verif_token) WHERE verif_token IS NOT NULL;
 
   -- ponte com o módulo de laboratório: lab_patients aponta para o cadastro mestre (pront_pacientes).

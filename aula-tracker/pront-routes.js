@@ -12,6 +12,9 @@ import { readFile } from "node:fs/promises";
 import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
 import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
 import { parseValue } from "./pront-normalizador.js";
+import { randomUUID } from "node:crypto";
+import { abrirSessao, descobrirCertificado } from "./birdid.js";
+import { makeBirdIdRawSigner, assinarPdfCades } from "./birdid-cades.js";
 
 function safe(s) {
   return String(s ?? "")
@@ -1000,6 +1003,39 @@ window.__READY=1;`;
     };
   })();</script>`;
 
+  // botão "Baixar PDF assinado (ICP-Brasil)" — assinatura qualificada via Bird ID
+  const SIGN_UI = `<script>(function(){
+    var st=document.createElement('style');st.textContent='@media print{#__sign{display:none!important}}';document.head.appendChild(st);
+    var s=document.createElement('button');s.id='__sign';s.textContent='Baixar PDF assinado (ICP-Brasil)';
+    s.style.cssText='position:fixed;right:18px;bottom:160px;z-index:99999;background:#0e7a4b;color:#fff;border:0;border-radius:10px;padding:11px 16px;font:600 14px system-ui;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.25)';
+    document.body.appendChild(s);
+    function say(c,t){var m=document.getElementById('__savemsg');if(m){m.style.color=c;m.textContent=t;}}
+    s.onclick=async function(){
+      if(!window.__GETSTATE){say('#b91c1c','Estado indisponível');return;}
+      s.disabled=true;
+      try{
+        var stt=await (await fetch(window.__ASSINA_STATUS_URL)).json();
+        if(!stt.ativa){
+          var otp=prompt('Assinatura ICP-Brasil (Bird ID) — digite o OTP de 6 dígitos do app:');
+          if(!otp){s.disabled=false;return;}
+          say('#0c447c','Abrindo sessão de assinatura…');
+          var ra=await fetch(window.__ASSINA_ABRIR_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({otp:String(otp).trim()})});
+          var ja=await ra.json().catch(function(){return{};});
+          if(!ra.ok||!ja.ok){say('#b91c1c','Falha na sessão: '+(ja.erro||ra.status));s.disabled=false;return;}
+        }
+        var w=window.open('','_blank');
+        if(w){try{w.document.write('<!doctype html><meta charset=utf-8><body style=\'font:15px system-ui;padding:24px;color:#444\'>Assinando documento…');}catch(e){}}
+        say('#0e7a4b','Assinando…');
+        var r=await fetch(window.__ASSINA_PDF_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
+        if(!r.ok){var j=await r.json().catch(function(){return{};});if(w)w.close();say('#b91c1c','Falha: '+(j.erro||r.status));s.disabled=false;return;}
+        var blob=await r.blob();var url=URL.createObjectURL(blob);
+        if(w){w.location=url;}else{var a=document.createElement('a');a.href=url;a.download='documento-assinado.pdf';document.body.appendChild(a);a.click();a.remove();}
+        setTimeout(function(){URL.revokeObjectURL(url);},120000);
+        say('#0e7a4b','PDF assinado ✓ — valide em validar.iti.gov.br');s.disabled=false;
+      }catch(e){say('#b91c1c','Erro: '+e.message);s.disabled=false;}
+    };
+  })();</script>`;
+
   // orçamento de exames complementares: injeta o nome do paciente no campo e serve a página
   app.get("/pront/paciente/:id/orcamento", authRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id, nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
@@ -1026,7 +1062,8 @@ window.__READY=1;`;
       html = html.replace('pacEnd:""', `pacEnd:${endJS}`);
       const saveUrl = `/pront/paciente/${p.id}/documento/salvar`;
       const ppUrl = `/pront/paciente/${p.id}/documento/pdf-timbrado`;
-      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};</script>${SAVE_UI}</body>`);
+      const assinaPdfUrl = `/pront/paciente/${p.id}/documento/pdf-assinado`;
+      html = html.replace("</body>", `<script>window.__SAVE_URL=${JSON.stringify(saveUrl)};window.__PP_URL=${JSON.stringify(ppUrl)};window.__ASSINA_STATUS_URL="/pront/assinatura/status";window.__ASSINA_ABRIR_URL="/pront/assinatura/abrir";window.__ASSINA_PDF_URL=${JSON.stringify(assinaPdfUrl)};</script>${SAVE_UI}${SIGN_UI}</body>`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.send(html);
     } catch (e) {
@@ -1101,6 +1138,111 @@ window.__READY=1;`;
       res.status(500).send("Falha ao abrir o documento");
     }
   });
+  // ===== ASSINATURA DIGITAL ICP-BRASIL (Bird ID) =====
+  const _sessoesBird = new Map();                       // userKey -> { access_token, expira_em, alias, pem }
+  const userKey = req => String(req.user?.id || req.user?.email || "medico");
+
+  app.get("/pront/assinatura/status", medicoRequired, (req, res) => {
+    const sx = _sessoesBird.get(userKey(req));
+    const ativa = !!(sx && sx.expira_em > Date.now());
+    res.json({ ativa, expira_em: ativa ? sx.expira_em : null });
+  });
+
+  app.post("/pront/assinatura/abrir", medicoRequired, async (req, res) => {
+    try {
+      const otp = String(req.body?.otp || "").trim();
+      if (!/^\d{6,8}$/.test(otp)) return res.status(400).json({ ok: false, erro: "OTP inválido" });
+      if (!process.env.BIRDID_CLIENT_ID || !process.env.BIRDID_CLIENT_SECRET || !process.env.BIRDID_CPF)
+        return res.status(500).json({ ok: false, erro: "Credenciais Bird ID não configuradas no servidor" });
+      const sessao = await abrirSessao({ cpf: process.env.BIRDID_CPF, otp, lifetimeSeg: 4 * 3600 });
+      const cert = await descobrirCertificado(sessao.access_token);
+      _sessoesBird.set(userKey(req), { access_token: sessao.access_token, expira_em: sessao.expira_em, alias: cert.alias, pem: cert.pem });
+      res.json({ ok: true, expira_em: sessao.expira_em });
+    } catch (e) {
+      console.error("BIRDID ABRIR", e);
+      res.status(502).json({ ok: false, erro: e.message });
+    }
+  });
+
+  // gera o PDF (com bloco digital + QR por-documento), assina ICP-Brasil e devolve p/ download
+  app.post("/pront/paciente/:id/documento/pdf-assinado", medicoRequired, async (req, res) => {
+    const id = req.params.id;
+    try {
+      const sess = _sessoesBird.get(userKey(req));
+      if (!sess || sess.expira_em <= Date.now())
+        return res.status(401).json({ ok: false, erro: "sessão de assinatura expirada", precisa_otp: true });
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      const state = req.body && req.body.state;
+      if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+      state.impressao = "digital";                       // mantém o timbrado digital
+      state.assina = "digital";                          // usa o bloco de assinatura digital + QR
+
+      const token = randomUUID();
+      const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+      const verifUrl = `${base}/verificar/${token}`;
+
+      let html = await geradorBase();
+      html = html.replace("</body>", `<script>window.VERIFY_URL=${JSON.stringify(verifUrl)};</script></body>`);
+      const pdf = await gerarDocumentoPDF(html, state);   // puppeteer
+
+      const rawSignHex = makeBirdIdRawSigner({ access_token: sess.access_token, certificateAlias: sess.alias });
+      const assinado = await assinarPdfCades({ pdfBuffer: pdf, certificadosPem: [sess.pem], rawSignHex, meta: { reason: "Documento médico assinado digitalmente" } });
+
+      const tipo = String(state.doc || "documento").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40) || "documento";
+      const paper = String(state.paper || "A4").slice(0, 8);
+      const r2key = `pront/docs-assinados/${id}/${Date.now()}-${tipo}.pdf`;
+      await uploadToR2(r2key, assinado, "application/pdf");
+      await pool.query(
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado)
+         VALUES ($1,$2,$3,$4,$5,$6,true)`,
+        [id, tipo, paper, r2key, quem(req), token]);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${tipo}-assinado.pdf"`);
+      res.setHeader("X-Verif-Url", verifUrl);
+      res.send(assinado);
+    } catch (e) {
+      console.error("PDF ASSINADO ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
+
+  // verificação PÚBLICA (o QR aponta pra cá). O token uuid é a capability (não-adivinhável).
+  app.get("/verificar/:token", async (req, res) => {
+    const t = String(req.params.token || "");
+    if (!/^[0-9a-fA-F-]{36}$/.test(t)) return res.status(400).send("Token inválido");
+    const d = (await pool.query(`SELECT tipo, criado_em FROM pront_docs_emitidos WHERE verif_token=$1 AND assinado=true`, [t])).rows[0];
+    if (!d) { res.status(404); }
+    const dt = d ? new Date(d.criado_em).toLocaleString("pt-BR") : "";
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(d
+      ? `<!doctype html><html lang=pt-br><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Verificação de documento</title>
+<body style="font:16px/1.55 system-ui,Segoe UI,Arial;max-width:640px;margin:0 auto;padding:28px;color:#1a1d23">
+<div style="display:inline-block;background:#e8f5ee;color:#0e7a4b;font-weight:700;font-size:13px;padding:4px 10px;border-radius:20px">● Documento assinado digitalmente</div>
+<h1 style="font-size:21px;margin:14px 0 6px">${safe(d.tipo || "Documento")}</h1>
+<p>Emitido e assinado digitalmente por <b>Dr. Leandro Mendes</b> — CRM/SP 134.985 — em ${dt}, com certificado <b>ICP-Brasil</b> (assinatura qualificada).</p>
+<p><a href="/verificar/${t}/pdf" style="display:inline-block;background:#0c447c;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Abrir o documento assinado (PDF)</a></p>
+<p style="color:#5b6470;font-size:14px;margin-top:22px">Para conferir a validade criptográfica da assinatura, baixe o PDF e valide em <a href="https://validar.iti.gov.br">validar.iti.gov.br</a>.</p>
+</body></html>`
+      : `<!doctype html><meta charset=utf-8><title>Não encontrado</title><body style="font:16px system-ui;max-width:560px;margin:60px auto;padding:24px;color:#1a1d23"><h1 style="font-size:20px">Documento não encontrado</h1><p style="color:#5b6470">O código informado não corresponde a nenhum documento assinado.</p></body>`);
+  });
+  app.get("/verificar/:token/pdf", async (req, res) => {
+    const t = String(req.params.token || "");
+    if (!/^[0-9a-fA-F-]{36}$/.test(t)) return res.status(400).send("Token inválido");
+    const d = (await pool.query(`SELECT r2_key FROM pront_docs_emitidos WHERE verif_token=$1 AND assinado=true`, [t])).rows[0];
+    if (!d) return res.status(404).send("Documento não encontrado");
+    try {
+      const r = await fetchR2Stream(d.r2_key);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "inline");
+      res.send(buf);
+    } catch (e) {
+      res.status(500).send("Falha ao abrir o documento");
+    }
+  });
+
   const semAcento = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
   app.get("/pront/reconciliar", authRequired, adminRequired, async (req, res) => {

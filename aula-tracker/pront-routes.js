@@ -1141,6 +1141,7 @@ window.__READY=1;`;
   // ===== ASSINATURA DIGITAL ICP-BRASIL (Bird ID) =====
   const _sessoesBird = new Map();                       // userKey -> { access_token, expira_em, alias, pem }
   const userKey = req => String(req.user?.id || req.user?.email || "medico");
+  const gerarSecretCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let x = ""; for (let i = 0; i < 6; i++) x += A[Math.floor(Math.random() * A.length)]; return x; };
 
   app.get("/pront/assinatura/status", medicoRequired, (req, res) => {
     const sx = _sessoesBird.get(userKey(req));
@@ -1179,11 +1180,12 @@ window.__READY=1;`;
       state.assina = "digital";                          // usa o bloco de assinatura digital + QR
 
       const token = randomUUID();
+      const secretCode = gerarSecretCode();               // código de acesso do QR (protocolo ITI)
       const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
       const verifUrl = `${base}/verificar/${token}`;
 
       let html = await geradorBase();
-      html = html.replace("</body>", `<script>window.VERIFY_URL=${JSON.stringify(verifUrl)};</script></body>`);
+      html = html.replace("</body>", `<script>window.VERIFY_URL=${JSON.stringify(verifUrl)};window.VERIFY_CODE=${JSON.stringify(secretCode)};</script></body>`);
       const pdf = await gerarDocumentoPDF(html, state);   // puppeteer
 
       const rawSignHex = makeBirdIdRawSigner({ access_token: sess.access_token, certificateAlias: sess.alias });
@@ -1194,13 +1196,14 @@ window.__READY=1;`;
       const r2key = `pront/docs-assinados/${id}/${Date.now()}-${tipo}.pdf`;
       await uploadToR2(r2key, assinado, "application/pdf");
       await pool.query(
-        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado)
-         VALUES ($1,$2,$3,$4,$5,$6,true)`,
-        [id, tipo, paper, r2key, quem(req), token]);
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado, secret_code)
+         VALUES ($1,$2,$3,$4,$5,$6,true,$7)`,
+        [id, tipo, paper, r2key, quem(req), token, secretCode]);
 
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${tipo}-assinado.pdf"`);
       res.setHeader("X-Verif-Url", verifUrl);
+      res.setHeader("X-Verif-Code", secretCode);
       res.send(assinado);
     } catch (e) {
       console.error("PDF ASSINADO ERROR", e);
@@ -1212,7 +1215,19 @@ window.__READY=1;`;
   app.get("/verificar/:token", async (req, res) => {
     const t = String(req.params.token || "");
     if (!/^[0-9a-fA-F-]{36}$/.test(t)) return res.status(400).send("Token inválido");
-    const d = (await pool.query(`SELECT tipo, criado_em FROM pront_docs_emitidos WHERE verif_token=$1 AND assinado=true`, [t])).rows[0];
+    const d = (await pool.query(`SELECT tipo, criado_em, secret_code FROM pront_docs_emitidos WHERE verif_token=$1 AND assinado=true`, [t])).rows[0];
+
+    // Protocolo do Portal VALIDAR do ITI (Cap. IV do Guia) — scan-and-validate direto na farmácia.
+    // O `+` de application/validador-iti+json pode virar espaço no parser de query; detecta por substring.
+    if (/validador-iti/.test(String(req.query?._format || ""))) {
+      res.setHeader("Content-Type", "application/validador-iti+json; charset=utf-8");
+      if (!d) return res.status(404).json({ erro: "prescrição não encontrada" });
+      const enviado = String(req.query._secretCode || "").trim().toUpperCase();
+      if (enviado !== String(d.secret_code || "").toUpperCase()) return res.status(401).json({ erro: "código de acesso incorreto" });
+      const baseIti = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+      return res.status(200).json({ version: "1.0.0", prescription: { signatureFiles: [{ url: `${baseIti}/verificar/${t}/pdf` }] } });
+    }
+
     if (!d) { res.status(404); }
     const dt = d ? new Date(d.criado_em).toLocaleString("pt-BR") : "";
     res.setHeader("Content-Type", "text/html; charset=utf-8");

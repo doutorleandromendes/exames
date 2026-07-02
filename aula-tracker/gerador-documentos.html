@@ -179,6 +179,7 @@
   .doc .signdig .sd-sub{font-size:9pt;color:#3c3f45}
   .doc .signdig .sd-icp{margin-top:1.5mm;font-size:8pt;color:#2b6cb0;font-weight:600}
   .doc .signdig .sd-ver{font-size:7.5pt;color:#6b7280}
+  .doc .signdig .sd-code{font-size:8pt;color:#1a1d23;margin-top:1mm}
   .doc .empty{color:#b9bcc2}
   .doc .legalbox{border:1px solid #000;border-radius:3px;margin-top:12px;font-size:9pt;color:#222}
   .doc .legalbox-h{background:#f0f0f0;border-bottom:1px solid #000;font-weight:700;text-transform:uppercase;
@@ -202,6 +203,7 @@
   body.paper-a5 .doc .signdig .sd-h{font-size:7pt}
   body.paper-a5 .doc .signdig .sd-icp{font-size:7pt}
   body.paper-a5 .doc .signdig .sd-ver{font-size:6.5pt}
+  body.paper-a5 .doc .signdig .sd-code{font-size:7pt}
   body.paper-a5 .doc .signzone .nm{font-size:10pt}
   body.paper-a5 .doc .signzone .sub{font-size:8pt}
   body.paper-a5 .doc .signzone .line{margin:0 auto 3px}
@@ -3045,6 +3047,7 @@ function signBlock(){
           ${S.medEsp?`<div class="sd-sub">${esc(S.medEsp)}</div>`:""}
           <div class="sd-icp">Certificado ICP-Brasil · assinatura qualificada</div>
           <div class="sd-ver">Verifique em ${esc(url.replace(/^https?:\/\//,""))}</div>
+          ${window.VERIFY_CODE?`<div class="sd-code">Código de acesso: <b>${esc(window.VERIFY_CODE)}</b></div>`:""}
         </div>
       </div></div>`;
   }

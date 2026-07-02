@@ -105,6 +105,7 @@ export async function runProntMigrations(pool) {
   CREATE INDEX IF NOT EXISTS idx_pront_docs_emit_pac ON pront_docs_emitidos (paciente_id, criado_em DESC);
   ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS verif_token UUID;      -- token do QR (capability p/ /verificar)
   ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS assinado BOOLEAN DEFAULT false;  -- assinado ICP-Brasil?
+  ALTER TABLE pront_docs_emitidos ADD COLUMN IF NOT EXISTS secret_code TEXT;  -- código de acesso do QR (protocolo VALIDAR/ITI)
   CREATE UNIQUE INDEX IF NOT EXISTS idx_pront_docs_verif ON pront_docs_emitidos (verif_token) WHERE verif_token IS NOT NULL;
 
   -- ponte com o módulo de laboratório: lab_patients aponta para o cadastro mestre (pront_pacientes).

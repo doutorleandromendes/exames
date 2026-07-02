@@ -4,10 +4,10 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-  "start": "node app.js",
-  "keepalive": "node keepalive.js",
-  "postinstall": "npx puppeteer browsers install chrome"
-},
+    "start": "node app.js",
+    "keepalive": "node keepalive.js",
+    "postinstall": "npx puppeteer browsers install chrome"
+  },
   "dependencies": {
     "express": "^4.19.0",
     "body-parser": "^1.20.2",
@@ -17,6 +17,10 @@
     "nodemailer": "^6.9.0",
     "dotenv": "^16.4.0",
     "puppeteer": "^22.0.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@signpdf/signpdf": "^3.3.0",
+    "@signpdf/placeholder-plain": "^3.3.0",
+    "@signpdf/utils": "^3.3.0",
+    "asn1js": "^3.0.10"
   }
 }

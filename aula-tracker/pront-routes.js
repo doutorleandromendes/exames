@@ -1047,7 +1047,7 @@ window.__READY=1;`;
           if(!ra.ok||!ja.ok){say('#b91c1c','Falha na sessão: '+(ja.erro||ra.status));s.disabled=false;return;}
         }
         var w=window.open('','_blank');
-        if(w){try{w.document.write('<!doctype html><meta charset=utf-8><body style=\'font:15px system-ui;padding:24px;color:#444\'>Assinando documento…');}catch(e){}}
+        if(w){try{w.document.write('<!doctype html><meta charset=utf-8><body style="font:15px system-ui;padding:24px;color:#444">Assinando documento…');}catch(e){}}
         say('#0e7a4b','Assinando…');
         var r=await fetch(window.__ASSINA_PDF_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:window.__GETSTATE()})});
         if(!r.ok){var j=await r.json().catch(function(){return{};});if(w)w.close();say('#b91c1c','Falha: '+(j.erro||r.status));s.disabled=false;return;}

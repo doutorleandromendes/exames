@@ -1417,6 +1417,51 @@ window.__READY=1;`;
     }
   });
 
+  // ===== app mobile (PWA enxuto p/ emitir + assinar on-the-go) =====
+  // shell sem auth (só UI; login inline via /api/login). Toda AÇÃO real usa medicoRequired.
+  app.get("/pront/mobile", async (req, res) => {
+    try {
+      const html = await readFile(new URL("./mobile.html", import.meta.url), "utf8");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(html);
+    } catch (e) {
+      console.error("MOBILE SHELL ERROR", e);
+      res.status(500).send("App mobile indisponível");
+    }
+  });
+
+  // busca de nomes de medicamentos p/ o app mobile (med-seed.js decodificado 1x em memória)
+  let _medIdx = null;
+  async function _carregarMedIdx() {
+    if (_medIdx) return _medIdx;
+    const { gunzipSync } = await import("node:zlib");
+    const js = await readFile(new URL("./med-seed.js", import.meta.url), "utf8");
+    const m = js.match(/window\.MEDGZ\s*=\s*"([^"]+)"/);
+    if (!m) { _medIdx = []; return _medIdx; }
+    const raw = gunzipSync(Buffer.from(m[1], "base64")).toString("utf8");
+    const nrm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+    _medIdx = raw.split("\n").filter(Boolean).map(l => { const p = l.split("\t"); return { s: p[0] || "", p: p[1] || "", a: p[2] || "", n: nrm((p[0] || "") + " " + (p[1] || "")) }; });
+    return _medIdx;
+  }
+  app.get("/pront/api/med-busca", medicoRequired, async (req, res) => {
+    try {
+      const nrm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+      const q = nrm(req.query.q);
+      if (q.length < 2) return res.json([]);
+      const terms = q.split(" ").filter(Boolean);
+      const idx = await _carregarMedIdx();
+      const out = [];
+      for (const o of idx) {
+        if (terms.every(t => o.n.includes(t))) { out.push({ s: o.s, p: o.p, a: o.a }); if (out.length >= 20) break; }
+      }
+      res.json(out);
+    } catch (e) {
+      console.error("MED-BUSCA ERROR", e);
+      res.status(500).json([]);
+    }
+  });
+
   // verificação PÚBLICA (o QR aponta pra cá). O token uuid é a capability (não-adivinhável).
   app.get("/verificar/:token", async (req, res) => {
     const t = String(req.params.token || "");

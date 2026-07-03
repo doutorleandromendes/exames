@@ -76,6 +76,9 @@
   .seg{display:flex;border:1.5px solid var(--line);border-radius:10px;overflow:hidden}
   .seg button{flex:1;background:#fff;border:0;padding:11px;font:inherit;font-weight:600;color:var(--mut);cursor:pointer}
   .seg button.on{background:var(--pri);color:#fff}
+  .picked{display:flex;align-items:center;gap:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:12px 13px}
+  .picked>div{flex:1}.picked b{color:var(--pri-d)}.picked .sub{font-size:12px;color:var(--mut);margin-top:2px}
+  .picked .chg{background:#fff;border:1.5px solid var(--pri);color:var(--pri);border-radius:8px;padding:7px 12px;font-weight:600;cursor:pointer}
 </style>
 </head>
 <body>
@@ -204,26 +207,73 @@ function bindPaper(state){
   });
 }
 
+/* ---------- seção paciente (prontuário ou avulso) ---------- */
+function patientCard(state){
+  if(state.pacienteId){
+    return `<div class="card"><h2>Paciente</h2>
+      <div class="picked"><div><b>${esc(state.paciente)}</b><div class="sub">Será salvo no prontuário deste paciente</div></div>
+      <button class="chg" id="pacclear">trocar</button></div></div>`;
+  }
+  return `<div class="card"><h2>Paciente</h2>
+    <div class="ac"><label class="f" style="margin-bottom:8px"><span>Buscar no prontuário</span>
+      <input id="pacbusca" placeholder="Nome do paciente…" autocomplete="off"></label><div class="ac-list hide"></div></div>
+    <label class="f" style="margin-bottom:0"><span>ou avulso — nome (opcional)</span>
+      <input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+  </div>`;
+}
+function bindPatient(state, onChange){
+  const clr=$("#pacclear");
+  if(clr){ clr.onclick=()=>{ state.pacienteId=null; state.paciente=""; state.pacEnd=""; onChange(); }; return; }
+  const pac=$("#pac");
+  if(pac) pac.oninput=()=>{ state.paciente=pac.value; if(state.doc==="atestado"&&window.regenAtestado) regenAtestado(); };
+  const inp=$("#pacbusca"); if(!inp) return;
+  const box=inp.closest(".ac").querySelector(".ac-list");
+  let t=null;
+  inp.oninput=()=>{
+    const q=inp.value.trim(); clearTimeout(t);
+    if(q.length<2){box.classList.add("hide");return;}
+    t=setTimeout(async ()=>{
+      try{
+        const r=await api("/pront/api/pacientes-busca?q="+encodeURIComponent(q));
+        if(!r.ok){box.classList.add("hide");return;}
+        const list=await r.json();
+        if(!Array.isArray(list)||!list.length){box.classList.add("hide");return;}
+        box.innerHTML="";
+        list.forEach(p=>{
+          const d=document.createElement("div");
+          const dn=p.dn?p.dn.split("-").reverse().join("/"):"";
+          d.innerHTML=`${esc(p.nome)}${dn?` <span class="sub">${dn}</span>`:""}`;
+          d.onclick=()=>{ state.pacienteId=p.id; state.paciente=p.nome; state.pacEnd=p.endereco||""; box.classList.add("hide"); onChange(); };
+          box.appendChild(d);
+        });
+        box.classList.remove("hide");
+      }catch(e){box.classList.add("hide");}
+    },220);
+  };
+  inp.onblur=()=>setTimeout(()=>box.classList.add("hide"),200);
+}
+
 function screenForm(root, tipo, state){
   state = state || { doc:tipo, paper:"A4", paciente:"" };
   let body="";
   if(tipo==="receituario"){
     state.rx=state.rx||{tipo:"simples", continuo:false, itens:[{med:"",pos:"",qtd:""}]};
-    body=`<div class="card"><h2>Paciente</h2>
-        <label class="f"><span>Nome (opcional em avulso)</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+    body=patientCard(state)+`<div class="card"><h2>Receituário</h2>
         ${paperRow(state)}
         <label class="f"><span>Tipo</span><div class="seg" id="rxtipo">
           <button data-t="simples" class="${state.rx.tipo==='simples'?'on':''}">Simples</button>
           <button data-t="controle" class="${state.rx.tipo==='controle'?'on':''}">Controle especial (2 vias)</button></div></label>
-        <label class="f" style="display:flex;align-items:center;gap:10px;flex-direction:row">
+        <div id="endwrap" class="${state.rx.tipo==='controle'?'':'hide'}">
+          <label class="f"><span>Endereço do paciente (impresso no controlado)</span>
+            <input id="pacend" value="${esc(state.pacEnd||'')}" placeholder="Rua, nº, bairro, cidade"></label></div>
+        <label class="f" style="display:flex;align-items:center;gap:10px;flex-direction:row;margin-bottom:0">
           <input type="checkbox" id="cont" ${state.rx.continuo?'checked':''} style="width:22px;height:22px;flex:0 0 auto"><span style="margin:0">Uso contínuo</span></label>
       </div>
       <div class="card"><h2>Medicamentos</h2><div id="itens"></div>
         <button class="add" id="addit">+ Adicionar medicamento</button></div>`;
   } else if(tipo==="pedido"){
     state.ped=state.ped||{outros:"", indicacao:"", cid:"", cidDesc:"", sel:[], tuss:{}};
-    body=`<div class="card"><h2>Solicitação de exames</h2>
-        <label class="f"><span>Nome (opcional)</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+    body=patientCard(state)+`<div class="card"><h2>Solicitação de exames</h2>
         ${paperRow(state)}
         <label class="f"><span>Exames (um por linha)</span>
           <textarea id="exames" placeholder="Hemograma&#10;Creatinina&#10;TSH">${esc(state.ped.outros)}</textarea></label>
@@ -232,8 +282,7 @@ function screenForm(root, tipo, state){
       </div>`;
   } else if(tipo==="relatorio"){
     state.rel=state.rel||{titulo:"RELATÓRIO MÉDICO", corpo:""};
-    body=`<div class="card"><h2>Relatório / documento</h2>
-        <label class="f"><span>Nome (opcional)</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+    body=patientCard(state)+`<div class="card"><h2>Relatório / documento</h2>
         ${paperRow(state)}
         <label class="f"><span>Título</span><input id="tit" value="${esc(state.rel.titulo)}"></label>
         <label class="f"><span>Texto</span><textarea id="corpo" style="min-height:200px" placeholder="Escreva o conteúdo do documento…">${esc(state.rel.corpo)}</textarea></label>
@@ -241,8 +290,7 @@ function screenForm(root, tipo, state){
   } else if(tipo==="atestado"){
     state.ate=state.ate||{modelo:"afastamento",dias:1,atividade:"laborais",pdata:hoje(),hi:"",hf:"",acompanhante:"",cid:"",cidDesc:"",incluirCid:false,texto:""};
     const sel=(v)=>state.ate.modelo===v?" selected":"";
-    body=`<div class="card"><h2>Atestado</h2>
-        <label class="f"><span>Paciente</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+    body=patientCard(state)+`<div class="card"><h2>Atestado</h2>
         ${paperRow(state)}
         <label class="f"><span>Modelo</span><select id="modelo">
           <option value="afastamento"${sel('afastamento')}>Afastamento</option>
@@ -265,10 +313,11 @@ function screenForm(root, tipo, state){
     </div>`;
 
   bindPaper(state);
-  const pac=$("#pac"); if(pac) pac.oninput=()=>{ state.paciente=pac.value; if(tipo==="atestado") regenAtestado(); };
+  bindPatient(state, paint);
 
   if(tipo==="receituario"){
-    $("#rxtipo").querySelectorAll("button").forEach(b=>b.onclick=()=>{state.rx.tipo=b.dataset.t;$("#rxtipo").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));});
+    $("#rxtipo").querySelectorAll("button").forEach(b=>b.onclick=()=>{state.rx.tipo=b.dataset.t;$("#rxtipo").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));const ew=$("#endwrap");if(ew)ew.classList.toggle("hide",b.dataset.t!=="controle");});
+    const pe=$("#pacend"); if(pe) pe.oninput=e=>state.pacEnd=e.target.value;
     $("#cont").onchange=e=>state.rx.continuo=e.target.checked;
     const itensBox=$("#itens");
     function drawItens(){
@@ -407,7 +456,8 @@ async function assinar(state){
     <div style="font-weight:700;color:var(--pri-d)">Gerando e assinando o PDF…</div>
     <p class="hint">Renderização + assinatura ICP-Brasil no servidor.</p></div>`; }, "Assinando");
   try{
-    const r=await api("/pront/documento/pdf-assinado",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state})});
+    const url = state.pacienteId ? ("/pront/paciente/"+state.pacienteId+"/documento/pdf-assinado") : "/pront/documento/pdf-assinado";
+    const r=await api(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state})});
     if(r.status===401){ const j=await r.json().catch(()=>({})); if(j.precisa_otp){ back(); return pedirOTP(state); } throw new Error(j.erro||"Sessão expirada"); }
     const ct=r.headers.get("content-type")||"";
     if(!r.ok || !ct.includes("application/pdf")){ const j=await r.json().catch(()=>({erro:"Falha ("+r.status+")"})); throw new Error(j.erro||"Falha ao assinar"); }
@@ -415,18 +465,18 @@ async function assinar(state){
     const verifUrl=r.headers.get("X-Verif-Url")||"";
     const code=r.headers.get("X-Verif-Code")||"";
     const tipo=state.doc||"documento";
-    telaResultado(blob, verifUrl, code, tipo);
+    telaResultado(blob, verifUrl, code, tipo, !!state.pacienteId);
   }catch(e){
     go(root=>{ root.innerHTML=`<div class="card"><div class="msg show e">${(e.message||"Erro ao assinar")}</div>
       <button class="btn sec" id="volt">Voltar ao documento</button></div>`;
       $("#volt").onclick=()=>{back();back();}; }, "Erro");
   }
 }
-function telaResultado(blob, verifUrl, code, tipo){
+function telaResultado(blob, verifUrl, code, tipo, salvo){
   const nome=`${tipo}-assinado.pdf`;
   go(root=>{
     root.innerHTML=`<div class="card">
-      <div class="msg show o">✓ Documento assinado (ICP-Brasil)</div>
+      <div class="msg show o">✓ Documento assinado (ICP-Brasil)${salvo?" · salvo no prontuário":" · avulso"}</div>
       ${code?`<div class="codebox"><div class="lbl">Código de acesso (verificação)</div><div class="code">${code}</div>${verifUrl?`<a href="${verifUrl}" target="_blank">${verifUrl}</a>`:""}</div>`:""}
       <button class="btn ok" id="share">Compartilhar / Enviar PDF</button>
       <button class="btn sec" id="dl" style="margin-top:10px">Abrir / Baixar PDF</button>

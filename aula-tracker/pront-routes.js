@@ -131,7 +131,10 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       </style>
       <div class="right" style="justify-content:space-between">
         <h1 style="margin:0">Prontuário</h1>
-        <a href="/pront/novo"><button type="button">+ Novo paciente</button></a>
+        <div style="display:flex;gap:8px">
+          ${req.user?.super_admin ? `<a href="/pront/documentos-avulsos"><button type="button" style="background:#b45309">Avulsos</button></a>` : ""}
+          <a href="/pront/novo"><button type="button">+ Novo paciente</button></a>
+        </div>
       </div>
       ${cards}
       ${st.conf ? `<div class="card mt" style="border-left:4px solid #d97706"><b>${st.conf}</b> documento(s) aguardando sua conferência. <a href="/pront/conferencia">Revisar →</a></div>` : ""}
@@ -1075,6 +1078,92 @@ window.__READY=1;`;
     }
   });
 
+  // gerador AVULSO (sem paciente): só assinatura digital + QR. Link direto autenticado.
+  app.get("/pront/documento", medicoRequired, async (req, res) => {
+    try {
+      let html = await geradorBase();
+      let dupJson = "null";                                   // duplicação de um avulso
+      if (req.query.dup) {
+        const drow = (await pool.query(`SELECT state_json FROM pront_docs_emitidos WHERE id=$1 AND paciente_id IS NULL`, [req.query.dup])).rows[0];
+        if (drow && drow.state_json) dupJson = JSON.stringify(drow.state_json).replace(/</g, "\\u003c");
+      }
+      html = html.replace("<body>", `<body><script>window.__DUP_STATE=${dupJson};</script>`);
+      // cria o #__savemsg (o say() do SIGN_UI escreve nele) + injeta as URLs de assinatura e o botão
+      const msgUi = `<script>(function(){var m=document.createElement('div');m.id='__savemsg';m.style.cssText='position:fixed;right:18px;bottom:112px;z-index:99999;font:600 13px system-ui';document.body.appendChild(m);var st=document.createElement('style');st.textContent='@media print{#__savemsg{display:none!important}}';document.head.appendChild(st);})();</script>`;
+      html = html.replace("</body>", `<script>window.__ASSINA_STATUS_URL="/pront/assinatura/status";window.__ASSINA_ABRIR_URL="/pront/assinatura/abrir";window.__ASSINA_PDF_URL="/pront/documento/pdf-assinado";</script>${msgUi}${SIGN_UI}</body>`);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(html);
+    } catch (e) {
+      console.error("GERADOR AVULSO ERROR", e);
+      res.status(500).send("Gerador indisponível");
+    }
+  });
+
+  // lista dos documentos avulsos (só médico). Ordenável por descrição, tipo, data.
+  app.get("/pront/documentos-avulsos", medicoRequired, async (req, res) => {
+    try {
+      const sortMap = { descricao: "LOWER(COALESCE(descricao,''))", tipo: "LOWER(COALESCE(tipo,''))", data: "criado_em" };
+      const sort = sortMap[req.query.sort] ? req.query.sort : "data";
+      const dir = (req.query.dir === "asc") ? "ASC" : "DESC";
+      const orderBy = `${sortMap[sort]} ${dir}, criado_em DESC`;
+      const docs = (await pool.query(
+        `SELECT id, tipo, paper, assinado, secret_code, verif_token, descricao, to_char(criado_em,'YYYY-MM-DD') data
+           FROM pront_docs_emitidos WHERE paciente_id IS NULL ORDER BY ${orderBy}`)).rows;
+
+      const th = (key, label) => {
+        const active = sort === key;
+        const nextDir = (active && dir === "ASC") ? "desc" : "asc";
+        const arrow = active ? (dir === "ASC" ? " ↑" : " ↓") : "";
+        return `<th><a href="/pront/documentos-avulsos?sort=${key}&dir=${nextDir}" style="color:inherit;text-decoration:none;white-space:nowrap">${label}${arrow}</a></th>`;
+      };
+
+      const corpo = `
+        <div class="admin-back-top"><a href="/pront">← Prontuário</a></div>
+        <div class="right" style="justify-content:space-between">
+          <h1 style="margin:0">Documentos avulsos <span class="mut" style="font-weight:400">(${docs.length})</span></h1>
+          <a href="/pront/documento" target="_blank"><button type="button" style="background:#b45309">+ Novo avulso</button></a>
+        </div>
+        ${docs.length ? `
+        <div class="card mt">
+          <table>
+            <thead><tr>${th("data", "Data")}${th("tipo", "Tipo")}${th("descricao", "Descrição")}<th>Assinatura</th><th>Ações</th></tr></thead>
+            <tbody>${docs.map(d => `
+              <tr>
+                <td>${toBR(d.data)}</td>
+                <td><b>${TIPO_DOC[d.tipo] || safe(d.tipo)}</b></td>
+                <td>${d.descricao ? `<span style="font-size:.95em;line-height:1.3;max-width:44ch;display:inline-block">${safe(d.descricao)}</span>` : `<span class="mut">—</span>`}</td>
+                <td>${d.assinado
+                  ? `<span style="color:#0e7a4b;font-weight:600">✔ ICP-Brasil</span>${d.secret_code ? ` · <span class="mut">código:</span> <code style="font-weight:700;letter-spacing:.5px">${safe(d.secret_code)}</code>` : ""}${d.verif_token ? ` · <a href="/verificar/${d.verif_token}" target="_blank">verificar</a>` : ""}`
+                  : `<span class="mut">—</span>`}</td>
+                <td style="white-space:nowrap">
+                  <a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a>
+                  · <a href="/pront/documento?dup=${d.id}" target="_blank">duplicar</a>
+                  · <a href="#" class="doc-del" data-del="${d.id}" data-desc="${safe((TIPO_DOC[d.tipo] || d.tipo) + (d.descricao ? " — " + d.descricao : ""))}" style="color:#b91c1c">excluir</a>
+                </td>
+              </tr>`).join("")}</tbody>
+          </table>
+        </div>
+        <script>(function(){
+          document.querySelectorAll('a.doc-del').forEach(function(a){
+            a.addEventListener('click',function(ev){
+              ev.preventDefault();
+              var did=a.getAttribute('data-del'), desc=a.getAttribute('data-desc')||'este documento';
+              if(!confirm('Excluir '+desc+' ?\\n\\nRemove o documento avulso. Esta ação não pode ser desfeita.'))return;
+              a.textContent='excluindo…';a.style.pointerEvents='none';
+              fetch('/pront/documento-emitido/'+did,{method:'DELETE'}).then(function(r){
+                if(r.ok){var tr=a.closest('tr');if(tr)tr.parentNode.removeChild(tr);}
+                else{a.textContent='falhou';a.style.color='#b91c1c';a.style.pointerEvents='';}
+              }).catch(function(){a.textContent='erro';a.style.pointerEvents='';});
+            });
+          });
+        })();</script>` : `<div class="card mt"><p class="mut">Nenhum documento avulso emitido ainda. <a href="/pront/documento" target="_blank">Emitir o primeiro →</a></p></div>`}`;
+      res.send(renderShell("Documentos avulsos", corpo));
+    } catch (e) {
+      console.error("AVULSOS LIST ERROR", e);
+      res.status(500).send("Erro ao listar documentos avulsos");
+    }
+  });
+
   app.get("/pront/paciente/:id/documento", medicoRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id, nome, endereco FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
@@ -1281,6 +1370,49 @@ window.__READY=1;`;
       res.send(assinado);
     } catch (e) {
       console.error("PDF ASSINADO ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
+
+  // assinatura AVULSA (sem paciente): assina, grava em pront_docs_emitidos com paciente_id NULL, mantém QR/código
+  app.post("/pront/documento/pdf-assinado", medicoRequired, async (req, res) => {
+    try {
+      const sess = _sessoesBird.get(userKey(req));
+      if (!sess || sess.expira_em <= Date.now())
+        return res.status(401).json({ ok: false, erro: "sessão de assinatura expirada", precisa_otp: true });
+      const state = req.body && req.body.state;
+      if (!state || typeof state !== "object") return res.status(400).json({ ok: false, erro: "estado ausente" });
+      state.impressao = "digital";
+      state.assina = "digital";
+
+      const token = randomUUID();
+      const secretCode = gerarSecretCode();
+      const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+      const verifUrl = `${base}/verificar/${token}`;
+
+      let html = await geradorBase();
+      html = html.replace("</body>", `<script>window.VERIFY_URL=${JSON.stringify(verifUrl)};window.VERIFY_CODE=${JSON.stringify(secretCode)};</script></body>`);
+      const pdf = await gerarDocumentoPDF(html, state);
+
+      const rawSignHex = makeBirdIdRawSigner({ access_token: sess.access_token, certificateAlias: sess.alias });
+      const assinado = await assinarPdfCades({ pdfBuffer: pdf, certificadosPem: [sess.pem], rawSignHex, meta: { reason: "Documento médico assinado digitalmente" } });
+
+      const tipo = String(state.doc || "documento").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40) || "documento";
+      const paper = String(state.paper || "A4").slice(0, 8);
+      const r2key = `pront/docs-assinados/avulso/${Date.now()}-${tipo}.pdf`;
+      await uploadToR2(r2key, assinado, "application/pdf");
+      await pool.query(
+        `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado, secret_code, descricao, state_json)
+         VALUES (NULL,$1,$2,$3,$4,$5,true,$6,$7,$8::jsonb)`,
+        [tipo, paper, r2key, quem(req), token, secretCode, resumoDocumento(state), JSON.stringify(state)]);
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${tipo}-assinado.pdf"`);
+      res.setHeader("X-Verif-Url", verifUrl);
+      res.setHeader("X-Verif-Code", secretCode);
+      res.send(assinado);
+    } catch (e) {
+      console.error("PDF ASSINADO AVULSO ERROR", e);
       res.status(500).json({ ok: false, erro: e.message });
     }
   });

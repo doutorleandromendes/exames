@@ -1462,6 +1462,22 @@ window.__READY=1;`;
     }
   });
 
+  // busca de pacientes do prontuário p/ o app mobile (nome + endereço, p/ puxar dados)
+  app.get("/pront/api/pacientes-busca", medicoRequired, async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      if (q.length < 2) return res.json([]);
+      const { rows } = await pool.query(
+        `SELECT id, nome, to_char(dn,'YYYY-MM-DD') dn, COALESCE(endereco,'') endereco
+           FROM pront_pacientes WHERE nome ILIKE $1 ORDER BY lower(nome) LIMIT 20`,
+        ["%" + q + "%"]);
+      res.json(rows);
+    } catch (e) {
+      console.error("PAC-BUSCA ERROR", e);
+      res.status(500).json([]);
+    }
+  });
+
   // verificação PÚBLICA (o QR aponta pra cá). O token uuid é a capability (não-adivinhável).
   app.get("/verificar/:token", async (req, res) => {
     const t = String(req.params.token || "");

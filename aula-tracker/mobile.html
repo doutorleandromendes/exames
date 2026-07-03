@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Docs Kadri">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0c447c">
+<title>Documentos — Clínica Kadri</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Crect width='180' height='180' rx='40' fill='%230c447c'/%3E%3Ctext x='90' y='120' font-size='90' font-family='Georgia,serif' fill='white' text-anchor='middle'%3ELM%3C/text%3E%3C/svg%3E">
+<style>
+  :root{
+    --pri:#0c447c; --pri-d:#093461; --bg:#eef2f7; --card:#fff; --ink:#1e293b;
+    --mut:#64748b; --line:#e2e8f0; --ok:#0e7a4b; --warn:#b45309; --err:#b91c1c;
+    --sat:env(safe-area-inset-top); --sab:env(safe-area-inset-bottom);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0}
+  body{font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);
+    padding-bottom:calc(16px + var(--sab))}
+  .top{position:sticky;top:0;z-index:50;background:var(--pri);color:#fff;padding:calc(10px + var(--sat)) 16px 12px;
+    display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+  .top h1{font-size:16px;font-weight:700;margin:0;flex:1;letter-spacing:.2px}
+  .top .back{background:rgba(255,255,255,.16);border:0;color:#fff;font-size:15px;border-radius:8px;padding:7px 11px;cursor:pointer}
+  .wrap{max-width:640px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:0 0 14px;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+  h2{font-size:15px;margin:0 0 12px;color:var(--pri-d)}
+  label.f{display:block;margin:0 0 12px}
+  label.f>span{display:block;font-size:13px;color:var(--mut);margin:0 0 5px;font-weight:600}
+  input,select,textarea{width:100%;font:inherit;color:var(--ink);background:#fff;border:1.5px solid var(--line);
+    border-radius:10px;padding:12px 13px;outline:none;-webkit-appearance:none;appearance:none}
+  input:focus,select,textarea:focus{border-color:var(--pri)}
+  select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 14px center;padding-right:36px}
+  textarea{min-height:120px;resize:vertical;line-height:1.5}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .btn{display:block;width:100%;text-align:center;background:var(--pri);color:#fff;border:0;border-radius:12px;
+    padding:15px;font-size:16px;font-weight:700;cursor:pointer}
+  .btn:active{background:var(--pri-d)}
+  .btn[disabled]{opacity:.55}
+  .btn.sec{background:#fff;color:var(--pri);border:1.5px solid var(--pri)}
+  .btn.warn{background:var(--warn)}
+  .btn.ok{background:var(--ok)}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 14px;text-align:center;cursor:pointer;
+    box-shadow:0 1px 3px rgba(15,23,42,.05)}
+  .tile:active{border-color:var(--pri);background:#f5f9ff}
+  .tile .ic{font-size:26px;margin-bottom:6px}
+  .tile .t{font-weight:700;font-size:14px}
+  .tile .d{font-size:12px;color:var(--mut);margin-top:3px}
+  .item{border:1px dashed var(--line);border-radius:12px;padding:12px;margin:0 0 10px;position:relative}
+  .item .rm{position:absolute;right:8px;top:8px;background:#fee2e2;color:#b91c1c;border:0;border-radius:8px;width:28px;height:28px;font-size:16px;cursor:pointer}
+  .item .n{font-size:12px;color:var(--mut);font-weight:700;margin-bottom:8px}
+  .add{background:#f1f5ff;color:var(--pri);border:1.5px dashed var(--pri);border-radius:10px;padding:11px;width:100%;font-weight:600;cursor:pointer}
+  .ac{position:relative}
+  .ac-list{position:absolute;left:0;right:0;top:calc(100% + 3px);background:#fff;border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 8px 24px rgba(15,23,42,.14);max-height:230px;overflow:auto;z-index:20}
+  .ac-list div{padding:11px 12px;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer}
+  .ac-list div:last-child{border-bottom:0}
+  .ac-list div:active{background:#f1f5ff}
+  .ac-list .sub{color:var(--mut);font-size:12px}
+  .msg{padding:11px 13px;border-radius:10px;font-size:14px;margin:0 0 12px;font-weight:600;display:none}
+  .msg.show{display:block}
+  .msg.e{background:#fef2f2;color:var(--err)} .msg.o{background:#ecfdf5;color:var(--ok)} .msg.i{background:#eff6ff;color:var(--pri-d)}
+  .hint{font-size:12.5px;color:var(--mut);margin:6px 0 0}
+  .codebox{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:14px;text-align:center;margin:0 0 12px}
+  .codebox .lbl{font-size:12px;color:var(--mut);font-weight:600}
+  .codebox .code{font-size:26px;font-weight:800;letter-spacing:3px;color:var(--pri-d);margin:3px 0}
+  .codebox a{font-size:12px;color:var(--pri);word-break:break-all}
+  .spin{display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:s .7s linear infinite;vertical-align:-3px;margin-right:7px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .hide{display:none!important}
+  .foot{text-align:center;color:var(--mut);font-size:11.5px;padding:8px 0 0}
+  .seg{display:flex;border:1.5px solid var(--line);border-radius:10px;overflow:hidden}
+  .seg button{flex:1;background:#fff;border:0;padding:11px;font:inherit;font-weight:600;color:var(--mut);cursor:pointer}
+  .seg button.on{background:var(--pri);color:#fff}
+</style>
+</head>
+<body>
+<div class="top">
+  <button class="back hide" id="back">‹ Voltar</button>
+  <h1 id="title">Documentos</h1>
+</div>
+<div class="wrap" id="app"></div>
+<div class="foot">Clínica Kadri · Dr. Leandro Mendes · ICP-Brasil</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const app = $("#app"), title = $("#title"), backBtn = $("#back");
+let stack = [];
+
+/* ---------- API helpers (cookie same-origin) ---------- */
+async function api(url, opts={}){
+  const r = await fetch(url, Object.assign({credentials:"same-origin", redirect:"follow"}, opts));
+  return r;
+}
+async function apiJSON(url, opts={}){
+  const r = await api(url, opts);
+  const ct = r.headers.get("content-type")||"";
+  if(!ct.includes("application/json")) throw {notJSON:true, status:r.status};
+  const j = await r.json();
+  return {status:r.status, ok:r.ok, json:j, headers:r.headers};
+}
+
+/* ---------- navegação ---------- */
+function go(render, ttl){
+  stack.push({render, ttl});
+  paint();
+}
+function back(){ if(stack.length>1){ stack.pop(); paint(); } }
+function reset(render, ttl){ stack=[{render,ttl}]; paint(); }
+function paint(){
+  const cur = stack[stack.length-1];
+  title.textContent = cur.ttl || "Documentos";
+  backBtn.classList.toggle("hide", stack.length<=1);
+  app.innerHTML = "";
+  cur.render(app);
+  window.scrollTo(0,0);
+}
+backBtn.onclick = back;
+
+/* ---------- utilidades atestado ---------- */
+const MESES=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
+function dataExtenso(iso){if(!iso)return "";const [y,m,d]=iso.split("-").map(Number);return `${d} de ${MESES[m-1]} de ${y}`;}
+function numExtenso(n){const e=["zero","um","dois","três","quatro","cinco","seis","sete","oito","nove","dez","onze","doze","treze","quatorze","quinze","dezesseis","dezessete","dezoito","dezenove","vinte"];return e[n]||n;}
+function hoje(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function gerarAtestado(a, paciente){
+  const nome=paciente||"o(a) paciente", atvd=a.atividade||"laborais";
+  const per=(a.hi&&a.hf)?`, no período das ${a.hi} às ${a.hf}`:"";
+  const cid=(a.incluirCid&&a.cid)?`\n\nCID-10: ${a.cid}${a.cidDesc?` — ${a.cidDesc}`:""}.`:"";
+  let t="";
+  if(a.modelo==="afastamento"){const d=a.dias||1;t=`Atesto, para os devidos fins, que ${nome} esteve sob meus cuidados médicos nesta data, necessitando de afastamento de suas atividades ${atvd} por ${d} (${numExtenso(d)}) dia(s), a partir de ${dataExtenso(a.pdata)}.`;}
+  else if(a.modelo==="retorno"){t=`Atesto, para os devidos fins, que ${nome} encontra-se apto(a) a retornar às suas atividades ${atvd} a partir de ${dataExtenso(a.pdata)}.`;}
+  else if(a.modelo==="comp_pac"){t=`Atesto, para os devidos fins, que ${nome} compareceu a consulta médica no dia ${dataExtenso(a.pdata)}${per}.`;}
+  else if(a.modelo==="comp_acomp"){const ac=a.acompanhante||"o(a) acompanhante";t=`Atesto, para os devidos fins, que ${ac} compareceu a esta unidade no dia ${dataExtenso(a.pdata)}${per}, na condição de acompanhante do(a) paciente ${nome}.`;}
+  return t+cid;
+}
+
+/* ================= LOGIN ================= */
+function screenLogin(root){
+  root.innerHTML = `
+    <div class="card">
+      <h2>Entrar</h2>
+      <div class="msg e" id="lmsg"></div>
+      <label class="f"><span>E-mail</span><input type="email" id="email" autocomplete="username" inputmode="email" placeholder="seu@email"></label>
+      <label class="f"><span>Senha</span><input type="password" id="pass" autocomplete="current-password" placeholder="••••••••"></label>
+      <button class="btn" id="entrar">Entrar</button>
+      <p class="hint">A assinatura ICP-Brasil e a geração de PDF acontecem no servidor. Este acesso é restrito ao médico.</p>
+    </div>`;
+  const em=$("#email"), pw=$("#pass"), msg=$("#lmsg");
+  $("#entrar").onclick = async ()=>{
+    msg.classList.remove("show");
+    const email=em.value.trim(), password=pw.value;
+    if(!email||!password){msg.textContent="Preencha e-mail e senha.";msg.classList.add("show");return;}
+    const b=$("#entrar"); b.disabled=true; b.innerHTML='<span class="spin"></span>Entrando…';
+    try{
+      const r=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password,remember:true})});
+      const j=await r.json().catch(()=>({}));
+      if(r.ok&&j.ok){ boot(); }
+      else{ msg.textContent=j.error||"Falha ao entrar."; msg.classList.add("show"); b.disabled=false; b.textContent="Entrar"; }
+    }catch(e){ msg.textContent="Erro de conexão."; msg.classList.add("show"); b.disabled=false; b.textContent="Entrar"; }
+  };
+  pw.addEventListener("keydown",e=>{if(e.key==="Enter")$("#entrar").click();});
+}
+
+/* ================= HOME ================= */
+const TIPOS=[
+  {k:"receituario", ic:"℞", t:"Receituário", d:"Medicamentos"},
+  {k:"pedido",      ic:"🧪", t:"Exames", d:"Solicitação"},
+  {k:"relatorio",   ic:"📄", t:"Relatório", d:"Texto livre"},
+  {k:"atestado",    ic:"📝", t:"Atestado", d:"Afast./comp."},
+];
+function screenHome(root){
+  const t=document.createElement("div");
+  t.innerHTML=`<div class="card"><h2>Novo documento avulso</h2>
+    <p class="hint" style="margin:0 0 12px">Emita e assine digitalmente. O PDF sai pronto para enviar (WhatsApp, e-mail).</p>
+    <div class="tiles"></div></div>`;
+  const grid=t.querySelector(".tiles");
+  TIPOS.forEach(tp=>{
+    const el=document.createElement("div"); el.className="tile";
+    el.innerHTML=`<div class="ic">${tp.ic}</div><div class="t">${tp.t}</div><div class="d">${tp.d}</div>`;
+    const st={doc:tp.k, paper:"A4", paciente:""};
+    el.onclick=()=>go(r=>screenForm(r,tp.k,st), tp.t);
+    grid.appendChild(el);
+  });
+  root.appendChild(t);
+}
+
+/* ================= FORM ================= */
+function paperRow(state){
+  return `<label class="f"><span>Papel</span>
+    <div class="seg" id="paperseg">
+      <button data-p="A4" class="${state.paper==='A4'?'on':''}">A4</button>
+      <button data-p="A5" class="${state.paper==='A5'?'on':''}">A5</button>
+    </div></label>`;
+}
+function bindPaper(state){
+  const seg=$("#paperseg"); if(!seg)return;
+  seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    state.paper=b.dataset.p; seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+  });
+}
+
+function screenForm(root, tipo, state){
+  state = state || { doc:tipo, paper:"A4", paciente:"" };
+  let body="";
+  if(tipo==="receituario"){
+    state.rx=state.rx||{tipo:"simples", continuo:false, itens:[{med:"",pos:"",qtd:""}]};
+    body=`<div class="card"><h2>Paciente</h2>
+        <label class="f"><span>Nome (opcional em avulso)</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+        ${paperRow(state)}
+        <label class="f"><span>Tipo</span><div class="seg" id="rxtipo">
+          <button data-t="simples" class="${state.rx.tipo==='simples'?'on':''}">Simples</button>
+          <button data-t="controle" class="${state.rx.tipo==='controle'?'on':''}">Controle especial (2 vias)</button></div></label>
+        <label class="f" style="display:flex;align-items:center;gap:10px;flex-direction:row">
+          <input type="checkbox" id="cont" ${state.rx.continuo?'checked':''} style="width:22px;height:22px;flex:0 0 auto"><span style="margin:0">Uso contínuo</span></label>
+      </div>
+      <div class="card"><h2>Medicamentos</h2><div id="itens"></div>
+        <button class="add" id="addit">+ Adicionar medicamento</button></div>`;
+  } else if(tipo==="pedido"){
+    state.ped=state.ped||{outros:"", indicacao:"", cid:"", cidDesc:"", sel:[], tuss:{}};
+    body=`<div class="card"><h2>Solicitação de exames</h2>
+        <label class="f"><span>Nome (opcional)</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+        ${paperRow(state)}
+        <label class="f"><span>Exames (um por linha)</span>
+          <textarea id="exames" placeholder="Hemograma&#10;Creatinina&#10;TSH">${esc(state.ped.outros)}</textarea></label>
+        <label class="f"><span>Justificativa / indicação (opcional)</span><input id="ind" value="${esc(state.ped.indicacao)}" placeholder="Ex.: rastreio anual"></label>
+        <label class="f"><span>CID (opcional)</span><input id="cid" value="${esc(state.ped.cid)}" placeholder="Ex.: Z00.0"></label>
+      </div>`;
+  } else if(tipo==="relatorio"){
+    state.rel=state.rel||{titulo:"RELATÓRIO MÉDICO", corpo:""};
+    body=`<div class="card"><h2>Relatório / documento</h2>
+        <label class="f"><span>Nome (opcional)</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+        ${paperRow(state)}
+        <label class="f"><span>Título</span><input id="tit" value="${esc(state.rel.titulo)}"></label>
+        <label class="f"><span>Texto</span><textarea id="corpo" style="min-height:200px" placeholder="Escreva o conteúdo do documento…">${esc(state.rel.corpo)}</textarea></label>
+      </div>`;
+  } else if(tipo==="atestado"){
+    state.ate=state.ate||{modelo:"afastamento",dias:1,atividade:"laborais",pdata:hoje(),hi:"",hf:"",acompanhante:"",cid:"",cidDesc:"",incluirCid:false,texto:""};
+    const sel=(v)=>state.ate.modelo===v?" selected":"";
+    body=`<div class="card"><h2>Atestado</h2>
+        <label class="f"><span>Paciente</span><input id="pac" value="${esc(state.paciente)}" placeholder="Nome do paciente"></label>
+        ${paperRow(state)}
+        <label class="f"><span>Modelo</span><select id="modelo">
+          <option value="afastamento"${sel('afastamento')}>Afastamento</option>
+          <option value="retorno"${sel('retorno')}>Apto a retornar</option>
+          <option value="comp_pac"${sel('comp_pac')}>Comparecimento (paciente)</option>
+          <option value="comp_acomp"${sel('comp_acomp')}>Comparecimento (acompanhante)</option></select></label>
+        <div id="ate-extra"></div>
+        <label class="f"><span>Data de referência</span><input type="date" id="pdata" value="${esc(state.ate.pdata)}"></label>
+        <label class="f" style="display:flex;align-items:center;gap:10px;flex-direction:row">
+          <input type="checkbox" id="incid" ${state.ate.incluirCid?'checked':''} style="width:22px;height:22px;flex:0 0 auto"><span style="margin:0">Incluir CID</span></label>
+        <label class="f${state.ate.incluirCid?'':' hide'}" id="cidwrap"><span>CID</span><input id="cid" value="${esc(state.ate.cid)}" placeholder="Ex.: J06.9"></label>
+        <label class="f"><span>Texto gerado (editável)</span><textarea id="atexto" style="min-height:150px"></textarea></label>
+      </div>`;
+  }
+  root.innerHTML = body + `
+    <div class="card">
+      <div class="msg" id="fmsg"></div>
+      <button class="btn" id="assinar">Assinar (ICP-Brasil) e gerar PDF</button>
+      <p class="hint">Abre uma sessão Bird ID por OTP (vale ~4 h e serve para vários documentos).</p>
+    </div>`;
+
+  bindPaper(state);
+  const pac=$("#pac"); if(pac) pac.oninput=()=>{ state.paciente=pac.value; if(tipo==="atestado") regenAtestado(); };
+
+  if(tipo==="receituario"){
+    $("#rxtipo").querySelectorAll("button").forEach(b=>b.onclick=()=>{state.rx.tipo=b.dataset.t;$("#rxtipo").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));});
+    $("#cont").onchange=e=>state.rx.continuo=e.target.checked;
+    const itensBox=$("#itens");
+    function drawItens(){
+      itensBox.innerHTML="";
+      state.rx.itens.forEach((it,i)=>{
+        const d=document.createElement("div"); d.className="item";
+        d.innerHTML=`${state.rx.itens.length>1?`<button class="rm" data-i="${i}">×</button>`:""}
+          <div class="n">Item ${i+1}</div>
+          <div class="ac"><label class="f" style="margin-bottom:8px"><span>Medicamento</span>
+            <input data-k="med" data-i="${i}" value="${it.med.replace(/"/g,'&quot;')}" placeholder="Ex.: Amoxicilina 500 mg" autocomplete="off"></label>
+            <div class="ac-list hide"></div></div>
+          <label class="f" style="margin-bottom:0"><span>Posologia</span>
+            <input data-k="pos" data-i="${i}" value="${it.pos.replace(/"/g,'&quot;')}" placeholder="Ex.: 1 cp VO 8/8h por 7 dias"></label>`;
+        itensBox.appendChild(d);
+      });
+      itensBox.querySelectorAll(".rm").forEach(b=>b.onclick=()=>{state.rx.itens.splice(+b.dataset.i,1);drawItens();});
+      itensBox.querySelectorAll("input[data-k]").forEach(inp=>{
+        inp.oninput=e=>{ state.rx.itens[+inp.dataset.i][inp.dataset.k]=e.target.value; if(inp.dataset.k==="med") autocomplete(inp); };
+      });
+    }
+    $("#addit").onclick=()=>{state.rx.itens.push({med:"",pos:"",qtd:""});drawItens();};
+    drawItens();
+  }
+  if(tipo==="pedido"){
+    $("#exames").oninput=e=>state.ped.outros=e.target.value;
+    $("#ind").oninput=e=>state.ped.indicacao=e.target.value;
+    $("#cid").oninput=e=>state.ped.cid=e.target.value;
+  }
+  if(tipo==="relatorio"){
+    $("#tit").oninput=e=>state.rel.titulo=e.target.value;
+    $("#corpo").oninput=e=>state.rel.corpo=e.target.value;
+  }
+  if(tipo==="atestado"){
+    const extra=$("#ate-extra"), atexto=$("#atexto");
+    function drawExtra(){
+      const m=state.ate.modelo; let h="";
+      if(m==="afastamento"||m==="retorno") h+=`<label class="f"><span>Atividades</span><input id="atvd" value="${state.ate.atividade}"></label>`;
+      if(m==="afastamento") h+=`<label class="f"><span>Dias de afastamento</span><input type="number" id="dias" min="1" value="${state.ate.dias}"></label>`;
+      if(m==="comp_pac"||m==="comp_acomp") h+=`<div class="row"><label class="f"><span>Hora início</span><input id="hi" placeholder="14:00"></label><label class="f"><span>Hora fim</span><input id="hf" placeholder="15:00"></label></div>`;
+      if(m==="comp_acomp") h+=`<label class="f"><span>Acompanhante</span><input id="acomp" placeholder="Nome do acompanhante"></label>`;
+      extra.innerHTML=h;
+      const dias=$("#dias"); if(dias)dias.oninput=e=>{state.ate.dias=+e.target.value||1;regenAtestado();};
+      const atvd=$("#atvd"); if(atvd)atvd.oninput=e=>{state.ate.atividade=e.target.value;regenAtestado();};
+      const hi=$("#hi"); if(hi)hi.oninput=e=>{state.ate.hi=e.target.value;regenAtestado();};
+      const hf=$("#hf"); if(hf)hf.oninput=e=>{state.ate.hf=e.target.value;regenAtestado();};
+      const ac=$("#acomp"); if(ac)ac.oninput=e=>{state.ate.acompanhante=e.target.value;regenAtestado();};
+    }
+    window.regenAtestado=function(){ state.ate.texto=gerarAtestado(state.ate,state.paciente); atexto.value=state.ate.texto; };
+    $("#modelo").onchange=e=>{state.ate.modelo=e.target.value;drawExtra();regenAtestado();};
+    $("#pdata").oninput=e=>{state.ate.pdata=e.target.value;regenAtestado();};
+    $("#incid").onchange=e=>{state.ate.incluirCid=e.target.checked;$("#cidwrap").classList.toggle("hide",!e.target.checked);regenAtestado();};
+    $("#cid").oninput=e=>{state.ate.cid=e.target.value;regenAtestado();};
+    atexto.oninput=e=>state.ate.texto=e.target.value;
+    drawExtra(); regenAtestado();
+  }
+
+  $("#assinar").onclick=()=>assinarFluxo(state);
+}
+
+/* ---------- autocomplete de medicamentos (server) ---------- */
+let acTimer=null;
+function autocomplete(inp){
+  const box=inp.closest(".ac").querySelector(".ac-list");
+  const q=inp.value.trim();
+  clearTimeout(acTimer);
+  if(q.length<2){box.classList.add("hide");return;}
+  acTimer=setTimeout(async ()=>{
+    try{
+      const r=await api("/pront/api/med-busca?q="+encodeURIComponent(q));
+      if(!r.ok){box.classList.add("hide");return;}
+      const list=await r.json();
+      if(!Array.isArray(list)||!list.length){box.classList.add("hide");return;}
+      box.innerHTML="";
+      list.slice(0,12).forEach(o=>{
+        const d=document.createElement("div");
+        const nome=o.p||o.s;
+        d.innerHTML=`${nome}${o.a?` <span class="sub">${o.a}</span>`:""}`;
+        d.onclick=()=>{ inp.value=(nome+(o.a?" "+o.a:"")).trim(); inp.dispatchEvent(new Event("input")); box.classList.add("hide"); };
+        box.appendChild(d);
+      });
+      box.classList.remove("hide");
+    }catch(e){box.classList.add("hide");}
+  },220);
+  inp.onblur=()=>setTimeout(()=>box.classList.add("hide"),200);
+}
+
+/* ================= FLUXO DE ASSINATURA ================= */
+function validar(state){
+  if(state.doc==="receituario"){ if(!state.rx.itens.some(i=>i.med.trim())) return "Adicione ao menos um medicamento."; }
+  if(state.doc==="pedido"){ if(!(state.ped.outros||"").trim()) return "Liste ao menos um exame."; }
+  if(state.doc==="relatorio"){ if(!(state.rel.corpo||"").trim()) return "Escreva o texto do relatório."; }
+  if(state.doc==="atestado"){ if(!(state.ate.texto||"").trim()) return "Texto do atestado vazio."; }
+  return null;
+}
+async function assinarFluxo(state){
+  const msg=$("#fmsg"), btn=$("#assinar");
+  const setMsg=(cls,txt)=>{msg.className="msg show "+cls;msg.textContent=txt;};
+  const err=validar(state); if(err){setMsg("e",err);return;}
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>Verificando sessão…';
+  try{
+    // 1) sessão ativa?
+    let ativa=false;
+    try{ const s=await apiJSON("/pront/assinatura/status"); ativa=!!(s.json&&s.json.ativa); }
+    catch(e){ if(e.notJSON){ setMsg("e","Sessão encerrada. Faça login novamente."); btn.disabled=false; btn.textContent="Assinar (ICP-Brasil) e gerar PDF"; boot(); return; } }
+    if(!ativa){ btn.disabled=false; btn.textContent="Assinar (ICP-Brasil) e gerar PDF"; return pedirOTP(state); }
+    await assinar(state);
+  }catch(e){ setMsg("e","Erro: "+(e.message||e)); btn.disabled=false; btn.textContent="Assinar (ICP-Brasil) e gerar PDF"; }
+}
+function pedirOTP(state){
+  go(root=>{
+    root.innerHTML=`<div class="card"><h2>Assinatura ICP-Brasil</h2>
+      <div class="msg" id="omsg"></div>
+      <p class="hint" style="margin:0 0 12px">Digite o código OTP do app <b>Bird ID</b> (Soluti). A sessão fica ativa por ~4 h para vários documentos.</p>
+      <label class="f"><span>Código OTP</span><input id="otp" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="000000" style="font-size:22px;letter-spacing:6px;text-align:center"></label>
+      <button class="btn" id="abrir">Abrir sessão e assinar</button>
+    </div>`;
+    const otp=$("#otp"), om=$("#omsg");
+    otp.focus();
+    $("#abrir").onclick=async ()=>{
+      const v=otp.value.trim();
+      if(!/^\d{6,8}$/.test(v)){om.className="msg show e";om.textContent="OTP deve ter 6 a 8 dígitos.";return;}
+      const b=$("#abrir"); b.disabled=true; b.innerHTML='<span class="spin"></span>Abrindo sessão…';
+      try{
+        const r=await apiJSON("/pront/assinatura/abrir",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({otp:v})});
+        if(r.ok&&r.json.ok){ back(); await assinar(state); }
+        else{ om.className="msg show e"; om.textContent=r.json.erro||"Falha ao abrir sessão."; b.disabled=false; b.textContent="Abrir sessão e assinar"; }
+      }catch(e){ om.className="msg show e"; om.textContent="Erro ao abrir sessão."; b.disabled=false; b.textContent="Abrir sessão e assinar"; }
+    };
+    otp.addEventListener("keydown",e=>{if(e.key==="Enter")$("#abrir").click();});
+  }, "Assinatura");
+}
+async function assinar(state){
+  // tela de progresso
+  go(root=>{ root.innerHTML=`<div class="card" style="text-align:center;padding:34px 16px">
+    <div class="spin" style="width:26px;height:26px;border-color:#c7d2e4;border-top-color:var(--pri);margin:0 auto 14px"></div>
+    <div style="font-weight:700;color:var(--pri-d)">Gerando e assinando o PDF…</div>
+    <p class="hint">Renderização + assinatura ICP-Brasil no servidor.</p></div>`; }, "Assinando");
+  try{
+    const r=await api("/pront/documento/pdf-assinado",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state})});
+    if(r.status===401){ const j=await r.json().catch(()=>({})); if(j.precisa_otp){ back(); return pedirOTP(state); } throw new Error(j.erro||"Sessão expirada"); }
+    const ct=r.headers.get("content-type")||"";
+    if(!r.ok || !ct.includes("application/pdf")){ const j=await r.json().catch(()=>({erro:"Falha ("+r.status+")"})); throw new Error(j.erro||"Falha ao assinar"); }
+    const blob=await r.blob();
+    const verifUrl=r.headers.get("X-Verif-Url")||"";
+    const code=r.headers.get("X-Verif-Code")||"";
+    const tipo=state.doc||"documento";
+    telaResultado(blob, verifUrl, code, tipo);
+  }catch(e){
+    go(root=>{ root.innerHTML=`<div class="card"><div class="msg show e">${(e.message||"Erro ao assinar")}</div>
+      <button class="btn sec" id="volt">Voltar ao documento</button></div>`;
+      $("#volt").onclick=()=>{back();back();}; }, "Erro");
+  }
+}
+function telaResultado(blob, verifUrl, code, tipo){
+  const nome=`${tipo}-assinado.pdf`;
+  go(root=>{
+    root.innerHTML=`<div class="card">
+      <div class="msg show o">✓ Documento assinado (ICP-Brasil)</div>
+      ${code?`<div class="codebox"><div class="lbl">Código de acesso (verificação)</div><div class="code">${code}</div>${verifUrl?`<a href="${verifUrl}" target="_blank">${verifUrl}</a>`:""}</div>`:""}
+      <button class="btn ok" id="share">Compartilhar / Enviar PDF</button>
+      <button class="btn sec" id="dl" style="margin-top:10px">Abrir / Baixar PDF</button>
+      <button class="btn sec" id="novo" style="margin-top:10px;border-color:var(--line);color:var(--mut)">Novo documento</button>
+      <p class="hint">O PDF já contém o QR e o código para validação no portal do ITI.</p>
+    </div>`;
+    $("#share").onclick=async ()=>{
+      try{
+        const file=new File([blob],nome,{type:"application/pdf"});
+        if(navigator.canShare&&navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:"Documento médico"}); }
+        else{ abrirPDF(blob,nome); }
+      }catch(e){ /* usuário cancelou */ }
+    };
+    $("#dl").onclick=()=>abrirPDF(blob,nome);
+    $("#novo").onclick=()=>reset(screenHome,"Documentos");
+  }, "Pronto");
+}
+function abrirPDF(blob,nome){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=nome; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>{ try{ window.open(url,"_blank"); }catch(e){} }, 300);
+}
+
+/* ================= BOOT ================= */
+async function boot(){
+  try{
+    const s=await apiJSON("/pront/assinatura/status"); // exige médico logado -> JSON
+    if(s && s.json && typeof s.json.ativa!=="undefined"){ reset(screenHome,"Documentos"); return; }
+    reset(screenLogin,"Entrar");
+  }catch(e){
+    reset(screenLogin,"Entrar"); // não-JSON (redirect p/ login) ou 403
+  }
+}
+boot();
+</script>
+</body>
+</html>

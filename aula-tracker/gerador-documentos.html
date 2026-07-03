@@ -75,6 +75,12 @@
   .poso-builder .pb-ins{flex:1 1 100%;appearance:none;border:0;background:var(--accent);color:#fff;font:inherit;
     font-size:12px;font-weight:600;padding:7px;border-radius:7px;cursor:pointer}
   .poso-builder .pb-ins:hover{background:var(--accent-d)}
+  .poso-sug{margin-top:9px;padding:8px 9px;background:var(--accent-soft);border:1px solid #cfe2e4;border-radius:8px}
+  .poso-sug .ps-h{font-size:11px;font-weight:700;color:var(--accent-d);margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .poso-sug .ps-note{font-weight:500;font-size:10px;color:var(--muted2);background:#fff;border:1px solid var(--line);border-radius:20px;padding:1px 7px}
+  .poso-sug .ps-line{display:block;width:100%;text-align:left;appearance:none;border:1px solid var(--line);background:var(--paper);color:inherit;font:inherit;font-size:12.5px;padding:6px 8px;border-radius:6px;margin-top:5px;cursor:pointer;line-height:1.3}
+  .poso-sug .ps-line:hover{border-color:var(--accent);background:#fff}
+  .poso-sug .ps-star{color:var(--accent);margin-right:5px}
   .addbtn{width:100%;border:1px dashed var(--line);background:transparent;color:var(--accent);
     padding:9px;border-radius:9px;cursor:pointer;font:inherit;font-size:13px;font-weight:600}
   .addbtn:hover{border-color:var(--accent);background:var(--accent-soft)}
@@ -2559,6 +2565,7 @@ var qrcode = function() {
 }));
 
 </script>
+<script src="poso-seed.js"></script>
 <script>
 /* ===== Catálogos (JotForm "Consultorio") ======================= */
 const CAT = {
@@ -2664,6 +2671,35 @@ async function savePoso(){try{await window.storage.set("posologias",JSON.stringi
 function drugKey(med){const n=norm(med);const m=n.match(/^[^0-9]+/);return ((m?m[0]:n).trim().split(" ").slice(0,3).join(" "))||n;}
 function posoSuggest(med){const k=drugKey(med);return (POSO[k]||[]).slice(0,6);}
 function posoSave(med,pos){const k=drugKey(med);if(!k||!pos||!pos.trim())return false;POSO[k]=POSO[k]||[];if(!POSO[k].includes(pos)){POSO[k].unshift(pos);POSO[k]=POSO[k].slice(0,8);}savePoso();return true;}
+/* ===== Posologias sugeridas — maquinária (dados em poso-seed.js) ===== */
+/* Palavras de sal/éster que aparecem nos genéricos BR e não devem impedir o casamento
+   (ex.: "losartana potássica" ≡ "losartana"). Não incluir princípios ativos reais
+   como clavulanato/sulbactam/tazobactam. */
+const SALT_WORDS=new Set(["potassica","potassico","sodica","sodico","calcica","calcico","maleato","besilato","mesilato","cloridrato","dicloridrato","bromidrato","sulfato","fosfato","succinato","tartarato","hemitartarato","fumarato","hemifumarato","trometamol","nitrato","acetato","propionato","dipropionato","valerato","pamoato","estearato","axetil","anidro","monoidratado","dihidratado"]);
+function saltKey(k){const w=k.split(" ").filter(x=>x&&!SALT_WORDS.has(x));return w.join(" ")||k;}
+const POSO_SEED={};
+function seedAdd(key,lines){if(!key)return;POSO_SEED[key]=(POSO_SEED[key]||[]).concat(lines);}
+for(const it of (window.POSO_SEED_RAW||[])){
+  for(const nm of [it.n].concat(it.k||[])){const key=drugKey(nm);seedAdd(key,it.l);const sk=saltKey(key);if(sk!==key)seedAdd(sk,it.l);}
+}
+function posoSuggestAll(med){
+  const k=drugKey(med), ks=saltKey(k); const seen=new Set(); const out=[];
+  const push=(arr,mine)=>{(arr||[]).forEach(p=>{const t=(p||"").trim();if(t&&!seen.has(t)){seen.add(t);out.push({t,mine});}});};
+  push(POSO[k],true);
+  push(POSO_SEED[k],false);
+  if(ks!==k) push(POSO_SEED[ks],false);
+  out.sort((a,b)=>a.t.localeCompare(b.t,"pt"));
+  return out;
+}
+function renderSug(i){
+  const host=document.querySelector('.poso-sug[data-sug="'+i+'"]');if(!host)return;
+  const med=(S.rx.itens[i]&&S.rx.itens[i].med)||"";
+  const sug=med.trim()?posoSuggestAll(med):[];
+  if(!sug.length){host.hidden=true;host.innerHTML="";return;}
+  host.hidden=false;
+  host.innerHTML='<div class="ps-h">Posologias sugeridas<span class="ps-note">referência — confira antes de prescrever</span></div>'+
+    sug.map(s=>'<button type="button" class="ps-line" data-t="'+esc(s.t)+'">'+(s.mine?'<span class="ps-star">★</span>':'')+esc(s.t)+'</button>').join("");
+}
 const POSO_OPT={
   q:["1 comprimido","2 comprimidos","1/2 comprimido","1 cápsula","2 cápsulas","10 mL","15 mL","20 mL","1 ampola","1 sachê","1 aplicação","2 gotas","1 jato"],
   v:["VO","IM","IV","SC","via tópica","via inalatória","sublingual","via retal","via nasal","via oftálmica"],
@@ -2746,6 +2782,7 @@ function panelReceituario(){
         <select data-pb="d"><option value="">duração…</option>${POSO_OPT.d.map(o=>`<option>${o}</option>`).join("")}</select>
         <button class="pb-ins">inserir na posologia</button>
       </div>
+      <div class="poso-sug" data-sug="${i}" hidden></div>
     </div>`).join("");
   return `${commonBlock()}
   <div class="grp"><h3>Receita</h3>
@@ -2939,16 +2976,19 @@ function bindPanel(){
     on("#rxContinuo","change",e=>{S.rx.continuo=e.target.checked;renderDoc();});
     on("#rxAdd","click",()=>{S.rx.itens.push({med:"",pos:"",qtd:""});renderPanel();renderDoc();});
     document.querySelectorAll("#rxItens .item").forEach(it=>{const i=+it.dataset.i;
-      it.querySelectorAll("input[data-k]").forEach(inp=>inp.addEventListener("input",e=>{S.rx.itens[i][e.target.dataset.k]=e.target.value;renderDoc();}));
+      it.querySelectorAll("input[data-k]").forEach(inp=>inp.addEventListener("input",e=>{S.rx.itens[i][e.target.dataset.k]=e.target.value;if(e.target.dataset.k==="med")renderSug(i);renderDoc();}));
       const medInp=it.querySelector('input[data-k="med"]'), posInp=it.querySelector('input[data-k="pos"]');
       if(BASES_OK && medInp){
         dropdown(medInp,()=>medSearch(medInp.value).map(o=>({html:`<b>${esc(medLabel(o))}</b> ${esc(o.a)}`,val:o})),
-          o=>{const v=medFill(o);medInp.value=v;S.rx.itens[i].med=v;renderDoc();posInp&&posInp.focus();});
+          o=>{const v=medFill(o);medInp.value=v;S.rx.itens[i].med=v;renderSug(i);renderDoc();posInp&&posInp.focus();});
       }
       if(posInp){
         dropdown(posInp,()=>posoSuggest(S.rx.itens[i].med).map(p=>({html:`<span style="color:var(--accent-d)">★</span> ${esc(p)}`,val:p})),
           p=>{posInp.value=p;S.rx.itens[i].pos=p;renderDoc();});
       }
+      const sugHost=it.querySelector('.poso-sug[data-sug="'+i+'"]');
+      if(sugHost) sugHost.addEventListener("click",e=>{const b=e.target.closest(".ps-line");if(!b)return;const t=b.getAttribute("data-t");S.rx.itens[i].pos=t;if(posInp)posInp.value=t;renderDoc();});
+      renderSug(i);
       const sv=it.querySelector(".poso-save");
       if(sv) sv.addEventListener("click",()=>{
         const ok=posoSave(S.rx.itens[i].med,S.rx.itens[i].pos);

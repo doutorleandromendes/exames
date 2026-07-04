@@ -26,6 +26,8 @@
 //  Não há schema novo — só leitura.
 // ════════════════════════════════════════════════════════════════════════════
 
+import { buscarCulturasDaFicha, culturasTemMR, renderCulturasCard } from './atb-culturas-routes.js';
+
 function _safe(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -229,6 +231,8 @@ export function fichaCardAssets() {
       align-items:flex-start;justify-content:space-between;gap:12px;position:sticky;top:0}
     #fc-modal .fc-head .nome{font-size:16px;font-weight:700;color:#0c447c}
     #fc-modal .fc-head .meta{font-size:12px;color:#3a4654;margin-top:2px}
+    #fc-modal .fc-head .nome-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    #fc-modal #fc-mr{background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;flex:none}
     #fc-modal .fc-x{background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#9aa0a6;padding:0 4px}
     #fc-modal .fc-body{padding:14px 18px;max-height:62vh;overflow-y:auto}
     #fc-modal .fc-loading{padding:40px;text-align:center;color:#9aa0a6;font-size:13px}
@@ -259,7 +263,7 @@ export function fichaCardAssets() {
   <div id="fc-overlay">
     <div id="fc-modal">
       <div class="fc-head">
-        <div><div class="nome" id="fc-nome">—</div><div class="meta" id="fc-meta"></div></div>
+        <div style="flex:1;min-width:0"><div class="nome-row"><div class="nome" id="fc-nome">—</div><span id="fc-mr" style="display:none"></span></div><div class="meta" id="fc-meta"></div></div>
         <button type="button" class="fc-x" id="fc-close">×</button>
       </div>
       <div class="fc-body" id="fc-content"><div class="fc-loading">Carregando…</div></div>
@@ -317,6 +321,8 @@ export function fichaCardAssets() {
         .then(function(j){
           if(!j || !j.ok){ contentEl.innerHTML = '<div class="fc-loading">Não foi possível carregar.</div>'; return; }
           nomeEl.textContent = j.nome || '—';
+          var mrEl = document.getElementById('fc-mr');
+          if(mrEl){ if(j.mr){ mrEl.textContent = j.mr; mrEl.style.display=''; } else { mrEl.style.display='none'; mrEl.textContent=''; } }
           metaEl.textContent = j.meta || '';
           prontAtual = j.prontuario || '';
           contentEl.innerHTML = j.html || '<div class="fc-loading">Sem dados.</div>';
@@ -419,12 +425,14 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
       ].filter(Boolean);
       if (f.obito) metaParts.push('✝ óbito' + (f.data_obito ? ' ' + _dt(f.data_obito) : ''));
 
+      const culturas = await buscarCulturasDaFicha(pool, f);
       res.json({
         ok: true,
         nome: _safe(nome),
         meta: _safe(metaParts.join(' · ')),
         prontuario: f.prontuario || '',
-        html: renderCardBody(f, evol, _safe),
+        html: renderCulturasCard(culturas) + renderCardBody(f, evol, _safe),
+        mr: culturasTemMR(culturas) ? '⚠ Multirresistente' : null,
       });
     } catch (e) {
       console.error('[atb] ficha card error:', e.message);

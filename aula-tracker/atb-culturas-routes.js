@@ -209,6 +209,70 @@ export async function sincronizarCulturas(pool) {
   return { lidas: tuplas.length, inseridas, atualizadas };
 }
 
+// ── Fase 2: match ficha→culturas + render (card/complemento) ─────────────────
+export function normalizarNome(str) { return _norm(str); }
+
+// Culturas que casam com uma ficha: mesma instituição, janela [ref-30d, ref+5d],
+// por ATENDIMENTO quando a ficha tem um; senão (rede de segurança) por NOME normalizado.
+export async function buscarCulturasDaFicha(pool, ficha) {
+  if (!ficha) return [];
+  const ref = ficha.data_referencia || ficha.jotform_created_at || ficha.created_at;
+  if (!ref) return [];
+  const atend = (ficha.atendimento || '').trim();
+  const nomeNorm = _norm(ficha.paciente_nome_raw || ficha.paciente_nome || '');
+  if (!atend && !nomeNorm) return [];
+  const { rows } = await pool.query(`
+    SELECT data_coleta, material, microorganismo, resistencia, mic_poli, mic_vanco, classe, tempo_positividade
+      FROM atb_culturas
+     WHERE instituicao_id IS NOT DISTINCT FROM $1
+       AND data_coleta >= ($2::date - interval '30 days')
+       AND data_coleta <= ($2::date + interval '5 days')
+       AND (CASE WHEN $3 <> '' THEN atendimento = $3 ELSE paciente_nome_norm = $4 END)
+     ORDER BY data_coleta DESC, id DESC`,
+    [ficha.instituicao_id, ref, atend, nomeNorm]);
+  return rows;
+}
+
+export function culturasTemMR(culturas) {
+  return !!(culturas && culturas.some(c => c.resistencia));
+}
+
+const _esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+const _dtBR = d => d ? new Date(d).toLocaleDateString('pt-BR') : '';
+const _chipR = v => v ? `<span style="background:#fcebeb;color:#a32d2d;font-size:11px;padding:1px 7px;border-radius:6px;white-space:nowrap">${_esc(v)}</span>` : '';
+const _micTempo = c => [c.mic_vanco ? 'vanco ' + c.mic_vanco : '', c.tempo_positividade].filter(Boolean).join(' · ');
+
+// Selo compacto pro corpo do card: 3 mais recentes + "e mais N".
+export function renderCulturasCard(culturas) {
+  if (!culturas || !culturas.length) return '';
+  const top = culturas.slice(0, 3).map(c => `<div style="display:flex;align-items:baseline;gap:8px;font-size:13px;flex-wrap:wrap;margin:5px 0 0">
+      <span style="color:#8a8a8a;min-width:44px">${_dtBR(c.data_coleta)}</span>
+      <span style="color:#555">${_esc(c.material)}</span>
+      <span style="font-weight:600">${_esc(c.microorganismo)}</span>${_chipR(c.resistencia)}</div>`).join('');
+  const resto = culturas.length > 3
+    ? `<div style="font-size:12px;color:#555;margin-top:4px">e mais ${culturas.length - 3} · ver no complemento</div>` : '';
+  return `<div style="margin:10px 0;border:1px solid #f2d9a0;background:#fdf6e9;border-radius:10px;padding:10px 12px">
+    <div style="font-size:13px;font-weight:600;color:#8a5a00">🦠 Culturas positivas · ${culturas.length}<span style="font-weight:400;color:#8a8a8a;font-size:12px"> · janela −30d/+5d</span></div>
+    ${top}${resto}</div>`;
+}
+
+// Seção completa pro complemento: tabela com todas as culturas da janela.
+export function renderCulturasComplemento(culturas) {
+  if (!culturas || !culturas.length) return '';
+  const linhas = culturas.map(c => `<tr style="border-top:1px solid #eee">
+      <td style="padding:7px 8px;white-space:nowrap">${_dtBR(c.data_coleta)}</td>
+      <td style="padding:7px 8px;color:#555">${_esc(c.material)}</td>
+      <td style="padding:7px 8px;font-weight:600">${_esc(c.microorganismo)}</td>
+      <td style="padding:7px 8px">${_chipR(c.resistencia)}</td>
+      <td style="padding:7px 8px;color:#555">${_esc(_micTempo(c)) || '<span style=\'color:#aaa\'>—</span>'}</td></tr>`).join('');
+  return `<div style="margin:14px 0">
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px">🦠 Microbiologia <span style="font-weight:400;color:#8a8a8a;font-size:12px">· janela −30d/+5d · ${culturas.length} positiva(s)</span></div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;color:#666;font-size:12px">
+        <th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Material</th><th style="padding:6px 8px">Microrganismo</th><th style="padding:6px 8px">Resist.</th><th style="padding:6px 8px">MIC/tempo</th>
+      </tr></thead><tbody>${linhas}</tbody></table></div>`;
+}
+
 // Libera o POST /sync via header X-Cron-Token (cron externo, sem sessão);
 // senão, exige sessão de admin normalmente.
 function adminOrCron(adminRequired) {

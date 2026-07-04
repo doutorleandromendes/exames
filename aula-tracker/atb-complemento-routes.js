@@ -14,7 +14,6 @@
 // ════════════════════════════════════════════════════════════════════════════
 import { anexosManagerWidget } from './atb-anexos-routes.js';
 import { espelharEdicao, CAMPOS_COMPLEMENTO } from './atb-jotform-mirror.js';
-import { buscarCulturasDaFicha, renderCulturasComplemento } from './atb-culturas-routes.js';
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 
 const GRUPOS = {
@@ -45,7 +44,6 @@ export function registerComplementoRoutes(app, pool, adminRequired) {
       const id = parseInt(req.params.id, 10);
       const { rows: [f] } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.atendimento,
-               f.instituicao_id, f.data_referencia, f.jotform_created_at, f.created_at,
                f.setor, f.leito, f.atb_solicitado, f.complemento_scih, f.parecer_evolutivo,
                i.sigla AS instituicao,
                e.labs, e.hemodinamica, e.ventilatorio, e.acesso_vascular_neo_evol,
@@ -56,9 +54,8 @@ export function registerComplementoRoutes(app, pool, adminRequired) {
         WHERE f.id = $1
       `, [id]);
       if (!f) return res.status(404).send(paginaErro('Ficha não encontrada'));
-      const culturas = await buscarCulturasDaFicha(pool, f);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(paginaComplemento(f, renderCulturasComplemento(culturas)));
+      res.send(paginaComplemento(f));
     } catch (e) {
       console.error('[atb] complementar GET error:', e);
       res.status(500).send(paginaErro(e.message));
@@ -149,7 +146,7 @@ function gradeSerie(gkey, grupo, dados) {
     </div>`;
 }
 
-function paginaComplemento(f, microHTML = '') {
+function paginaComplemento(f) {
   const nome = safe(f.paciente_nome || f.paciente_nome_raw || '—');
   const atb = Array.isArray(f.atb_solicitado) ? f.atb_solicitado.join(', ')
     : (typeof f.atb_solicitado === 'string' ? safe(f.atb_solicitado) : '—');
@@ -237,8 +234,6 @@ function paginaComplemento(f, microHTML = '') {
       <div class="atb"><b>ATB solicitado:</b> ${atb}</div>
       ${ultimo}
     </div>
-
-    ${microHTML}
 
     ${grades}
 

@@ -15,12 +15,16 @@
 //   GOOGLE_SA_EMAIL        client_email da service account
 //   GOOGLE_SA_PRIVATE_KEY  private_key do JSON (pode conter \n literais)
 //   CULTURAS_SHEET_ID      id da planilha (trecho da URL entre /d/ e /edit)
-//   CULTURAS_SHEET_RANGE   faixa; default '2026!A:O'
+//   CULTURAS_SHEET_RANGE   faixa; default '2026' (aba inteira)
+//   CULTURAS_DESDE         ingere só coletas a partir desta data; default '2026-01-01'
+//   CULTURAS_CRON_TOKEN    (opcional) libera POST /sync via header X-Cron-Token (cron externo)
 
 import crypto from 'crypto';
 
-const SHEET_RANGE_DEFAULT = '2026!A:O';
+const SHEET_RANGE_DEFAULT = '2026';
 const SIGLA = 'HUSF';
+const CULTURAS_DESDE = process.env.CULTURAS_DESDE || '2026-01-01'; // ingere só coletas >= esta data
+const LOTE = 400; // linhas por INSERT em lote (evita timeout)
 
 // ── schema ────────────────────────────────────────────────────────────────
 export async function ensureCulturasSchema(pool) {
@@ -49,6 +53,9 @@ export async function ensureCulturasSchema(pool) {
     ON atb_culturas(instituicao_id, atendimento, data_coleta)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_culturas_nome_idx
     ON atb_culturas(instituicao_id, paciente_nome_norm, data_coleta)`);
+  // acelera o match cultura→ficha por atendimento
+  await pool.query(`CREATE INDEX IF NOT EXISTS atb_fichas_atendimento_idx
+    ON atb_fichas(instituicao_id, atendimento) WHERE atendimento IS NOT NULL`);
 }
 
 async function instId(pool) {
@@ -164,34 +171,58 @@ export async function sincronizarCulturas(pool) {
   const inst = await instId(pool);
   if (!inst) throw new Error(`instituição ${SIGLA} não encontrada em atb_instituicoes`);
   const values = await fetchSheetValues();
-  const linhas = parseCulturas(values);
-  let inseridas = 0, atualizadas = 0;
+  const linhas = parseCulturas(values).filter(c => c.data_coleta >= CULTURAS_DESDE); // só coletas >= corte
+  // dedup por chave natural dentro da própria planilha (última vence) — evita o erro
+  // "ON CONFLICT ... cannot affect row a second time" no upsert em lote.
+  const porChave = new Map();
   for (const c of linhas) {
     const chave = [inst, c.atendimento || '', c.data_coleta, c.material || '', c.microorganismo].join('|');
+    porChave.set(chave, [inst, c.data_coleta, c.paciente_nome, c.paciente_nome_norm, c.atendimento,
+      c.material, c.microorganismo, c.resistencia, c.mic_poli, c.mic_vanco, c.classe,
+      c.tempo_positividade, c.clinica, c.os, JSON.stringify(c.raw), chave]);
+  }
+  const tuplas = [...porChave.values()];
+  let inseridas = 0, atualizadas = 0;
+  // UPSERT em LOTE: 1 query por lote de ~400 linhas (em vez de 1 por linha) — evita timeout.
+  for (let i = 0; i < tuplas.length; i += LOTE) {
+    const grupo = tuplas.slice(i, i + LOTE);
+    const vals = [];
+    const ph = grupo.map((r, gi) => {
+      const b = gi * 16;
+      vals.push(...r);
+      return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15}::jsonb,$${b+16}, now())`;
+    }).join(',');
     const q = await pool.query(`
       INSERT INTO atb_culturas
         (instituicao_id, data_coleta, paciente_nome, paciente_nome_norm, atendimento,
          material, microorganismo, resistencia, mic_poli, mic_vanco, classe,
          tempo_positividade, clinica, os, raw, chave, sincronizado_em)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, now())
+      VALUES ${ph}
       ON CONFLICT (chave) DO UPDATE SET
         resistencia=EXCLUDED.resistencia, mic_poli=EXCLUDED.mic_poli, mic_vanco=EXCLUDED.mic_vanco,
         classe=EXCLUDED.classe, tempo_positividade=EXCLUDED.tempo_positividade, clinica=EXCLUDED.clinica,
         os=EXCLUDED.os, raw=EXCLUDED.raw, paciente_nome=EXCLUDED.paciente_nome,
         paciente_nome_norm=EXCLUDED.paciente_nome_norm, sincronizado_em=now()
-      RETURNING (xmax = 0) AS inserted`,
-      [inst, c.data_coleta, c.paciente_nome, c.paciente_nome_norm, c.atendimento,
-       c.material, c.microorganismo, c.resistencia, c.mic_poli, c.mic_vanco, c.classe,
-       c.tempo_positividade, c.clinica, c.os, JSON.stringify(c.raw), chave]);
-    if (q.rows[0].inserted) inseridas++; else atualizadas++;
+      RETURNING (xmax = 0) AS inserted`, vals);
+    for (const row of q.rows) { if (row.inserted) inseridas++; else atualizadas++; }
   }
-  return { lidas: linhas.length, inseridas, atualizadas };
+  return { lidas: tuplas.length, inseridas, atualizadas };
+}
+
+// Libera o POST /sync via header X-Cron-Token (cron externo, sem sessão);
+// senão, exige sessão de admin normalmente.
+function adminOrCron(adminRequired) {
+  return (req, res, next) => {
+    const tok = process.env.CULTURAS_CRON_TOKEN;
+    if (tok && req.get('X-Cron-Token') === tok) return next();
+    return adminRequired(req, res, next);
+  };
 }
 
 // ── rotas ─────────────────────────────────────────────────────────────────
 export function registerCulturasRoutes(app, pool, adminRequired) {
   // POST: dispara o sync (usado pelo botão e pelo cron do Render)
-  app.post('/atb/admin/culturas/sync', adminRequired, async (req, res) => {
+  app.post('/atb/admin/culturas/sync', adminOrCron(adminRequired), async (req, res) => {
     try {
       const r = await sincronizarCulturas(pool);
       res.json({ ok: true, ...r });
@@ -220,17 +251,19 @@ export function registerCulturasRoutes(app, pool, adminRequired) {
         WHERE c.instituicao_id IS NOT DISTINCT FROM $1 AND c.atendimento IS NOT NULL
           AND EXISTS (SELECT 1 FROM atb_fichas f
                        WHERE f.instituicao_id IS NOT DISTINCT FROM $1
-                         AND f.atendimento = c.atendimento AND f.deletado_em IS NULL)`, [inst])).rows[0];
+                         AND f.atendimento = c.atendimento AND f.deletado_em IS NULL
+                         AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= $2)`, [inst, CULTURAS_DESDE])).rows[0];
       const linhas = (await pool.query(`
         SELECT c.data_coleta, c.paciente_nome, c.atendimento, c.material, c.microorganismo,
                c.resistencia, c.mic_vanco, c.tempo_positividade,
                EXISTS (SELECT 1 FROM atb_fichas f
                         WHERE f.instituicao_id IS NOT DISTINCT FROM $1
-                          AND f.atendimento = c.atendimento AND f.deletado_em IS NULL) AS casa
+                          AND f.atendimento = c.atendimento AND f.deletado_em IS NULL
+                          AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= $2) AS casa
         FROM atb_culturas c
         WHERE c.instituicao_id IS NOT DISTINCT FROM $1
         ORDER BY c.data_coleta DESC NULLS LAST, c.id DESC
-        LIMIT 200`, [inst])).rows;
+        LIMIT 200`, [inst, CULTURAS_DESDE])).rows;
 
       const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
       const dt = d => d ? new Date(d).toLocaleDateString('pt-BR') : '—';

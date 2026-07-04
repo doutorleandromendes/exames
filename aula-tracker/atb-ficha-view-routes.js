@@ -22,6 +22,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { getFormSchema } from './atb-form-schema.js';
+import { buscarCulturasDaFicha, renderCulturasComplemento } from './atb-culturas-routes.js';
 
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 const EXAMES = {
@@ -128,7 +129,7 @@ function tabelaMatriz(titulo, def, dados, s) {
   return `<div class="bloco"><h3>${s(titulo)}</h3><div class="serie-scroll"><table class="mtab"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 
-function paginaFichaView(f, anexos, s, podeEditar, matrizes) {
+function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '') {
   matrizes = matrizes || {};
   const nome = f.paciente_nome || f.paciente_nome_raw || '—';
   const ver = _arr(f.recomendacao_scih);
@@ -328,6 +329,7 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes) {
   <div class="wrap">
     ${f.deletado_em ? `<div class="full" style="background:#fff4f4;border:1px solid #f3c2c2;color:#a4282b;border-radius:10px;padding:12px 16px;font-size:13px">🗑️ Esta ficha está <b>apagada</b> (fora da grade). Use "↩️ Restaurar" no topo para trazê-la de volta.</div>` : ''}
     ${parecerBloco}
+    ${microHTML ? `<div class="bloco full">${microHTML}</div>` : ''}
     ${secoes.filter(Boolean).join('')}
     ${seriesHtml ? `<div class="bloco full"><h3>Séries evolutivas (D-3 → D+3)</h3>${seriesHtml}</div>` : ''}
     ${compBloco ? `<div class="full">${compBloco}</div>` : ''}
@@ -373,7 +375,8 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
       let matrizes = {};
       try { matrizes = extrairMatrizes(await getFormSchema(pool, f.instituicao || 'HUSF')); }
       catch (e) { console.error('[atb] matrizes schema:', e.message); }
-      res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes));
+      const culturas = await buscarCulturasDaFicha(pool, f);
+      res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes, renderCulturasComplemento(culturas)));
     } catch (e) {
       console.error('[atb] ficha view error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

@@ -407,7 +407,9 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
       };
       const nome = f.paciente_nome || f.paciente_nome_raw || '—';
       const idade = _idade(f.paciente_dn, f.paciente_idade);
+      const dataFicha = f.data_referencia || f.jotform_created_at || f.created_at;  // data canônica (HUSF e SCMI)
       const metaParts = [
+        dataFicha ? 'Ficha ' + _dt(dataFicha) : '',
         f.prontuario ? 'Pront. ' + f.prontuario : '',
         idade || '',
         f.setor || '',

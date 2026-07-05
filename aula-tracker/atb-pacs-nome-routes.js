@@ -18,7 +18,10 @@
 //   import { registerPacsNomeRoutes } from './atb-pacs-nome-routes.js';
 //   registerPacsNomeRoutes(app, pool, adminRequired);
 
+import express from 'express';
+
 const PACS_BASE = 'https://pacs.husf.com.br';
+const SIGLA = 'HUSF';
 const TIMEOUT_MS = 8000;
 
 // Deriva as credenciais do PACS a partir de prontuário + DN (mesma fórmula do link).
@@ -26,6 +29,29 @@ export function credenciaisPacs(prontuario, dn) {
   const d = String(dn || '').replace(/[^0-9]/g, ''); // YYYYMMDD (de 'AAAA-MM-DD')
   const pass = d.length >= 8 ? d.slice(6, 8) + d.slice(4, 6) + d.slice(0, 4) : ''; // DDMMYYYY
   return { user: 'p' + String(prontuario || '').trim(), pass };
+}
+
+async function instHUSF(pool) {
+  const { rows } = await pool.query(`SELECT id FROM atb_instituicoes WHERE sigla=$1`, [SIGLA]);
+  return rows[0] ? rows[0].id : null;
+}
+
+// normalização p/ comparar com o nome da ficha (ignora acento/caixa/espaço)
+function normPacsNome(s) {
+  return String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase().replace(/\s+/g, ' ').trim();
+}
+
+export async function ensurePacsNomeSchema(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS atb_nome_pacs (
+      instituicao_id  INTEGER REFERENCES atb_instituicoes(id),
+      prontuario      TEXT NOT NULL,
+      nome_pacs       TEXT,
+      nome_pacs_norm  TEXT,
+      visto_em        TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (instituicao_id, prontuario)
+    )`);
 }
 
 async function comTimeout(fn, ms) {
@@ -132,6 +158,29 @@ export function registerPacsNomeRoutes(app, pool, adminRequired) {
         ? 'timeout — o PACS não respondeu no tempo. Provável: inalcançável a partir do Render (rede/firewall).'
         : (e && e.message) || String(e);
       return res.status(200).send('ERRO: ' + msg);
+    }
+  });
+
+  // Ingestão do NOME vindo do PACS (userscript Tampermonkey). Auth por token
+  // compartilhado (X-Pacs-Token == env PACS_NOME_TOKEN). Sem sessão de admin.
+  app.post('/atb/api/pacs-nome', express.json({ limit: '64kb' }), async (req, res) => {
+    const tok = process.env.PACS_NOME_TOKEN;
+    if (!tok || req.get('X-Pacs-Token') !== tok) return res.status(401).json({ ok: false, error: 'token' });
+    const prontuario = String((req.body && req.body.prontuario) || '').trim();
+    const nome = String((req.body && req.body.nome) || '').trim();
+    if (!prontuario || !nome) return res.status(400).json({ ok: false, error: 'faltam prontuario/nome' });
+    try {
+      const inst = await instHUSF(pool);
+      await pool.query(`
+        INSERT INTO atb_nome_pacs (instituicao_id, prontuario, nome_pacs, nome_pacs_norm, visto_em)
+        VALUES ($1,$2,$3,$4, now())
+        ON CONFLICT (instituicao_id, prontuario) DO UPDATE SET
+          nome_pacs=EXCLUDED.nome_pacs, nome_pacs_norm=EXCLUDED.nome_pacs_norm, visto_em=now()`,
+        [inst, prontuario, nome, normPacsNome(nome)]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error('[atb] pacs-nome ingest:', e.message);
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
 }

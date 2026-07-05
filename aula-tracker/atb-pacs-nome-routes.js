@@ -256,8 +256,10 @@ export function registerPacsNomeRoutes(app, pool, adminRequired) {
       log.push('Login detectado=' + (d.login || '(nenhum)'));
       log.push('Nome encontrado=' + (d.nome || '(não)'));
       if (d.login && d.nome) log.push('\n✅ FUNCIONOU — Puppeteer logou e leu o nome. Dá pra fazer a captura prospectiva server-side.');
-      else if (d.url && /\/login/i.test(d.url)) log.push('\n⚠ Parou na tela de login — o PACS barrou o Puppeteer também.');
-      else log.push('\n⚠ Logou mas não peguei o nome (seletor?) — me diga o que apareceu.');
+      else if (d.title && /negado|denied/i.test(d.title)) log.push('\n⚠ ACESSO NEGADO — login recusado (sessão/CSRF ou detecção de automação).');
+      else if (d.url && /\/login/i.test(d.url)) log.push('\n⚠ Parou na tela de login.');
+      else log.push('\n⚠ Logou mas não peguei o nome (seletor?).');
+      if (!d.nome) log.push('\n--- TRECHO DA PÁGINA (pra diagnóstico) ---\n' + (d._body || '(vazio)'));
       res.send(log.join('\n'));
     } catch (e) {
       res.send('ERRO: ' + ((e && e.message) || e) + '\n\n(Se for erro de launch/OOM do Chromium, o plano do Render pode não ter RAM pro Puppeteer no web service.)');

@@ -52,6 +52,32 @@ export async function ensurePacsNomeSchema(pool) {
       visto_em        TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (instituicao_id, prontuario)
     )`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS atb_nome_pacs_log (
+      id               BIGSERIAL PRIMARY KEY,
+      ficha_id         BIGINT,
+      prontuario       TEXT,
+      nome_antigo      TEXT,
+      nome_raw_antigo  TEXT,
+      nome_novo        TEXT,
+      aplicado_em      TIMESTAMPTZ DEFAULT now()
+    )`);
+}
+
+// Nome do PACS para um prontuário (HUSF). Retorna {nome_pacs, nome_pacs_norm} ou null.
+export async function buscarNomePacs(pool, instituicaoId, prontuario) {
+  if (!prontuario) return null;
+  const { rows } = await pool.query(
+    `SELECT nome_pacs, nome_pacs_norm FROM atb_nome_pacs
+      WHERE instituicao_id IS NOT DISTINCT FROM $1 AND prontuario = $2`,
+    [instituicaoId, String(prontuario).trim()]);
+  return rows[0] || null;
+}
+
+// true se o nome da ficha diverge do nome do PACS (comparação normalizada).
+export function nomeDivergePacs(nomeFicha, nomePacsNorm) {
+  if (!nomePacsNorm) return false;
+  return normPacsNome(nomeFicha) !== nomePacsNorm;
 }
 
 async function comTimeout(fn, ms) {
@@ -180,6 +206,28 @@ export function registerPacsNomeRoutes(app, pool, adminRequired) {
       res.json({ ok: true });
     } catch (e) {
       console.error('[atb] pacs-nome ingest:', e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Aplica o nome do PACS numa ficha (grava em paciente_nome E paciente_nome_raw),
+  // registrando o nome anterior em atb_nome_pacs_log (auditável/reversível).
+  app.post('/atb/admin/ficha/:id/atualizar-nome-pacs', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { rows: [f] } = await pool.query(
+        `SELECT id, prontuario, instituicao_id, paciente_nome, paciente_nome_raw FROM atb_fichas WHERE id=$1`, [id]);
+      if (!f) return res.status(404).json({ ok: false, error: 'ficha não encontrada' });
+      const np = await buscarNomePacs(pool, f.instituicao_id, f.prontuario);
+      if (!np || !np.nome_pacs) return res.status(400).json({ ok: false, error: 'sem nome do PACS para este prontuário' });
+      await pool.query(
+        `INSERT INTO atb_nome_pacs_log (ficha_id, prontuario, nome_antigo, nome_raw_antigo, nome_novo, aplicado_em)
+         VALUES ($1,$2,$3,$4,$5, now())`,
+        [f.id, f.prontuario, f.paciente_nome, f.paciente_nome_raw, np.nome_pacs]);
+      await pool.query(`UPDATE atb_fichas SET paciente_nome=$1, paciente_nome_raw=$1 WHERE id=$2`, [np.nome_pacs, f.id]);
+      res.json({ ok: true, nome: np.nome_pacs });
+    } catch (e) {
+      console.error('[atb] atualizar-nome-pacs:', e.message);
       res.status(500).json({ ok: false, error: e.message });
     }
   });

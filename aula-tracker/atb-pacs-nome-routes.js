@@ -279,12 +279,21 @@ export async function capturarNomePacs(prontuario, dn) {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36');
     page.setDefaultNavigationTimeout(30000);
-    // 1) GET inicial p/ estabelecer sessão/cookie/CSRF no PACS antes do login
+    // 1) GET inicial no PACS (MESMA origem) — estabelece a sessão/cookie JSESSIONID
     await page.goto('https://pacs.husf.com.br/', { waitUntil: 'networkidle2' }).catch(() => {});
-    // 2) autologin (auto-submete o form j_spring, agora com sessão já presente)
-    const autologin = 'https://doutorleandromendes.github.io/exames/autologin.html'
-      + '?user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass);
-    await page.goto(autologin, { waitUntil: 'networkidle2' }).catch(() => {});
+    // 2) LOGIN SAME-ORIGIN: monta o form no próprio pacs.husf.com.br e submete p/
+    //    j_spring_security_check. Assim o cookie de sessão VIAJA (o autologin via
+    //    github.io é cross-site e o cookie SameSite não ia junto → POST "frio").
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
+      page.evaluate((u, p) => {
+        const f = document.createElement('form');
+        f.method = 'POST'; f.action = '/j_spring_security_check';
+        const a = document.createElement('input'); a.type = 'hidden'; a.name = 'j_username'; a.value = u; f.appendChild(a);
+        const b = document.createElement('input'); b.type = 'hidden'; b.name = 'j_password'; b.value = p; f.appendChild(b);
+        document.body.appendChild(f); f.submit();
+      }, user, pass),
+    ]);
     await page.waitForSelector('th', { timeout: 15000 }).catch(() => {});
     const dados = await page.evaluate(() => {
       const login = (document.body.innerText.match(/Login:\s*p(\d+)/i) || [])[1] || null;
@@ -297,7 +306,7 @@ export async function capturarNomePacs(prontuario, dn) {
         if (col) { const cell = document.querySelector('td.' + col[0] + ' .yui-dt-liner'); if (cell) nome = (cell.innerText || '').trim(); }
         if (!nome && th.cellIndex >= 0) { const r = document.querySelector('table tbody tr'); if (r && r.children[th.cellIndex]) nome = (r.children[th.cellIndex].innerText || '').trim(); }
       }
-      return { url: location.href, title: document.title, login, nome };
+      return { url: location.href, title: document.title, login, nome, _body: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 400) };
     });
     return { ...dados, _user: user, _dn: dn, _passLen: pass.length };
   } finally {

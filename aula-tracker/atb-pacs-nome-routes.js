@@ -251,7 +251,7 @@ export function registerPacsNomeRoutes(app, pool, adminRequired) {
       const d = await capturarNomePacs(prontuario, dn);
       const seg = ((Date.now() - t0) / 1000).toFixed(1);
       const log = [];
-      log.push('Prontuário=' + prontuario + ' · levou ' + seg + 's');
+      log.push('Prontuário=' + prontuario + ' · DN=' + (d._dn || '(vazia!)') + ' · senha=' + (d._passLen ? d._passLen + ' díg.' : 'VAZIA') + ' · levou ' + seg + 's');
       log.push('URL final=' + d.url + ' · título=' + d.title);
       log.push('Login detectado=' + (d.login || '(nenhum)'));
       log.push('Nome encontrado=' + (d.nome || '(não)'));
@@ -279,6 +279,9 @@ export async function capturarNomePacs(prontuario, dn) {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36');
     page.setDefaultNavigationTimeout(30000);
+    // 1) GET inicial p/ estabelecer sessão/cookie/CSRF no PACS antes do login
+    await page.goto('https://pacs.husf.com.br/', { waitUntil: 'networkidle2' }).catch(() => {});
+    // 2) autologin (auto-submete o form j_spring, agora com sessão já presente)
     const autologin = 'https://doutorleandromendes.github.io/exames/autologin.html'
       + '?user=' + encodeURIComponent(user) + '&pass=' + encodeURIComponent(pass);
     await page.goto(autologin, { waitUntil: 'networkidle2' }).catch(() => {});
@@ -296,7 +299,7 @@ export async function capturarNomePacs(prontuario, dn) {
       }
       return { url: location.href, title: document.title, login, nome };
     });
-    return dados;
+    return { ...dados, _user: user, _dn: dn, _passLen: pass.length };
   } finally {
     await browser.close().catch(() => {});
   }

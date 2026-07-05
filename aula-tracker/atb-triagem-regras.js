@@ -15,6 +15,8 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 // ── Schema + seed ──────────────────────────────────────────────────────────
+import { buscarCulturasDaFicha } from './atb-culturas-routes.js';
+
 export async function ensureTriagemRegrasSchema(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS atb_triagem_regras (
@@ -241,6 +243,19 @@ export async function aplicarRegras(pool, fichaId) {
         ctx.fichas_72h_mesmo_setor = rc.rows[0] ? rc.rows[0].n : 0;
       }
     }
+
+    // Campos derivados de MICROBIOLOGIA (culturas casadas na janela −30d/+5d).
+    // mr = LISTA (dropdown de mecanismos, match exato); organismos/materiais = TEXTO
+    // concatenado (usar text_contains_any, que ignora acento/cedilha/caixa).
+    ctx.cultura_positiva = false; ctx.cultura_mr = []; ctx.cultura_organismos = ''; ctx.cultura_materiais = ''; ctx.cultura_hemocultura = false;
+    try {
+      const cults = await buscarCulturasDaFicha(pool, f);
+      ctx.cultura_positiva   = cults.length > 0;
+      ctx.cultura_mr         = [...new Set(cults.map((c) => c.resistencia).filter(Boolean))];
+      ctx.cultura_organismos = [...new Set(cults.map((c) => c.microorganismo).filter(Boolean))].join(' | ');
+      ctx.cultura_materiais  = [...new Set(cults.map((c) => c.material).filter(Boolean))].join(' | ');
+      ctx.cultura_hemocultura = cults.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1);
+    } catch (e) { console.error('[atb] culturas na triagem:', e.message); }
 
     const regra = regras.find((r) => avaliaCond(r.condicoes, ctx));
     if (!regra) return null;

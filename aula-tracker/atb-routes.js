@@ -1042,7 +1042,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${vig.obitos}</div><div class="ml">Óbitos no recorte</div></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}${tabSem}</div>
-        ${gridControlsUI(req.query, pager, { tenantLocked: !!req.atbTenant, sigla: req.atbTenant && req.atbTenant.sigla })}
+        ${gridControlsUI(req.query, pager, { tenantLocked: !!req.atbTenant, sigla: req.atbTenant || null })}
         <div class="grid-wrap">
           <table class="atb-grid">
             <thead><tr>

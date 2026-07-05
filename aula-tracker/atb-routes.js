@@ -23,6 +23,7 @@ import { ensureHealthcheckTable, startHealthcheckSchedule, registerHealthcheckRo
 import { ensureRegrasCheckTable, startRegrasCheckSchedule, registerRegrasCheckRoutes } from './atb-regras-check.js';
 import { registerNomesRoutes } from './atb-nomes-routes.js';
 import { ensureCulturasSchema, registerCulturasRoutes } from './atb-culturas-routes.js';
+import { registerPacsNomeRoutes } from './atb-pacs-nome-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
@@ -95,6 +96,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerRegrasCheckRoutes(app, pool, adminRequired);
   registerNomesRoutes(app, pool, adminRequired);
   registerCulturasRoutes(app, pool, adminRequired);
+  registerPacsNomeRoutes(app, pool, adminRequired);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
   registerRegrasFormRoutes(app, pool, adminRequired);

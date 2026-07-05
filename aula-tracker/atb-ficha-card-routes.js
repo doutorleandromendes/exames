@@ -104,6 +104,7 @@ function renderCardBody(f, evol, s) {
 
   const sepseTxt = _bool(f.sepse) + (f.sepse === true && f.sofa != null ? ` · SOFA ${f.sofa}` : '');
   blocos.push(_bloco('Contexto clínico', [
+    ['Internação', f.data_internacao ? _dt(f.data_internacao) : '<span class="fc-mut">—</span>'],
     ['História da infecção', f.historia_clinica ? s(f.historia_clinica) : ''],
     ['Foco de infecção', s(_txt(f.foco_infeccao))],
     ['Sepse', sepseTxt],

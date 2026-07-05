@@ -10,6 +10,7 @@ import express from "express";
 import { uploadToR2, fetchR2Stream, deleteFromR2 } from "./lab-storage.js";
 import { readFile } from "node:fs/promises";
 import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
+import { generateLabPdf } from "./lab-pdf.js";
 import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
 import { parseValue } from "./pront-normalizador.js";
 import { randomUUID } from "node:crypto";
@@ -1476,6 +1477,92 @@ window.__READY=1;`;
       console.error("PAC-BUSCA ERROR", e);
       res.status(500).json([]);
     }
+  });
+
+  // ===== LAUDOS de testes rápidos: template do /lab + assinatura ICP-Brasil =====
+  // catálogo dos exames oferecidos (products.csv na raiz do repo)
+  let _laudoExames = null;
+  async function _carregarLaudoExames() {
+    if (_laudoExames) return _laudoExames;
+    try {
+      const csv = await readFile(new URL("../products.csv", import.meta.url), "utf8");
+      const nomes = [];
+      for (const l of csv.split(/\r?\n/)) {
+        if (!l.trim()) continue;
+        const nome = (l.split(";")[0] || "").replace(/^"|"$/g, "").trim();
+        if (nome) nomes.push(nome);
+      }
+      _laudoExames = [...new Set(nomes)].sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+    } catch (e) { console.error("LAUDO EXAMES ERROR", e); _laudoExames = []; }
+    return _laudoExames;
+  }
+  app.get("/pront/api/laudo-exames", medicoRequired, async (req, res) => {
+    const nrm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+    const q = nrm(req.query.q);
+    const lista = await _carregarLaudoExames();
+    if (!q) return res.json(lista.slice(0, 30));
+    const terms = q.split(" ").filter(Boolean);
+    res.json(lista.filter(n => { const nn = nrm(n); return terms.every(t => nn.includes(t)); }).slice(0, 30));
+  });
+
+  // monta {patient, collection, results}, gera o PDF do laudo (template /lab), assina ICP-Brasil e grava
+  async function _emitirLaudoAssinado(req, res, pacienteId) {
+    const sess = _sessoesBird.get(userKey(req));
+    if (!sess || sess.expira_em <= Date.now())
+      return res.status(401).json({ ok: false, erro: "sessão de assinatura expirada", precisa_otp: true });
+    const b = req.body || {};
+    const nome = String(b.paciente || "").trim();
+    if (!nome) return res.status(400).json({ ok: false, erro: "nome do paciente ausente" });
+    const itens = Array.isArray(b.itens) ? b.itens.filter(it => it && it.exam_name && it.result_value) : [];
+    if (!itens.length) return res.status(400).json({ ok: false, erro: "nenhum teste informado" });
+
+    const patient = { full_name: nome, birth_date: b.dn || null };
+    const collection = { collected_at: b.data || new Date().toISOString().slice(0, 10) };
+    const results = itens.map((it, i) => ({
+      exam_name: String(it.exam_name).slice(0, 200),
+      sample_type: String(it.sample_type || "Soro").slice(0, 60),
+      method: String(it.method || "Imunocromatografia").slice(0, 80),
+      result_value: String(it.result_value).slice(0, 400),
+      reference_value: String(it.reference_value || "").slice(0, 120),
+      observation: String(it.observation || "").slice(0, 500),
+      result_color: ["positivo", "negativo", "neutro", "auto"].includes(it.result_color) ? it.result_color : "auto",
+      sort_index: i,
+    }));
+
+    const token = randomUUID();
+    const secretCode = gerarSecretCode();
+    const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+    const verifUrl = `${base}/verificar/${token}`;
+
+    const pdf = await generateLabPdf({ patient, collection, results, sign: { verifUrl, verifCode: secretCode } });
+    const rawSignHex = makeBirdIdRawSigner({ access_token: sess.access_token, certificateAlias: sess.alias });
+    const assinado = await assinarPdfCades({ pdfBuffer: pdf, certificadosPem: [sess.pem], rawSignHex, meta: { reason: "Laudo de teste rápido assinado digitalmente" } });
+
+    const descricao = ("Laudo — " + results.map(r => `${r.exam_name}: ${r.result_value}`).join("; ")).slice(0, 300);
+    const r2key = `pront/docs-assinados/${pacienteId || "avulso"}/${Date.now()}-laudo.pdf`;
+    await uploadToR2(r2key, assinado, "application/pdf");
+    await pool.query(
+      `INSERT INTO pront_docs_emitidos (paciente_id, tipo, paper, r2_key, criado_por, verif_token, assinado, secret_code, descricao, state_json)
+       VALUES ($1,'laudo','A4',$2,$3,$4,true,$5,$6,$7::jsonb)`,
+      [pacienteId, r2key, quem(req), token, secretCode, descricao,
+       JSON.stringify({ doc: "laudo", paciente: nome, dn: b.dn || null, data: collection.collected_at, itens: results })]);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="laudo-assinado.pdf"`);
+    res.setHeader("X-Verif-Url", verifUrl);
+    res.setHeader("X-Verif-Code", secretCode);
+    res.send(assinado);
+  }
+  app.post("/pront/laudo/pdf-assinado", medicoRequired, async (req, res) => {
+    try { await _emitirLaudoAssinado(req, res, null); }
+    catch (e) { console.error("LAUDO ASSINADO ERROR", e); res.status(500).json({ ok: false, erro: e.message }); }
+  });
+  app.post("/pront/paciente/:id/laudo/pdf-assinado", medicoRequired, async (req, res) => {
+    try {
+      const p = (await pool.query(`SELECT id FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+      if (!p) return res.status(404).json({ ok: false, erro: "paciente não encontrado" });
+      await _emitirLaudoAssinado(req, res, req.params.id);
+    } catch (e) { console.error("LAUDO ASSINADO PAC ERROR", e); res.status(500).json({ ok: false, erro: e.message }); }
   });
 
   // verificação PÚBLICA (o QR aponta pra cá). O token uuid é a capability (não-adivinhável).

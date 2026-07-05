@@ -60,7 +60,7 @@ function formatResultText(value) {
 
 // ====== Template HTML do laudo ======
 
-export function buildPdfHtml({ patient, collection, results }) {
+export function buildPdfHtml({ patient, collection, results, sign }) {
   const todayBR     = new Date().toLocaleDateString('pt-BR');
   const collectedBR = toBR(collection.collected_at);
   const birthBR     = toBR(patient.birth_date);
@@ -389,7 +389,9 @@ export function buildPdfHtml({ patient, collection, results }) {
   </div>
 
   <div class="pdf-sign">
-    Assinado Digitalmente por: Leandro César Mendes — CRM 134.985SP
+    ${sign
+      ? `Assinado digitalmente com certificado ICP-Brasil por Leandro César Mendes — CRM 134.985/SP.<br>Verifique a autenticidade em ${safe(sign.verifUrl)} &nbsp;·&nbsp; Código de acesso: <strong>${safe(sign.verifCode)}</strong>`
+      : `Assinado Digitalmente por: Leandro César Mendes — CRM 134.985SP`}
   </div>
 
   <!-- Rodapé: visível no preview. Na impressão, footerTemplate assume. -->

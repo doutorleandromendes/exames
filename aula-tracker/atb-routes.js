@@ -23,7 +23,7 @@ import { ensureHealthcheckTable, startHealthcheckSchedule, registerHealthcheckRo
 import { ensureRegrasCheckTable, startRegrasCheckSchedule, registerRegrasCheckRoutes } from './atb-regras-check.js';
 import { registerNomesRoutes } from './atb-nomes-routes.js';
 import { ensureCulturasSchema, registerCulturasRoutes } from './atb-culturas-routes.js';
-import { registerPacsNomeRoutes, ensurePacsNomeSchema } from './atb-pacs-nome-routes.js';
+import { registerPacsNomeRoutes, ensurePacsNomeSchema, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
@@ -941,13 +941,14 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
                f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,f.retrospectiva,
                f.link_exames, f.link_labs, f.data_referencia, f.jotform_created_at, f.created_at,
-               i.sigla AS instituicao,
+               i.sigla AS instituicao, np.nome_pacs_norm AS _pacs_norm,
                a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data,
                ${extraSelectSql(cols)}(SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='pdf')    AS n_pdf,
                (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='imagem') AS n_img
         FROM atb_fichas f
         LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
         LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
+        LEFT JOIN atb_nome_pacs np ON np.instituicao_id=f.instituicao_id AND np.prontuario=f.prontuario
         WHERE ${whereSql}
         ORDER BY ${orderSql}
         LIMIT $${params.length+1} OFFSET $${params.length+2}`, [...params, pageSize, offset]);
@@ -957,6 +958,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
       const linhas = rows.map((f,i) => {
         const nome = f.paciente_nome || f.paciente_nome_raw || '—';
+        const _divPacs = nomeDivergePacs(f.paciente_nome_raw || f.paciente_nome, f._pacs_norm);
         const dd = f.desfecho_data ? String(f.desfecho_data).slice(0,10) : '';
         const irasVal = (f.iras||'').split(/\n+/)[0];
         const anexos = (f.n_pdf>0?`<a href="/atb/admin/fichas/${f.id}" title="${f.n_pdf} PDF" style="text-decoration:none">📄${f.n_pdf}</a>`:'') +
@@ -965,7 +967,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         return `<tr data-ficha="${f.id}"${temParecer?' class="com-parecer"':''}>
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
-            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}
+            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}${_divPacs?'<span title="Nome diverge do PACS — abra o card para corrigir" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#a32d2d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">≠PACS</span>':''}
             <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>

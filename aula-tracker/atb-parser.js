@@ -86,7 +86,7 @@ export function parseAnswers(answers, formId) {
   const posologia          = toMatrix(get(45));
   const parecer_evolutivo  = toMatrix(get(61));
 
-  const pron = str(107);
+  const pron = String(str(107) || '').replace(/\D/g, '') || null; // prontuário: só dígitos
   const dn   = toDate(get(14));
   const link_exames = (pron && dn)
     ? `https://doutorleandromendes.github.io/exames/autologin.html?user=p${pron}&pass=${dn.replace(/-/g,'').slice(6,8)+dn.replace(/-/g,'').slice(4,6)+dn.replace(/-/g,'').slice(0,4)}`
@@ -282,7 +282,7 @@ export function parseFormPayload(d) {
     ? String(Math.floor((new Date() - new Date(d.pac_dn)) / 31557600000))
     : null;
 
-  const pron = d.prontuario || null;
+  const pron = String(d.prontuario || '').replace(/\D/g, '') || null; // prontuário: só dígitos
   const dn   = toD(d.pac_dn);
   const link_exames = (pron && dn)
     ? `https://doutorleandromendes.github.io/exames/autologin.html?user=p${pron}&pass=${dn.replace(/-/g,'').slice(6,8)+dn.replace(/-/g,'').slice(4,6)+dn.replace(/-/g,'').slice(0,4)}`

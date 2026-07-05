@@ -23,7 +23,7 @@ import { ensureHealthcheckTable, startHealthcheckSchedule, registerHealthcheckRo
 import { ensureRegrasCheckTable, startRegrasCheckSchedule, registerRegrasCheckRoutes } from './atb-regras-check.js';
 import { registerNomesRoutes } from './atb-nomes-routes.js';
 import { ensureCulturasSchema, registerCulturasRoutes } from './atb-culturas-routes.js';
-import { registerPacsNomeRoutes } from './atb-pacs-nome-routes.js';
+import { registerPacsNomeRoutes, ensurePacsNomeSchema } from './atb-pacs-nome-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
@@ -77,6 +77,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureTriagemRegrasSchema(pool).catch(e => console.error('[atb] ensureTriagemRegrasSchema:', e.message));
   ensureFichaEditSchema(pool).catch(() => {});
   ensureCulturasSchema(pool).catch(e => console.error('[atb] ensureCulturasSchema:', e.message));
+  ensurePacsNomeSchema(pool).catch(e => console.error('[atb] ensurePacsNomeSchema:', e.message));
   
   
   registerParecerEditRoutes(app, pool, adminRequired);

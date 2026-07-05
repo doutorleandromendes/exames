@@ -54,6 +54,7 @@
   .item .rm{position:absolute;right:8px;top:8px;background:#fee2e2;color:#b91c1c;border:0;border-radius:8px;width:28px;height:28px;font-size:16px;cursor:pointer}
   .item .n{font-size:12px;color:var(--mut);font-weight:700;margin-bottom:8px}
   .add{background:#f1f5ff;color:var(--pri);border:1.5px dashed var(--pri);border-radius:10px;padding:11px;width:100%;font-weight:600;cursor:pointer}
+  .detbtn{background:none;border:0;color:var(--mut);font:inherit;font-size:12.5px;font-weight:600;padding:8px 0 2px;cursor:pointer}
   .ac{position:relative}
   .ac-list{position:absolute;left:0;right:0;top:calc(100% + 3px);background:#fff;border:1px solid var(--line);border-radius:10px;
     box-shadow:0 8px 24px rgba(15,23,42,.14);max-height:230px;overflow:auto;z-index:20}
@@ -175,6 +176,7 @@ const TIPOS=[
   {k:"pedido",      ic:"🧪", t:"Exames", d:"Solicitação"},
   {k:"relatorio",   ic:"📄", t:"Relatório", d:"Texto livre"},
   {k:"atestado",    ic:"📝", t:"Atestado", d:"Afast./comp."},
+  {k:"laudo",       ic:"🧾", t:"Laudo", d:"Teste rápido"},
 ];
 function screenHome(root){
   const t=document.createElement("div");
@@ -223,7 +225,7 @@ function patientCard(state){
 }
 function bindPatient(state, onChange){
   const clr=$("#pacclear");
-  if(clr){ clr.onclick=()=>{ state.pacienteId=null; state.paciente=""; state.pacEnd=""; onChange(); }; return; }
+  if(clr){ clr.onclick=()=>{ state.pacienteId=null; state.paciente=""; state.pacEnd=""; state.dn=null; onChange(); }; return; }
   const pac=$("#pac");
   if(pac) pac.oninput=()=>{ state.paciente=pac.value; if(state.doc==="atestado"&&window.regenAtestado) regenAtestado(); };
   const inp=$("#pacbusca"); if(!inp) return;
@@ -243,7 +245,7 @@ function bindPatient(state, onChange){
           const d=document.createElement("div");
           const dn=p.dn?p.dn.split("-").reverse().join("/"):"";
           d.innerHTML=`${esc(p.nome)}${dn?` <span class="sub">${dn}</span>`:""}`;
-          d.onclick=()=>{ state.pacienteId=p.id; state.paciente=p.nome; state.pacEnd=p.endereco||""; box.classList.add("hide"); onChange(); };
+          d.onclick=()=>{ state.pacienteId=p.id; state.paciente=p.nome; state.pacEnd=p.endereco||""; state.dn=p.dn||null; box.classList.add("hide"); onChange(); };
           box.appendChild(d);
         });
         box.classList.remove("hide");
@@ -252,6 +254,20 @@ function bindPatient(state, onChange){
   };
   inp.onblur=()=>setTimeout(()=>box.classList.add("hide"),200);
 }
+
+/* ---------- laudos (usa o catálogo /products.csv + template do /lab, assina ICP-Brasil) ---------- */
+// Resultados possíveis. A cor no PDF é automática (Não reagente/Negativo = verde; Reagente/Positivo = vermelho).
+const RES_OPTS=["Não reagente","Reagente","Negativo","Positivo","Indeterminado","Inconclusivo"];
+function novoTeste(){ return {exam_name:"", sample_type:"Soro", method:"Imunocromatografia", result_value:"", reference_value:"Não reagente", observation:"", det:false}; }
+// laudo vai à rota dedicada (/pront/laudo/...); os demais tipos passam por toDocState.
+function laudoPayload(state){
+  const itens=(state.lau.itens||[]).filter(i=>i.exam_name && i.result_value).map(i=>({
+    exam_name:i.exam_name, sample_type:i.sample_type||"Soro", method:i.method||"Imunocromatografia",
+    result_value:i.result_value, reference_value:i.reference_value||"", observation:i.observation||"", result_color:"auto"
+  }));
+  return { paciente:state.paciente, dn:state.dn||null, data:state.lau.data, itens };
+}
+function toDocState(state){ return state; }
 
 function screenForm(root, tipo, state){
   state = state || { doc:tipo, paper:"A4", paciente:"" };
@@ -303,6 +319,14 @@ function screenForm(root, tipo, state){
           <input type="checkbox" id="incid" ${state.ate.incluirCid?'checked':''} style="width:22px;height:22px;flex:0 0 auto"><span style="margin:0">Incluir CID</span></label>
         <label class="f${state.ate.incluirCid?'':' hide'}" id="cidwrap"><span>CID</span><input id="cid" value="${esc(state.ate.cid)}" placeholder="Ex.: J06.9"></label>
         <label class="f"><span>Texto gerado (editável)</span><textarea id="atexto" style="min-height:150px"></textarea></label>
+      </div>`;
+  } else if(tipo==="laudo"){
+    state.lau=state.lau||{itens:[novoTeste()], data:hoje()};
+    body=patientCard(state)+`<div class="card"><h2>Laudo — teste rápido</h2>
+        <label class="f"><span>Data de nascimento do paciente</span><input type="date" id="ldn" value="${esc(state.dn||'')}"></label>
+        <label class="f"><span>Data de realização</span><input type="date" id="ldata" value="${esc(state.lau.data)}"></label>
+        <div id="testes"></div>
+        <button class="add" id="addteste">+ Adicionar teste</button>
       </div>`;
   }
   root.innerHTML = body + `
@@ -374,6 +398,69 @@ function screenForm(root, tipo, state){
     drawExtra(); regenAtestado();
   }
 
+  if(tipo==="laudo"){
+    const box=$("#testes"), L=state.lau;
+    const resSel=(it,i)=>{
+      const sel = RES_OPTS.includes(it.result_value) ? it.result_value : (it.result_value?"__outro":"");
+      const opts=['<option value="">— resultado —</option>']
+        .concat(RES_OPTS.map(r=>`<option${r===sel?" selected":""}>${r}</option>`))
+        .concat([`<option value="__outro"${sel==="__outro"?" selected":""}>Outro (digitar)</option>`]).join("");
+      const custom = sel==="__outro" ? `<input data-k="rescustom" data-i="${i}" value="${esc(it.result_value)}" placeholder="Digite o resultado" style="margin-top:8px">` : "";
+      return `<select data-k="res" data-i="${i}">${opts}</select>${custom}`;
+    };
+    function draw(){
+      box.innerHTML="";
+      L.itens.forEach((it,i)=>{
+        const det=it.det?`
+          <label class="f" style="margin:8px 0 0"><span>Amostra</span><input data-k="sample_type" data-i="${i}" value="${esc(it.sample_type)}"></label>
+          <label class="f" style="margin:8px 0 0"><span>Método</span><input data-k="method" data-i="${i}" value="${esc(it.method)}"></label>
+          <label class="f" style="margin:8px 0 0"><span>Valor de referência</span><input data-k="reference_value" data-i="${i}" value="${esc(it.reference_value)}"></label>
+          <label class="f" style="margin:8px 0 0"><span>Observação</span><textarea data-k="observation" data-i="${i}" style="min-height:56px">${esc(it.observation)}</textarea></label>`:"";
+        const d=document.createElement("div"); d.className="item";
+        d.innerHTML=`${L.itens.length>1?`<button class="rm" data-i="${i}">×</button>`:""}
+          <div class="n">Teste ${i+1}</div>
+          <div class="ac"><label class="f" style="margin-bottom:8px"><span>Exame</span>
+            <input data-k="exam" data-i="${i}" value="${esc(it.exam_name)}" placeholder="Ex.: HIV - 4a geração" autocomplete="off"></label><div class="ac-list hide"></div></div>
+          <label class="f" style="margin-bottom:0"><span>Resultado</span>${resSel(it,i)}</label>
+          <button class="detbtn" data-det="${i}">${it.det?"▴ menos detalhes":"▾ amostra, método, VR, observação"}</button>${det}`;
+        box.appendChild(d);
+      });
+      box.querySelectorAll(".rm").forEach(b=>b.onclick=()=>{L.itens.splice(+b.dataset.i,1);draw();});
+      box.querySelectorAll(".detbtn").forEach(b=>b.onclick=()=>{const i=+b.dataset.det;L.itens[i].det=!L.itens[i].det;draw();});
+      box.querySelectorAll('[data-k="exam"]').forEach(inp=>inp.oninput=e=>{L.itens[+inp.dataset.i].exam_name=e.target.value;acExame(inp);});
+      box.querySelectorAll('[data-k="res"]').forEach(s=>s.onchange=e=>{
+        const it=L.itens[+s.dataset.i], v=e.target.value;
+        it.result_value = v==="__outro" ? (RES_OPTS.includes(it.result_value)?"":it.result_value) : v;
+        draw();
+      });
+      box.querySelectorAll('[data-k="rescustom"]').forEach(inp=>inp.oninput=e=>L.itens[+inp.dataset.i].result_value=e.target.value);
+      ["sample_type","method","reference_value","observation"].forEach(k=>box.querySelectorAll(`[data-k="${k}"]`).forEach(inp=>inp.oninput=e=>L.itens[+inp.dataset.i][k]=e.target.value));
+    }
+    function acExame(inp){
+      const boxl=inp.closest(".ac").querySelector(".ac-list"), q=inp.value.trim();
+      clearTimeout(inp._t);
+      if(q.length<2){boxl.classList.add("hide");return;}
+      inp._t=setTimeout(async ()=>{
+        try{
+          const r=await api("/pront/api/laudo-exames?q="+encodeURIComponent(q));
+          if(!r.ok){boxl.classList.add("hide");return;}
+          const list=await r.json();
+          if(!Array.isArray(list)||!list.length){boxl.classList.add("hide");return;}
+          boxl.innerHTML="";
+          list.slice(0,10).forEach(nome=>{ const d=document.createElement("div"); d.textContent=nome;
+            d.onclick=()=>{ L.itens[+inp.dataset.i].exam_name=nome; inp.value=nome; boxl.classList.add("hide"); };
+            boxl.appendChild(d); });
+          boxl.classList.remove("hide");
+        }catch(e){boxl.classList.add("hide");}
+      },220);
+      inp.onblur=()=>setTimeout(()=>boxl.classList.add("hide"),200);
+    }
+    $("#addteste").onclick=()=>{L.itens.push(novoTeste());draw();};
+    $("#ldn").oninput=e=>state.dn=e.target.value;
+    $("#ldata").oninput=e=>L.data=e.target.value;
+    draw();
+  }
+
   $("#assinar").onclick=()=>assinarFluxo(state);
 }
 
@@ -410,6 +497,7 @@ function validar(state){
   if(state.doc==="pedido"){ if(!(state.ped.outros||"").trim()) return "Liste ao menos um exame."; }
   if(state.doc==="relatorio"){ if(!(state.rel.corpo||"").trim()) return "Escreva o texto do relatório."; }
   if(state.doc==="atestado"){ if(!(state.ate.texto||"").trim()) return "Texto do atestado vazio."; }
+  if(state.doc==="laudo"){ if(!(state.lau.itens||[]).some(i=>i.exam_name&&i.result_value)) return "Selecione ao menos um exame e informe o resultado."; }
   return null;
 }
 async function assinarFluxo(state){
@@ -456,8 +544,15 @@ async function assinar(state){
     <div style="font-weight:700;color:var(--pri-d)">Gerando e assinando o PDF…</div>
     <p class="hint">Renderização + assinatura ICP-Brasil no servidor.</p></div>`; }, "Assinando");
   try{
-    const url = state.pacienteId ? ("/pront/paciente/"+state.pacienteId+"/documento/pdf-assinado") : "/pront/documento/pdf-assinado";
-    const r=await api(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({state})});
+    let url, reqBody;
+    if(state.doc==="laudo"){
+      url = state.pacienteId ? ("/pront/paciente/"+state.pacienteId+"/laudo/pdf-assinado") : "/pront/laudo/pdf-assinado";
+      reqBody = JSON.stringify(laudoPayload(state));
+    } else {
+      url = state.pacienteId ? ("/pront/paciente/"+state.pacienteId+"/documento/pdf-assinado") : "/pront/documento/pdf-assinado";
+      reqBody = JSON.stringify({state:toDocState(state)});
+    }
+    const r=await api(url,{method:"POST",headers:{"Content-Type":"application/json"},body:reqBody});
     if(r.status===401){ const j=await r.json().catch(()=>({})); if(j.precisa_otp){ back(); return pedirOTP(state); } throw new Error(j.erro||"Sessão expirada"); }
     const ct=r.headers.get("content-type")||"";
     if(!r.ok || !ct.includes("application/pdf")){ const j=await r.json().catch(()=>({erro:"Falha ("+r.status+")"})); throw new Error(j.erro||"Falha ao assinar"); }

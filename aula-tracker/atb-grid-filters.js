@@ -205,6 +205,9 @@ function _sel(name, value, opcoes, placeholder) {
 export function gridControlsUI(query, pager, opts = {}) {
   const q = query || {};
   const tenantLocked = !!(opts && opts.tenantLocked);
+  const sigla = opts && opts.sigla;
+  const mostrarCult = !tenantLocked || sigla === 'HUSF';   // culturas só existem no HUSF
+  const _mrSel = Array.isArray(q.cult_mr) ? q.cult_mr : String(q.cult_mr || '').split(',').map(x => x.trim()).filter(Boolean);
   const val = k => _safe(q[k] || '');
   const colsAtivas = []
     .concat(q.cols || [])
@@ -213,7 +216,7 @@ export function gridControlsUI(query, pager, opts = {}) {
     .filter(Boolean);
 
   // contagem de filtros ativos (exceto q/inst que ficam visíveis na barra)
-  const filtroKeys = ['setor','data_de','data_ate','sub_de','sub_ate','iras_sn','iras_classe','etiol','tipo_terapia','veredito','acesso_dialise','sofa_min','sofa_max','sepse'];
+  const filtroKeys = ['setor','data_de','data_ate','sub_de','sub_ate','iras_sn','iras_classe','etiol','tipo_terapia','veredito','acesso_dialise','sofa_min','sofa_max','sepse','cult_pos','cult_hemo','cult_mr'];
   const nAtivos = filtroKeys.filter(k => q[k]).length;
 
   // hidden p/ preservar estado ao submeter cada form
@@ -249,6 +252,11 @@ export function gridControlsUI(query, pager, opts = {}) {
         <label>Etiologia <input name="etiol" value="${val('etiol')}" placeholder="contém…" class="gf-in"></label>
         <label>Veredito ${_sel('veredito', q.veredito, OPC.veredito, 'Todos')}</label>
         <label>Acesso diálise ${_sel('acesso_dialise', q.acesso_dialise, OPC.acesso_dialise, 'Todos')}</label>
+        ${mostrarCult ? `
+        <label>Cultura positiva <select name="cult_pos" class="gf-in"><option value="">Todas</option><option value="1"${q.cult_pos==='1'?' selected':''}>Sim</option></select></label>
+        <label>Hemocultura <select name="cult_hemo" class="gf-in"><option value="">Todas</option><option value="1"${q.cult_hemo==='1'?' selected':''}>Sim</option></select></label>
+        <label>Resistência (MR) <select name="cult_mr" multiple size="4" class="gf-in">${['EPC','ESBL','KPC','METALO','MR','MRSA','OXA-R','VRE'].map(o => `<option value="${o}"${_mrSel.indexOf(o)!==-1?' selected':''}>${o}</option>`).join('')}</select></label>
+        ` : ''}
         <label>SOFA mín <input type="number" name="sofa_min" value="${val('sofa_min')}" class="gf-in" style="width:64px"></label>
         <label>máx <input type="number" name="sofa_max" value="${val('sofa_max')}" class="gf-in" style="width:64px"></label>
       </div>
@@ -358,6 +366,15 @@ export function buildGridWhere(query) {
   else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post') AND a.iras IS NOT NULL AND a.iras <> ''`);
   else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);
   if (Q.parecer === 'sem') where.push(`(f.recomendacao_scih IS NULL OR (jsonb_typeof(f.recomendacao_scih)='array' AND jsonb_array_length(f.recomendacao_scih)=0))`);
+  // ── Microbiologia (HUSF): EXISTS contra atb_culturas, match por atendimento + janela −30d/+5d.
+  const _cultMatch = `c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+      AND COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento
+      AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
+      AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
+  if (Q.cult_pos === '1')  where.push(`EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_cultMatch})`);
+  if (Q.cult_hemo === '1') where.push(`EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_cultMatch} AND c.material ILIKE '%hemocultura%')`);
+  const _mr = (Array.isArray(Q.cult_mr) ? Q.cult_mr : String(Q.cult_mr || '').split(',')).map(x => x.trim()).filter(Boolean);
+  if (_mr.length) { params.push(_mr); where.push(`EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_cultMatch} AND c.resistencia = ANY($${params.length}))`); }
   applyGridFilters(Q, where, params);
   return { whereSql: where.join(' AND '), params };
 }

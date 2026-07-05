@@ -232,86 +232,30 @@ export function registerPacsNomeRoutes(app, pool, adminRequired) {
     }
   });
 
-  // DIAGNÓSTICO Puppeteer: abre um Chromium headless, faz o autologin de UM
-  // paciente e reporta se logou + achou o nome. Testa se o navegador real passa
-  // pela proteção que barrou o fetch cru (401). adminRequired, não grava nada.
-  app.get('/atb/admin/pacs-nome/teste-puppeteer', adminRequired, async (req, res) => {
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  // Lista fichas HUSF novas que ainda NÃO têm nome do PACS (prontuário+DN),
+  // pro worker brasileiro capturar. Auth por token (mesmo do ingest).
+  app.get('/atb/api/pacs-nome/pendentes', async (req, res) => {
+    const tok = process.env.PACS_NOME_TOKEN;
+    if (!tok || (req.get('X-Pacs-Token') !== tok && req.query.token !== tok)) return res.status(401).json({ ok: false, error: 'token' });
     try {
-      let prontuario = req.query.prontuario, dn = req.query.dn;
-      if (req.query.ficha) {
-        const { rows: [f] } = await pool.query(
-          `SELECT prontuario, to_char(paciente_dn,'YYYY-MM-DD') AS dn FROM atb_fichas WHERE id=$1`,
-          [parseInt(req.query.ficha, 10)]);
-        if (!f) return res.status(404).send('Ficha não encontrada.');
-        prontuario = f.prontuario; dn = f.dn;
-      }
-      if (!prontuario || !dn) return res.status(400).send('Use ?ficha=ID  (ou ?prontuario=NNN&dn=AAAA-MM-DD)');
-      const t0 = Date.now();
-      const d = await capturarNomePacs(prontuario, dn);
-      const seg = ((Date.now() - t0) / 1000).toFixed(1);
-      const log = [];
-      log.push('Prontuário=' + prontuario + ' · DN=' + (d._dn || '(vazia!)') + ' · senha=' + (d._passLen ? d._passLen + ' díg.' : 'VAZIA') + ' · levou ' + seg + 's');
-      log.push('URL final=' + d.url + ' · título=' + d.title);
-      log.push('Login detectado=' + (d.login || '(nenhum)'));
-      log.push('Nome encontrado=' + (d.nome || '(não)'));
-      if (d.login && d.nome) log.push('\n✅ FUNCIONOU — Puppeteer logou e leu o nome. Dá pra fazer a captura prospectiva server-side.');
-      else if (d.title && /negado|denied/i.test(d.title)) log.push('\n⚠ ACESSO NEGADO — login recusado (sessão/CSRF ou detecção de automação).');
-      else if (d.url && /\/login/i.test(d.url)) log.push('\n⚠ Parou na tela de login.');
-      else log.push('\n⚠ Logou mas não peguei o nome (seletor?).');
-      if (!d.nome) log.push('\n--- TRECHO DA PÁGINA (pra diagnóstico) ---\n' + (d._body || '(vazio)'));
-      res.send(log.join('\n'));
+      const inst = await instHUSF(pool);
+      const lim = Math.min(parseInt(req.query.limit, 10) || 25, 100);
+      const dias = Math.min(parseInt(req.query.dias, 10) || 45, 365);
+      const { rows } = await pool.query(`
+        SELECT DISTINCT f.prontuario, to_char(f.paciente_dn,'YYYY-MM-DD') AS dn
+          FROM atb_fichas f
+          LEFT JOIN atb_nome_pacs np ON np.instituicao_id = f.instituicao_id AND np.prontuario = f.prontuario
+         WHERE f.instituicao_id IS NOT DISTINCT FROM $1
+           AND f.deletado_em IS NULL
+           AND COALESCE(f.prontuario,'') <> '' AND f.paciente_dn IS NOT NULL
+           AND np.prontuario IS NULL
+           AND COALESCE(f.data_referencia,f.jotform_created_at,f.created_at) >= (now() - ($2 || ' days')::interval)
+         ORDER BY f.prontuario
+         LIMIT $3`, [inst, String(dias), lim]);
+      res.json({ ok: true, pendentes: rows });
     } catch (e) {
-      res.send('ERRO: ' + ((e && e.message) || e) + '\n\n(Se for erro de launch/OOM do Chromium, o plano do Render pode não ter RAM pro Puppeteer no web service.)');
+      console.error('[atb] pacs-nome pendentes:', e.message);
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
-}
-
-// Captura o nome do paciente no PACS via Puppeteer (Chromium real → passa onde o
-// fetch cru é barrado). Usa o autologin (mesmo fluxo do navegador do médico).
-// Import dinâmico do puppeteer p/ não pesar o boot do app.
-export async function capturarNomePacs(prontuario, dn) {
-  const { user, pass } = credenciaisPacs(prontuario, dn);
-  const puppeteer = (await import('puppeteer')).default;
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-  });
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36');
-    page.setDefaultNavigationTimeout(30000);
-    // 1) GET inicial no PACS (MESMA origem) — estabelece a sessão/cookie JSESSIONID
-    await page.goto('https://pacs.husf.com.br/', { waitUntil: 'networkidle2' }).catch(() => {});
-    // 2) LOGIN SAME-ORIGIN: monta o form no próprio pacs.husf.com.br e submete p/
-    //    j_spring_security_check. Assim o cookie de sessão VIAJA (o autologin via
-    //    github.io é cross-site e o cookie SameSite não ia junto → POST "frio").
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
-      page.evaluate((u, p) => {
-        const f = document.createElement('form');
-        f.method = 'POST'; f.action = '/j_spring_security_check';
-        const a = document.createElement('input'); a.type = 'hidden'; a.name = 'j_username'; a.value = u; f.appendChild(a);
-        const b = document.createElement('input'); b.type = 'hidden'; b.name = 'j_password'; b.value = p; f.appendChild(b);
-        document.body.appendChild(f); f.submit();
-      }, user, pass),
-    ]);
-    await page.waitForSelector('th', { timeout: 15000 }).catch(() => {});
-    const dados = await page.evaluate(() => {
-      const login = (document.body.innerText.match(/Login:\s*p(\d+)/i) || [])[1] || null;
-      const ths = [].slice.call(document.querySelectorAll('th'));
-      let th = null;
-      for (let i = 0; i < ths.length; i++) { if (/nome do paciente/i.test(ths[i].innerText || '')) { th = ths[i]; break; } }
-      let nome = null;
-      if (th) {
-        const col = (th.className || '').match(/yui-dt-col-[\w-]+/);
-        if (col) { const cell = document.querySelector('td.' + col[0] + ' .yui-dt-liner'); if (cell) nome = (cell.innerText || '').trim(); }
-        if (!nome && th.cellIndex >= 0) { const r = document.querySelector('table tbody tr'); if (r && r.children[th.cellIndex]) nome = (r.children[th.cellIndex].innerText || '').trim(); }
-      }
-      return { url: location.href, title: document.title, login, nome, _body: (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 400) };
-    });
-    return { ...dados, _user: user, _dn: dn, _passLen: pass.length };
-  } finally {
-    await browser.close().catch(() => {});
-  }
 }

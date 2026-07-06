@@ -190,7 +190,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const docsEmitidos = (await pool.query(
       `SELECT id, tipo, paper, assinado, secret_code, verif_token, descricao, to_char(criado_em,'YYYY-MM-DD') data
          FROM pront_docs_emitidos WHERE paciente_id=$1 ORDER BY criado_em DESC`, [id])).rows;
-    const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado" };
+    const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado", laudo: "Laudo" };
 
     const dados = [
       p.dn && `<b>Nasc.:</b> ${toBR(p.dn)}${idade(p.dn) != null ? ` (${idade(p.dn)} anos)` : ""}`,
@@ -1103,6 +1103,7 @@ window.__READY=1;`;
   // lista dos documentos avulsos (só médico). Ordenável por descrição, tipo, data.
   app.get("/pront/documentos-avulsos", medicoRequired, async (req, res) => {
     try {
+      const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado", laudo: "Laudo" };
       const sortMap = { descricao: "LOWER(COALESCE(descricao,''))", tipo: "LOWER(COALESCE(tipo,''))", data: "criado_em" };
       const sort = sortMap[req.query.sort] ? req.query.sort : "data";
       const dir = (req.query.dir === "asc") ? "ASC" : "DESC";

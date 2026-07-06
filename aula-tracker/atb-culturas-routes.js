@@ -36,6 +36,7 @@ export async function ensureCulturasSchema(pool) {
       paciente_nome       TEXT,
       paciente_nome_norm  TEXT,
       atendimento         TEXT,
+      prontuario          TEXT,
       material            TEXT,
       microorganismo      TEXT,
       resistencia         TEXT,
@@ -51,8 +52,11 @@ export async function ensureCulturasSchema(pool) {
     )`);
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_culturas_atend_idx
     ON atb_culturas(instituicao_id, atendimento, data_coleta)`);
+  await pool.query(`ALTER TABLE atb_culturas ADD COLUMN IF NOT EXISTS prontuario TEXT`);
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_culturas_nome_idx
     ON atb_culturas(instituicao_id, paciente_nome_norm, data_coleta)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS atb_culturas_pront_idx
+    ON atb_culturas(instituicao_id, prontuario, data_coleta) WHERE prontuario IS NOT NULL`);
   // acelera o match cultura→ficha por atendimento
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_fichas_atendimento_idx
     ON atb_fichas(instituicao_id, atendimento) WHERE atendimento IS NOT NULL`);
@@ -82,37 +86,59 @@ function _data(v) {
 // 0 DATA · 1 NOME · 2 ATENDIMENTO · 3 PRESCRIÇÃO · 4 O.S · 5 CLÍNICA · 6 MATERIAL
 // 7 BACT · 8 TEMPO DE POSITIVIDADE · 9 (cabeçalho vazio = MICRORGANISMO)
 // 10 MR · 11 MIC POLI · 12 CLASSE · 13 MIC VANCO · 14 Rotina ou Admissão
+// Índices POSICIONAIS padrão = layout atual da planilha (fallback).
+// Quando o cabeçalho da coluna é reconhecível, ELE tem prioridade — assim
+// inserções/reordenações de coluna não quebram o parser.
 const COL = {
-  data: 0, nome: 1, atendimento: 2, os: 4, clinica: 5, material: 6,
-  tempo_pos: 8, organismo: 9, mr: 10, mic_poli: 11, classe: 12, mic_vanco: 13,
+  data: 0, nome: 1, atendimento: 2, prontuario: 3, os: 5, clinica: 6, material: 7,
+  tempo_pos: 9, organismo: 10, mr: 11, mic_poli: 12, classe: 13, mic_vanco: 14,
 };
+// Padrões de cabeçalho por campo. (organismo é reconhecido se você titular a
+// coluna como "MICRORGANISMO"; sem título, cai no índice posicional acima.)
+const HDR = {
+  data: /^data/i, nome: /nome/i, atendimento: /atendiment/i, prontuario: /prontu/i,
+  os: /^o\.?\s*s\b/i, clinica: /cl[íi]nic/i, material: /material/i,
+  tempo_pos: /tempo/i, organismo: /microrg|micro.?organism/i,
+  mr: /^mr\b|resist[êe]ncia/i, mic_poli: /mic.*poli/i, classe: /classe/i, mic_vanco: /mic.*vanco/i,
+};
+function resolverColunas(header) {
+  const idx = { ...COL };
+  const H = Array.isArray(header) ? header : [];
+  for (const k in HDR) {
+    const found = H.findIndex(h => HDR[k].test(String(h == null ? '' : h).trim()));
+    if (found >= 0) idx[k] = found;
+  }
+  return idx;
+}
 
 // values: matriz [[...linha]] vinda do Sheets (linha 0 = cabeçalho).
 // Retorna só linhas POSITIVAS (com microrganismo) e com data válida.
 export function parseCulturas(values) {
   const out = [];
   if (!Array.isArray(values)) return out;
+  const idx = resolverColunas(values[0] || []); // header tem prioridade; senão, posicional
   for (let i = 1; i < values.length; i++) {
     const c = values[i] || [];
-    const at = i => (c[i] == null ? '' : String(c[i]));
-    const data_coleta = _data(at(COL.data));
-    const microorganismo = _nn(at(COL.organismo));
+    const at = j => (c[j] == null ? '' : String(c[j]));
+    const data_coleta = _data(at(idx.data));
+    const microorganismo = _nn(at(idx.organismo));
     if (!data_coleta || !microorganismo) continue; // não-positiva / sem data → ignora
-    const nome = at(COL.nome).trim();
+    const nome = at(idx.nome).trim();
     out.push({
       data_coleta,
       paciente_nome: nome || null,
       paciente_nome_norm: _norm(nome) || null,
-      atendimento: _nn(at(COL.atendimento)),
-      material: _nn(at(COL.material)),
+      atendimento: _nn(at(idx.atendimento)),
+      prontuario: String(at(idx.prontuario)).replace(/\D/g, '') || null,
+      material: _nn(at(idx.material)),
       microorganismo,
-      resistencia: _nn(at(COL.mr)),
-      mic_poli: _nn(at(COL.mic_poli)),
-      mic_vanco: _nn(at(COL.mic_vanco)),
-      classe: _nn(at(COL.classe)),
-      tempo_positividade: _nn(at(COL.tempo_pos)),
-      clinica: _nn(at(COL.clinica)),
-      os: _nn(at(COL.os)),
+      resistencia: _nn(at(idx.mr)),
+      mic_poli: _nn(at(idx.mic_poli)),
+      mic_vanco: _nn(at(idx.mic_vanco)),
+      classe: _nn(at(idx.classe)),
+      tempo_positividade: _nn(at(idx.tempo_pos)),
+      clinica: _nn(at(idx.clinica)),
+      os: _nn(at(idx.os)),
       raw: c,
     });
   }
@@ -179,7 +205,7 @@ export async function sincronizarCulturas(pool) {
     const chave = [inst, c.atendimento || '', c.data_coleta, c.material || '', c.microorganismo].join('|');
     porChave.set(chave, [inst, c.data_coleta, c.paciente_nome, c.paciente_nome_norm, c.atendimento,
       c.material, c.microorganismo, c.resistencia, c.mic_poli, c.mic_vanco, c.classe,
-      c.tempo_positividade, c.clinica, c.os, JSON.stringify(c.raw), chave]);
+      c.tempo_positividade, c.clinica, c.os, JSON.stringify(c.raw), chave, c.prontuario || null]);
   }
   const tuplas = [...porChave.values()];
   let inseridas = 0, atualizadas = 0;
@@ -188,21 +214,22 @@ export async function sincronizarCulturas(pool) {
     const grupo = tuplas.slice(i, i + LOTE);
     const vals = [];
     const ph = grupo.map((r, gi) => {
-      const b = gi * 16;
+      const b = gi * 17;
       vals.push(...r);
-      return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15}::jsonb,$${b+16}, now())`;
+      return `($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14},$${b+15}::jsonb,$${b+16},$${b+17}, now())`;
     }).join(',');
     const q = await pool.query(`
       INSERT INTO atb_culturas
         (instituicao_id, data_coleta, paciente_nome, paciente_nome_norm, atendimento,
          material, microorganismo, resistencia, mic_poli, mic_vanco, classe,
-         tempo_positividade, clinica, os, raw, chave, sincronizado_em)
+         tempo_positividade, clinica, os, raw, chave, prontuario, sincronizado_em)
       VALUES ${ph}
       ON CONFLICT (chave) DO UPDATE SET
         resistencia=EXCLUDED.resistencia, mic_poli=EXCLUDED.mic_poli, mic_vanco=EXCLUDED.mic_vanco,
         classe=EXCLUDED.classe, tempo_positividade=EXCLUDED.tempo_positividade, clinica=EXCLUDED.clinica,
         os=EXCLUDED.os, raw=EXCLUDED.raw, paciente_nome=EXCLUDED.paciente_nome,
-        paciente_nome_norm=EXCLUDED.paciente_nome_norm, sincronizado_em=now()
+        paciente_nome_norm=EXCLUDED.paciente_nome_norm, atendimento=EXCLUDED.atendimento,
+        prontuario=EXCLUDED.prontuario, sincronizado_em=now()
       RETURNING (xmax = 0) AS inserted`, vals);
     for (const row of q.rows) { if (row.inserted) inseridas++; else atualizadas++; }
   }
@@ -219,17 +246,24 @@ export async function buscarCulturasDaFicha(pool, ficha) {
   const ref = ficha.data_referencia || ficha.jotform_created_at || ficha.created_at;
   if (!ref) return [];
   const atend = (ficha.atendimento || '').trim();
+  const pront = String(ficha.prontuario || '').replace(/\D/g, '').trim();
   const nomeNorm = _norm(ficha.paciente_nome_raw || ficha.paciente_nome || '');
-  if (!atend && !nomeNorm) return [];
+  if (!pront && !atend && !nomeNorm) return [];
+  // Prioridade de match: PRONTUÁRIO (melhor identificador) → atendimento → nome.
+  // Ficha com prontuário casa por prontuário OU atendimento (pega internado + P.S.).
   const { rows } = await pool.query(`
     SELECT data_coleta, material, microorganismo, resistencia, mic_poli, mic_vanco, classe, tempo_positividade
       FROM atb_culturas
      WHERE instituicao_id IS NOT DISTINCT FROM $1
        AND data_coleta >= ($2::date - interval '30 days')
        AND data_coleta <= ($2::date + interval '5 days')
-       AND (CASE WHEN $3 <> '' THEN atendimento = $3 ELSE paciente_nome_norm = $4 END)
+       AND (CASE
+              WHEN $5 <> '' THEN (prontuario = $5 OR ($3 <> '' AND atendimento = $3))
+              WHEN $3 <> '' THEN atendimento = $3
+              ELSE paciente_nome_norm = $4
+            END)
      ORDER BY data_coleta DESC, id DESC`,
-    [ficha.instituicao_id, ref, atend, nomeNorm]);
+    [ficha.instituicao_id, ref, atend, nomeNorm, pront]);
   return rows;
 }
 

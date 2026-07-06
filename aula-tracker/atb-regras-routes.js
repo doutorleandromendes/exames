@@ -36,7 +36,8 @@ const SUB_FICHAS_72H = `(
 // VIVO (aplicarRegras) usa buscarCulturasDaFicha, que também casa por nome; aqui, por
 // simplicidade/perf no lote, casamos só por atendimento (cobre os internados do HUSF).
 const _CULT_MATCH = `c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
-     AND COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento
+     AND ( (COALESCE(f.prontuario,'') <> '' AND c.prontuario = f.prontuario)
+          OR (COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento) )
      AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
      AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
 const SUB_CULT_POS = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH})`;

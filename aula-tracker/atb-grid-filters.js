@@ -208,6 +208,7 @@ export function gridControlsUI(query, pager, opts = {}) {
   const sigla = opts && opts.sigla;
   const mostrarCult = !tenantLocked || sigla === 'HUSF';   // culturas só existem no HUSF
   const _mrSel = Array.isArray(q.cult_mr) ? q.cult_mr : String(q.cult_mr || '').split(',').map(x => x.trim()).filter(Boolean);
+  const _setSel = Array.isArray(q.setor) ? q.setor : String(q.setor || '').split(',').map(x => x.trim()).filter(Boolean);
   const val = k => _safe(q[k] || '');
   const colsAtivas = []
     .concat(q.cols || [])
@@ -231,7 +232,7 @@ export function gridControlsUI(query, pager, opts = {}) {
       <input type="hidden" name="cols" value="${_safe(q.cols || '')}">
       <div class="gf-grid">
         ${tenantLocked ? '' : `<label>Hospital ${_sel('inst', q.inst, OPC.inst, 'Todos')}</label>`}
-        <label>Setor ${_sel('setor', q.setor, OPC.setor, 'Todos')}</label>
+        <label>Setor <select name="setor" multiple size="6" class="gf-in">${OPC.setor.map(o => `<option value="${o}"${_setSel.indexOf(o)!==-1?' selected':''}>${o}</option>`).join('')}</select></label>
         <label>Tipo de terapia ${_sel('tipo_terapia', q.tipo_terapia, OPC.tipo_terapia, 'Todos')}</label>
         <label>Sepse ${_sel('sepse', q.sepse === 'sim' ? 'Sim' : q.sepse === 'nao' ? 'Não' : '', ['Sim','Não'], 'Todos').replace('value="Sim"', 'value="sim"').replace('value="Não"', 'value="nao"')}</label>
 
@@ -353,14 +354,15 @@ export function gridControlsUI(query, pager, opts = {}) {
 export function buildGridWhere(query) {
   const Q = query || {};
   const q = (Q.q || '').trim();
-  const inst = Q.inst || '', setor = Q.setor || '', mes = Q.mes || '', iras = Q.iras || '';
+  const inst = Q.inst || '', mes = Q.mes || '', iras = Q.iras || '';
   const where = ['f.deletado_em IS NULL'], params = [];
   if (q) {
     params.push('%' + q.toLowerCase() + '%');
     where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length})`);
   }
   if (inst)  { params.push(inst);  where.push(`i.sigla = $${params.length}`); }
-  if (setor) { params.push(setor); where.push(`f.setor = $${params.length}`); }
+  const _setores = (Array.isArray(Q.setor) ? Q.setor : String(Q.setor || '').split(',')).map(x => x.trim()).filter(Boolean);
+  if (_setores.length) { params.push(_setores); where.push(`f.setor = ANY($${params.length})`); }
   if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)) = $${params.length}`); }
   if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
   else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post') AND a.iras IS NOT NULL AND a.iras <> ''`);

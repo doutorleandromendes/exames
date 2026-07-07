@@ -18,6 +18,7 @@
 import { getFormSchema } from './atb-form-schema.js';
 import { validarObrigatoriosServidor } from './atb-regras-form-routes.js';
 import { parseFormPayload } from './atb-parser.js';
+import { gerarInsertFichas, colunasReaisFichas } from './atb-field-registry.js';
 import { envTenant } from './atb-tenant.js';
 
 // ── helpers de geração (espelham o harness do navegador) ─────────────────────
@@ -101,7 +102,7 @@ function resolverServer(schema, map, seed) {
     if (!faltas.length) {
       try { parseFormPayload(d); }
       catch (e) { return { ok: false, iters: step, erro: 'parse: ' + e.message, preenchidos }; }
-      return { ok: true, iters: step, preenchidos };
+      return { ok: true, iters: step, preenchidos, d };
     }
     if (step >= 12)
       return { ok: false, iters: step, erro: 'faltas persistentes', faltas: faltas.map(f => f.key), preenchidos };
@@ -136,7 +137,50 @@ export async function runHealthcheck(pool, inst = 'HUSF') {
     detalhe.push({ caso: caso.nome, cond: caso.sub, ok: rr.ok, iters: rr.iters,
                    erro: rr.erro || null, faltas: rr.faltas || null });
   }
-  const total = casos.length, ok = failed === 0;
+  // ── caso final: INSERT gerado (Registro de Campos) com ROLLBACK ────────────
+  // Executa o INSERT real gerado por gerarInsertFichas contra atb_fichas dentro
+  // de uma transação revertida — valida o SQL dinâmico contra a estrutura REAL
+  // da tabela (coluna faltando, tipo errado, placeholder) sem gravar nada.
+  // Cobre o caminho que o dry-run puro (acima) deliberadamente não alcança.
+  {
+    const rr = resolverServer(schema, map, Object.assign({}, maxSeed));
+    let okIns = false, erroIns = null, extrasIns = null;
+    if (!rr.ok || !rr.d) {
+      erroIns = 'caso base não montou: ' + (rr.erro || '?');
+    } else {
+      const client = await pool.connect();
+      try {
+        const parsed = parseFormPayload(rr.d);
+        const { rows: [instRow] } = await client.query(
+          'SELECT id FROM atb_instituicoes WHERE sigla = $1', [inst]);
+        const colunasReais = await colunasReaisFichas(client);
+        const ins = gerarInsertFichas({
+          schema, parsed,
+          ctx: { instituicao_id: instRow?.id,
+                 submission_id: 'hc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                 payload_raw: rr.d },
+          colunasReais,
+        });
+        if (ins.extras.length) extrasIns = ins.extras;
+        await client.query('BEGIN');
+        const { rows: [f] } = await client.query(ins.text, ins.values);
+        await client.query('ROLLBACK');
+        okIns = !!(f && f.id);
+        if (!okIns) erroIns = 'INSERT não retornou id';
+      } catch (e) {
+        try { await client.query('ROLLBACK'); } catch {}
+        erroIns = 'insert: ' + e.message;
+      } finally {
+        client.release();
+      }
+    }
+    if (okIns) passed++; else failed++;
+    detalhe.push({ caso: 'INSERT gerado (rollback)', cond: 'Registro de Campos → atb_fichas',
+                   ok: okIns, iters: 1, erro: erroIns, faltas: null,
+                   extras: extrasIns });
+  }
+
+  const total = detalhe.length, ok = failed === 0;
   const { rows: [row] } = await pool.query(
     `INSERT INTO atb_healthcheck (instituicao, ok, total, passed, failed, detalhe)
      VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, ran_at, ok, total, passed, failed`,

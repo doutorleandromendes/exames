@@ -2,6 +2,7 @@
 
 import { handleWebhook, iniciarPolling, rodarTriagemIA } from './atb-sync.js';
 import { parseFormPayload } from './atb-parser.js';
+import { gerarInsertFichas, colunasReaisFichas } from './atb-field-registry.js';
 import { fetchR2Stream, fetchR2ImageAsDataURI } from './lab-storage.js';
 import { ensureFormSchemaTable, getFormSchema, saveFormSchema } from './atb-form-schema.js';
 import { carregarPrescritores, validarFormatoCRM, buscarCRM, statusCache } from './atb-prescritores.js';
@@ -224,48 +225,22 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       );
       const submissionId = `form_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 
-      const { rows: [ficha] } = await pool.query(`
-        INSERT INTO atb_fichas (
-          instituicao_id, jotform_submission_id, jotform_created_at,
-          paciente_nome, paciente_nome_raw, paciente_dn, paciente_idade,
-          prontuario, atendimento, setor, leito, equipe_responsavel,
-          data_internacao, data_admissao_uti, tipo_terapia, historia_clinica,
-          cirurgia, foco_infeccao, sepse, gestante, lactante, comorbidades,
-          uso_atb_7d, atb_previos, culturas_colhidas, culturas_previas,
-          dispositivos_invasivos, dialise, acesso_dialise, data_insercao_cateter,
-          sitio_cvc, sitio_cdl, sitio_pai, peso_nascimento, acesso_vascular_neo,
-          insuficiencia_renal, clcr, peso, altura, faz_quimio, cateter_quimio,
-          acesso_quimio, classificacao_fratura, atb_solicitado, posologia,
-          tempo_previsto, oxacilina_associacao, crm, prescritor_nome,
-          sofa, sofa_renal, payload_raw, status, sinais_dialise, link_exames, link_labs
-        ) VALUES (
-          $1,$2,now(),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-          $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,
-          $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,
-          $44,$45,$46,$47,$48,$49,$50,$51,'pendente',$52,$53,$54
-        ) RETURNING id
-      `, [
-        instRow?.id, submissionId,
-        parsed.paciente_nome, parsed.paciente_nome_raw, parsed.paciente_dn,
-        parsed.paciente_idade, parsed.prontuario, parsed.atendimento,
-        parsed.setor, parsed.leito, parsed.equipe_responsavel,
-        parsed.data_internacao, parsed.data_admissao_uti, parsed.tipo_terapia,
-        parsed.historia_clinica, parsed.cirurgia, parsed.foco_infeccao,
-        parsed.sepse, parsed.gestante, parsed.lactante,
-        JSON.stringify(parsed.comorbidades), parsed.uso_atb_7d,
-        JSON.stringify(parsed.atb_previos), JSON.stringify(parsed.culturas_colhidas),
-        JSON.stringify(parsed.culturas_previas), JSON.stringify(parsed.dispositivos_invasivos),
-        parsed.dialise, parsed.acesso_dialise, parsed.data_insercao_cateter,
-        JSON.stringify(parsed.sitio_cvc), JSON.stringify(parsed.sitio_cdl),
-        JSON.stringify(parsed.sitio_pai), parsed.peso_nascimento,
-        JSON.stringify(parsed.acesso_vascular_neo), JSON.stringify(parsed.insuficiencia_renal),
-        parsed.clcr, parsed.peso, parsed.altura, parsed.faz_quimio,
-        parsed.cateter_quimio, parsed.acesso_quimio, parsed.classificacao_fratura,
-        JSON.stringify(parsed.atb_solicitado), JSON.stringify(parsed.posologia),
-        parsed.tempo_previsto, parsed.oxacilina_associacao,
-        parsed.crm, parsed.prescritor_nome, parsed.sofa, parsed.sofa_renal,
-        JSON.stringify(d), parsed.sinais_dialise, parsed.link_exames, parsed.link_labs,
-      ]);
+      // INSERT gerado pelo Registro de Campos (atb-field-registry.js) a partir
+      // do schema vivo — paridade com o INSERT hard-coded anterior provada por
+      // harness-paridade-insert.mjs (56 colunas, 54 params, valores idênticos).
+      // Campos do schema SEM coluna real (não promovidos) ficam fora do INSERT
+      // e viajam em payload_raw — estado "extras" do modelo híbrido.
+      const _colunasReais = await colunasReaisFichas(pool);
+      const _ins = gerarInsertFichas({
+        schema: _schemaVal,
+        parsed,
+        ctx: { instituicao_id: instRow?.id, submission_id: submissionId, payload_raw: d },
+        colunasReais: _colunasReais,
+      });
+      if (_ins.extras.length) {
+        console.log('[atb] ficha: campos sem coluna (payload_raw apenas):', _ins.extras.join(', '));
+      }
+      const { rows: [ficha] } = await pool.query(_ins.text, _ins.values);
       
 
       // Triagem IA assíncrona

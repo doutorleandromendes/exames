@@ -134,6 +134,22 @@ async function pdfParaImagens(path, prefix) {
   return out;
 }
 
+// ---------- auto-orientação de foto (EXIF) antes da visão ----------
+// Fotos de celular costumam trazer a orientação só como flag EXIF; o modelo de
+// visão pode recebê-las deitadas. sharp(buffer).rotate() aplica a orientação EXIF
+// e grava os pixels já na posição correta. Import preguiçoso com fallback: se o
+// sharp não estiver instalado, devolve a imagem original (sem rotacionar) em vez
+// de quebrar a extração.
+async function autoOrientarB64(buffer) {
+  try {
+    const sharp = (await import("sharp")).default;
+    const out = await sharp(buffer).rotate().toBuffer();
+    return out.toString("base64");
+  } catch {
+    return buffer.toString("base64");
+  }
+}
+
 // ---------- API principal ----------
 // entrada: { buffer, mime, nomeArquivo }  ->  { paciente, data_coleta, laboratorio, analitos[], fonte, provedor }
 export async function extrairDocumento({ buffer, mime, nomeArquivo }, provider = escolheProvedor()) {
@@ -158,7 +174,8 @@ export async function extrairDocumento({ buffer, mime, nomeArquivo }, provider =
   }
 
   if (ehImg) {
-    const brutos = await provider.extrairImagens([buffer.toString("base64")]);
+    const b64 = await autoOrientarB64(buffer);
+    const brutos = await provider.extrairImagens([b64]);
     return { analitos: normalizarBrutos(brutos), fonte: "foto", provedor: provider.nome };
   }
 

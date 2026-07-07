@@ -829,8 +829,25 @@
     var sendState = useState(false), enviando = sendState[0], setEnviando = sendState[1];
 
     var inst = window.ATB_INSTITUICAO || 'HUSF';
+    var PREVIEW = new URLSearchParams(window.location.search).get('preview') === '1';
 
     useEffect(function () {
+      if (PREVIEW) {
+        // MODO PREVIEW (editor estrutural): o schema chega do editor-pai via
+        // postMessage e re-renderiza a cada edição; envio fica desabilitado.
+        function onMsg(ev) {
+          if (ev.origin !== window.location.origin) return;
+          var m = ev.data || {};
+          if (m && m.tipo === 'atb-preview-schema' && m.schema) setSchema(m.schema);
+        }
+        window.addEventListener('message', onMsg);
+        document.body.insertAdjacentHTML('afterbegin',
+          '<div style="position:sticky;top:0;z-index:99;background:#9a6700;color:#fff;' +
+          'font:600 12px/1 sans-serif;padding:7px 12px;text-align:center">' +
+          'PRÉ-VISUALIZAÇÃO — reflete o editor em tempo real · envio desabilitado</div>');
+        try { window.parent.postMessage({ tipo: 'atb-preview-ready' }, window.location.origin); } catch (e2) {}
+        return function () { window.removeEventListener('message', onMsg); };
+      }
       fetch('/atb/api/form-schema?inst=' + encodeURIComponent(inst))
         .then(function (r) { if (!r.ok) throw new Error('schema indisponível'); return r.json(); })
         .then(function (d) { setSchema(d); })
@@ -935,6 +952,7 @@
     }
 
     function enviar() {
+      if (PREVIEW) { alert('Modo pré-visualização — o envio está desabilitado.'); return; }
       if (!validar()) {
         var primeiro = document.querySelector('.erro, .erro-msg');
         if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });

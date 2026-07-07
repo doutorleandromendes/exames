@@ -40,7 +40,7 @@ export const TIPOS_CRIAVEIS = ['text', 'textarea', 'number', 'date', 'select', '
 const TIPOS_CONHECIDOS = new Set([...TIPOS_CRIAVEIS, 'matrix', 'crm', 'sofa', 'dose_vanco', 'check']);
 const TIPOS_COM_OPCOES = new Set(['select', 'radio', 'checkbox']);
 export const KEYS_INDELETAVEIS = new Set(['pac_nome', 'prontuario', 'crm']);
-const OPS = new Set(['eq', 'neq', 'in', 'filled', 'not_filled', 'contains', 'contains_any', 'text_contains_any']);
+const OPS = new Set(['eq', 'neq', 'in', 'filled', 'not_filled', 'contains', 'not_contains', 'contains_any', 'not_contains_any', 'text_contains_any']);
 const SLUG = /^[a-z][a-z0-9_]{1,40}$/;
 
 // chaves que não podem ser usadas por campos novos (colisão com sistema/banco)
@@ -64,9 +64,9 @@ function validarCond(cond, keysValidas, caminho, erros) {
   if (!cond.campo) { erros.push(`${caminho}: cond sem "campo"`); return; }
   if (!keysValidas.has(cond.campo)) erros.push(`${caminho}: cond referencia campo inexistente "${cond.campo}"`);
   if (!OPS.has(cond.op)) erros.push(`${caminho}: op desconhecido "${cond.op}"`);
-  if (['eq', 'neq', 'contains'].includes(cond.op) && (cond.valor == null || cond.valor === ''))
+  if (['eq', 'neq', 'contains', 'not_contains'].includes(cond.op) && (cond.valor == null || cond.valor === ''))
     erros.push(`${caminho}: op "${cond.op}" exige valor`);
-  if (['in', 'contains_any', 'text_contains_any'].includes(cond.op) && !Array.isArray(cond.valor))
+  if (['in', 'contains_any', 'not_contains_any', 'text_contains_any'].includes(cond.op) && !Array.isArray(cond.valor))
     erros.push(`${caminho}: op "${cond.op}" exige valor em lista`);
 }
 
@@ -322,11 +322,12 @@ function clienteJS() {
   var TIPO_LABEL = { text:'Texto curto', textarea:'Texto longo', number:'Número', date:'Data',
     select:'Seleção', radio:'Escolha única', checkbox:'Múltipla escolha',
     matrix:'Matriz', crm:'CRM', sofa:'Bloco SOFA', dose_vanco:'Widget vancomicina', check:'Check' };
-  var OP_LABEL = { eq:'é igual a', neq:'é diferente de', contains:'contém', in:'é um de (lista)',
-    contains_any:'contém algum de (lista)', text_contains_any:'texto contém algum de (lista)',
+  var OP_LABEL = { eq:'é igual a', neq:'é diferente de', contains:'contém', not_contains:'não contém',
+    in:'é um de (lista)', contains_any:'contém algum de (lista)', not_contains_any:'não contém nenhum de (lista)',
+    text_contains_any:'texto contém algum de (lista)',
     filled:'está preenchido', not_filled:'não está preenchido' };
-  var OPS_VALOR_UNICO = ['eq','neq','contains'];
-  var OPS_LISTA = ['in','contains_any','text_contains_any'];
+  var OPS_VALOR_UNICO = ['eq','neq','contains','not_contains'];
+  var OPS_LISTA = ['in','contains_any','not_contains_any','text_contains_any'];
   var OPS_SEM_VALOR = ['filled','not_filled'];
 
   function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }

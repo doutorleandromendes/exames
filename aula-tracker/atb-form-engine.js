@@ -50,9 +50,14 @@
       case 'not_filled': return !_filled(v);
       case 'contains': // v é array (checkbox); contém o valor?
         return Array.isArray(v) && v.indexOf(cond.valor) !== -1;
+      case 'not_contains': // v é array; NÃO contém o valor (array ausente/vazio conta como não-contém)
+        return !(Array.isArray(v) && v.indexOf(cond.valor) !== -1);
       case 'contains_any': // v é array; contém algum dos valores?
         return Array.isArray(v) && Array.isArray(cond.valor) &&
                cond.valor.some(function (x) { return v.indexOf(x) !== -1; });
+      case 'not_contains_any': // v é array; NÃO contém nenhum dos valores
+        return !(Array.isArray(v) && Array.isArray(cond.valor) &&
+               cond.valor.some(function (x) { return v.indexOf(x) !== -1; }));
       case 'text_contains_any': // v é texto livre; casa algum token (robusto a abreviações)
         return _textContainsAny(v, cond.valor);
       default: return true;

@@ -79,7 +79,9 @@ function satisfazer(cond, map) {
     case 'eq':                o[campo] = valor; break;
     case 'in':                o[campo] = Array.isArray(valor) ? valor[0] : valor; break;
     case 'contains':          o[campo] = [valor]; break;
+    case 'not_contains':      o[campo] = []; break;
     case 'contains_any':      o[campo] = Array.isArray(valor) ? [valor[0]] : [valor]; break;
+    case 'not_contains_any':  o[campo] = []; break;
     case 'text_contains_any': o[campo] = Array.isArray(valor) ? String(valor[0]) : String(valor); break;
     case 'filled':            o[campo] = map[campo] ? fill(map[campo]) : 'preenchido'; break;
     case 'neq':               if (valor === '') o[campo] = 'preenchido'; break;

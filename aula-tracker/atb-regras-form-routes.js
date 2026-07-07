@@ -54,8 +54,11 @@ export function avaliaCondServer(cond, valores) {
     case 'filled':     return _filled(v);
     case 'not_filled': return !_filled(v);
     case 'contains':     return Array.isArray(v) && v.indexOf(cond.valor) !== -1;
+    case 'not_contains': return !(Array.isArray(v) && v.indexOf(cond.valor) !== -1);
     case 'contains_any': return Array.isArray(v) && Array.isArray(cond.valor) &&
                                 cond.valor.some(x => v.indexOf(x) !== -1);
+    case 'not_contains_any': return !(Array.isArray(v) && Array.isArray(cond.valor) &&
+                                cond.valor.some(x => v.indexOf(x) !== -1));
     case 'text_contains_any': return _textContainsAny(v, cond.valor);
     default: return true;
   }

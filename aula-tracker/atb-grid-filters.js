@@ -93,7 +93,7 @@ export function applyGridFilters(query, where, params) {
 // ════════════════════════════════════════════════════════════════════════════
 //  REGISTRO DE CAMPOS p/ COLUNAS (campo → expressão SQL + tipo de render)
 // ════════════════════════════════════════════════════════════════════════════
-const COLS = {
+export const COLS = {
   // numéricos
   sofa:            { label: 'SOFA',            grupo: 'Números',  expr: 'f.sofa',            tipo: 'num' },
   saps3:           { label: 'SAPS3',           grupo: 'Números',  expr: 'a.saps3',           tipo: 'num' },

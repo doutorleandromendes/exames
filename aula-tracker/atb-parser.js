@@ -58,6 +58,13 @@ const toMatrix = (v) => {
 
 // ── Parser JotForm (polling / webhook) ───────────────────────────────────
 
+export function montarLinkExames(pron, dn) {
+  const p = String(pron == null ? '' : pron).replace(/\D/g, '');
+  const d = String(dn == null ? '' : dn).replace(/\D/g, '');
+  if (!p || d.length < 8) return null;
+  return `https://doutorleandromendes.github.io/exames/autologin.html?user=p${p}&pass=${d.slice(6,8)+d.slice(4,6)+d.slice(0,4)}`;
+}
+
 export function parseAnswers(answers, formId) {
   const get = (qid) => answers[String(qid)]?.answer ?? null;
   const str = (qid) => {
@@ -88,9 +95,7 @@ export function parseAnswers(answers, formId) {
 
   const pron = String(str(107) || '').replace(/\D/g, '') || null; // prontuário: só dígitos
   const dn   = toDate(get(14));
-  const link_exames = (pron && dn)
-    ? `https://doutorleandromendes.github.io/exames/autologin.html?user=p${pron}&pass=${dn.replace(/-/g,'').slice(6,8)+dn.replace(/-/g,'').slice(4,6)+dn.replace(/-/g,'').slice(0,4)}`
-    : null;
+  const link_exames = montarLinkExames(pron, dn);
   const nomePac  = paciente_nome_raw;
   const link_labs = nomePac
     ? `http://localhost:3000/api/buscar?nome=${String(nomePac).trim().replace(/\s+/g,"+")}`
@@ -284,9 +289,7 @@ export function parseFormPayload(d) {
 
   const pron = String(d.prontuario || '').replace(/\D/g, '') || null; // prontuário: só dígitos
   const dn   = toD(d.pac_dn);
-  const link_exames = (pron && dn)
-    ? `https://doutorleandromendes.github.io/exames/autologin.html?user=p${pron}&pass=${dn.replace(/-/g,'').slice(6,8)+dn.replace(/-/g,'').slice(4,6)+dn.replace(/-/g,'').slice(0,4)}`
-    : null;
+  const link_exames = montarLinkExames(pron, dn);
   const link_labs = paciente_nome_raw
     ? `http://localhost:3000/api/buscar?nome=${String(paciente_nome_raw).trim().replace(/\s+/g,"+")}`
     : null;

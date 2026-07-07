@@ -97,6 +97,15 @@
       props.required ? e('span', { className: 'req' }, '*') : null);
   }
 
+  // Campo é obrigatório agora? — fixo (required) OU condicional satisfeito
+  // (requiredCond). Espelha a validação real (linha ~915) para o asterisco
+  // aparecer/sumir em tempo real conforme o preenchimento.
+  function _ehObrigatorio(f, valores) {
+    if (f.required) return true;
+    if (f.requiredCond) return avaliaCond(f.requiredCond, valores || {});
+    return false;
+  }
+
   function CampoTexto(p) {
     var f = p.campo;
     function onCh(ev) {
@@ -105,7 +114,7 @@
       p.set(f.key, v);
     }
     return e('div', { className: 'campo' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('input', {
         type: f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text'),
         className: p.erro ? 'erro' : '', value: p.valor || '',
@@ -138,7 +147,7 @@
       taProps.onDragOver = function (ev) { ev.preventDefault(); };
     }
     return e('div', { className: 'campo' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('textarea', taProps),
       f.bloquearColar ? e('div', { className: 'dica' },
         'Para garantir o registro real, este campo não aceita colar — digite a história clínica.') : null,
@@ -150,7 +159,7 @@
   function CampoSelect(p) {
     var f = p.campo;
     return e('div', { className: 'campo' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('div', { className: 'sel-wrap' },
         e('select', {
           className: p.erro ? 'erro' : '', value: p.valor || '',
@@ -169,7 +178,7 @@
   function CampoRadio(p) {
     var f = p.campo;
     return e('div', { className: 'campo' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('div', { className: 'opcoes' },
         (f.options || []).map(function (o) {
           var on = p.valor === o;
@@ -206,7 +215,7 @@
       p.set(f.key, novo);
     }
     return e('div', { className: 'campo' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('div', { className: 'opcoes' },
         (f.options || []).map(function (o) {
           var on = arr.indexOf(o) !== -1;
@@ -249,7 +258,7 @@
     // Modo linhasFixas: render direto, uma linha por item fixo
     if (f.linhasFixas) {
       return e('div', { className: 'campo matriz' },
-        e(Rotulo, { texto: f.label, required: f.required }),
+        e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
         f.linhasFixas.map(function (nome, i) {
           var row = linhas[i] || {};
           return e('div', { key: nome, className: 'check-linha' },
@@ -279,7 +288,7 @@
     // Modo sincronizaCom: uma linha por droga selecionada (read-only na 1ª col)
     if (sincro) {
       return e('div', { className: 'campo matriz' },
-        e(Rotulo, { texto: f.label, required: f.required }),
+        e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
         sincro.length === 0
           ? e('div', { className: 'dica' }, 'Selecione os antimicrobianos acima para preencher a posologia.')
           : sincro.map(function (droga, i) {
@@ -310,7 +319,7 @@
 
     // Modo livre: cartões add/remove
     return e('div', { className: 'campo matriz' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       linhas.map(function (row, i) {
         return e('div', { key: i, className: 'cartao' },
           e('div', { className: 'cartao-cab' },
@@ -415,7 +424,7 @@
     var declarado = p.valores['_declaracao'] === true;
 
     return e('div', { className: 'campo' },
-      e(Rotulo, { texto: f.label, required: f.required }),
+      e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('input', {
         type: 'text', className: (p.erro || (st && st.status === 'invalido')) ? 'erro' : '',
         value: p.valor || '', placeholder: 'Digite o CRM (somente números)',

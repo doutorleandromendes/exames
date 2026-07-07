@@ -370,7 +370,8 @@ function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds, complexo, raw
         <select class="op" name="op_${i}" onchange="syncVal(${i})">${opSel}</select>
         <input class="val" name="val_${i}" value="${esc(v)}" list="dl_${i}" placeholder="valor (vários: separe por vírgula)">
         <datalist id="dl_${i}"></datalist>
-      </div>`);
+      </div>
+      <div id="av_${i}" class="nota" style="display:none;color:#9a6700;margin:-6px 0 8px"></div>`);
   }
   const CAMPOS_JSON = JSON.stringify(campos.reduce((m, c) => (m[c.key] = c.options, m), {}));
   const OPVALOR_JSON = JSON.stringify(OP_VALOR);
@@ -405,6 +406,13 @@ function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds, complexo, raw
         var modo=OPVALOR[op]||'um';
         if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
         else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+        var av=document.getElementById('av_'+i);
+        if(av){
+          if(ops.length>0 && op==='text_contains_any'){
+            av.style.display='block';
+            av.innerHTML='⚠ "'+campo+'" tem opções fixas. "texto contém algum de" casa por pedaço de palavra — "UTI" também casaria "UTI Neo / Infantil". Para valor exato, use <b>está entre</b>.';
+          } else { av.style.display='none'; av.innerHTML=''; }
+        }
       }
       function syncTipo(){
         // seção só tem visibilidade

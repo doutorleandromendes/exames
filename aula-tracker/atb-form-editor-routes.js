@@ -255,6 +255,14 @@ function paginaEditor(inst, def, boot, safe) {
     .fe-msg.err{color:#9a3a2d;white-space:pre-line}
     .fe-msg.ok{color:#0f7a4a;font-weight:600}
     .fe-tag{font-size:10px;border:1px solid var(--bd);border-radius:6px;padding:1px 6px;color:var(--mut)}
+    /* preview ao vivo */
+    #fe-pv{display:none;position:fixed;top:0;right:0;bottom:0;width:46vw;z-index:50;
+      background:#fff;border-left:2px solid var(--pri);box-shadow:-4px 0 14px rgba(0,0,0,.08)}
+    #fe-pv iframe{width:100%;height:100%;border:0}
+    body.fe-pv-on #fe-pv{display:block}
+    body.fe-pv-on .card, body.fe-pv-on #fe-app, body.fe-pv-on .fe-save{margin-right:47vw}
+    @media (max-width: 900px){ body.fe-pv-on #fe-pv{width:100vw}
+      body.fe-pv-on .card, body.fe-pv-on #fe-app, body.fe-pv-on .fe-save{margin-right:0} }
   </style>
 
   <div class="card">
@@ -299,11 +307,14 @@ function paginaEditor(inst, def, boot, safe) {
         <span class="fe-msg" id="fe-msg"></span>
       </div>
       <div style="display:flex;gap:10px;align-items:center">
+        <button type="button" class="fe-mini" id="fe-pv-btn" onclick="fePreview()">👁 Preview ao vivo</button>
         <button type="button" class="fe-mini" onclick="feAddSecao()">+ Seção</button>
         <button type="button" id="fe-salvar" onclick="feSalvar()">Salvar nova versão</button>
       </div>
     </div>
   </div>
+
+  <div id="fe-pv"></div>
 
   <script>window.__FE_BOOT = ${boot};</script>
   <script>${clienteJS()}</script>`;
@@ -331,7 +342,40 @@ function clienteJS() {
   var OPS_SEM_VALOR = ['filled','not_filled'];
 
   function esc(s){ var d=document.createElement('div'); d.textContent = (s==null?'':String(s)); return d.innerHTML; }
-  function marcaDirty(){ DIRTY = true; document.getElementById('fe-dirty').style.display='inline'; msg(''); }
+  function marcaDirty(){ DIRTY = true; document.getElementById('fe-dirty').style.display='inline'; msg(''); pvSync(); }
+
+  // ── preview ao vivo (iframe da ficha real em ?preview=1) ───────────────────
+  var PV = { on:false, ready:false, timer:null };
+  function pvFrame(){ var h=document.getElementById('fe-pv'); return h ? h.querySelector('iframe') : null; }
+  function pvEnvia(){
+    var f = pvFrame(); if (!f || !f.contentWindow) return;
+    try { f.contentWindow.postMessage({ tipo:'atb-preview-schema', schema: DEF }, window.location.origin); } catch(e){}
+  }
+  function pvSync(){
+    if (!PV.on || !PV.ready) return;
+    clearTimeout(PV.timer); PV.timer = setTimeout(pvEnvia, 250);
+  }
+  window.addEventListener('message', function(ev){
+    if (ev.origin !== window.location.origin) return;
+    if (ev.data && ev.data.tipo === 'atb-preview-ready'){ PV.ready = true; pvEnvia(); }
+  });
+  window.fePreview = function(){
+    PV.on = !PV.on;
+    var host = document.getElementById('fe-pv'), btn = document.getElementById('fe-pv-btn');
+    if (PV.on){
+      document.body.classList.add('fe-pv-on');
+      btn.textContent = '✕ Fechar preview';
+      if (!pvFrame()){
+        PV.ready = false;
+        var f = document.createElement('iframe');
+        f.src = '/atb/form?inst=' + encodeURIComponent(B.inst) + '&preview=1';
+        host.appendChild(f);
+      } else { pvEnvia(); }
+    } else {
+      document.body.classList.remove('fe-pv-on');
+      btn.textContent = '👁 Preview ao vivo';
+    }
+  };
   function msg(t, cls){ var m=document.getElementById('fe-msg'); m.textContent=t||''; m.className='fe-msg '+(cls||''); }
   window.addEventListener('beforeunload', function(e){ if (DIRTY){ e.preventDefault(); e.returnValue=''; } });
 

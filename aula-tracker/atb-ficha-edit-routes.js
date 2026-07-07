@@ -21,6 +21,7 @@
 
 import { espelharEdicao } from './atb-jotform-mirror.js';
 import { getFormSchema }  from './atb-form-schema.js';
+import { montarLinkExames } from './atb-parser.js';
 
 const _safe = s => String(s ?? '').replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -152,6 +153,16 @@ export function registerFichaEditRoutes(app, pool, adminRequired) {
     }
     if (mexidas.includes('paciente_nome')) {
       sets.push(`paciente_nome_raw = $${i++}`); vals.push(campos['paciente_nome'] || null);
+    }
+
+    // Regenera o link do PACS se DN OU prontuário mudou (o link embute os dois).
+    if (mexidas.includes('paciente_dn') || mexidas.includes('prontuario')) {
+      const { rows: [atual] } = await pool.query(
+        `SELECT to_char(paciente_dn,'YYYY-MM-DD') AS dn, prontuario FROM atb_fichas WHERE id=$1`, [id]);
+      const dnFinal   = mexidas.includes('paciente_dn')  ? campos['paciente_dn']  : (atual && atual.dn);
+      const pronFinal = mexidas.includes('prontuario')   ? campos['prontuario']   : (atual && atual.prontuario);
+      sets.push(`link_exames = $${i++}`); vals.push(montarLinkExames(pronFinal, dnFinal));
+      mexidas.push('link_exames');
     }
 
     sets.push(`editado_por = $${i++}`); vals.push(req.user?.id || null);

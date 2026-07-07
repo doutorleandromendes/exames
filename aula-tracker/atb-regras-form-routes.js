@@ -111,14 +111,16 @@ export function validarObrigatoriosServidor(schema, dados) {
 
 // ── Catálogo de operadores ───────────────────────────────────────────────────
 const OPS = [
-  { op: 'eq',                label: 'é igual a',               valor: 'um' },
-  { op: 'neq',               label: 'é diferente de',          valor: 'um' },
-  { op: 'contains',          label: 'contém (lista)',          valor: 'um' },
-  { op: 'contains_any',      label: 'contém algum de (lista)', valor: 'varios' },
-  { op: 'in',                label: 'está entre',              valor: 'varios' },
-  { op: 'text_contains_any', label: 'texto contém algum de',   valor: 'varios' },
-  { op: 'filled',            label: 'está preenchido',         valor: 'nenhum' },
-  { op: 'not_filled',        label: 'está vazio',              valor: 'nenhum' },
+  { op: 'eq',                label: 'é igual a',                    valor: 'um' },
+  { op: 'neq',               label: 'é diferente de',               valor: 'um' },
+  { op: 'contains',          label: 'contém (lista)',               valor: 'um' },
+  { op: 'not_contains',      label: 'não contém (lista)',           valor: 'um' },
+  { op: 'contains_any',      label: 'contém algum de (lista)',      valor: 'varios' },
+  { op: 'not_contains_any',  label: 'não contém nenhum de (lista)', valor: 'varios' },
+  { op: 'in',                label: 'está entre',                   valor: 'varios' },
+  { op: 'text_contains_any', label: 'texto contém algum de',        valor: 'varios' },
+  { op: 'filled',            label: 'está preenchido',              valor: 'nenhum' },
+  { op: 'not_filled',        label: 'está vazio',                   valor: 'nenhum' },
 ];
 const OP_LABEL = Object.fromEntries(OPS.map(o => [o.op, o.label]));
 const OP_VALOR = Object.fromEntries(OPS.map(o => [o.op, o.valor])); // 'um' | 'varios' | 'nenhum'

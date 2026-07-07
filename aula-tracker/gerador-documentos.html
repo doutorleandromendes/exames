@@ -3118,13 +3118,13 @@ function docReceituario(){
   const blocks=[pacLine()];
   if(S.rx.continuo)blocks.push(`<p class="meta">Uso contínuo</p>`);
   blocks.push(...rxItemBlocks());
-  return {title:"Receituário",blocks};
+  return {title:"Receituário",blocks,fit:true};
 }
 function docControle(via){
   const blocks=[pacLine(),S.pacEnd?`<p class="endr">Endereço: ${esc(S.pacEnd)}</p>`:`<p class="endr empty">Endereço: ____________________________</p>`];
   if(S.rx.continuo)blocks.push(`<p class="meta">Uso contínuo</p>`);
   blocks.push(...rxItemBlocks());
-  return {title:"Receituário Especial",via,blocks,boxes:legalBoxes(),noPush:true};
+  return {title:"Receituário Especial",via,blocks,boxes:legalBoxes(),noPush:true,fit:true};
 }
 function pedNomes(){
   const g={lab:[],esp:[],img:[]};
@@ -3142,7 +3142,7 @@ function docPedido(){
   const cidTxt=S.ped.cid?`${esc(S.ped.cid)}${S.ped.cidDesc?` — ${esc(S.ped.cidDesc)}`:""}`:"";
   if(S.ped.indicacao)blocks.push(`<p class="just">Justificativa: ${esc(S.ped.indicacao)}${cidTxt?` (CID ${cidTxt})`:""}</p>`);
   else if(cidTxt)blocks.push(`<p class="just">CID ${cidTxt}</p>`);
-  return {title:"Solicitação de Exames",blocks};
+  return {title:"Solicitação de Exames",blocks,fit:true};
 }
 function paraBlocks(text,emptyMsg){
   if(!text||!text.trim())return [`<div class="body"><span class="empty">${emptyMsg}</span></div>`];
@@ -3152,7 +3152,7 @@ function docRelatorio(){
   return {title:esc(S.rel.titulo||"Relatório Médico"),blocks:[pacLine(),...paraBlocks(S.rel.corpo,"Escreva o texto no painel ao lado.")]};
 }
 function docAtestado(){
-  return {title:"Atestado Médico",blocks:paraBlocks(S.ate.texto,"Use “Gerar texto automático” no painel.")};
+  return {title:"Atestado Médico",blocks:paraBlocks(S.ate.texto,"Use “Gerar texto automático” no painel."),fit:true};
 }
 function buildPages(){
   if(S.doc==="receituario"&&S.rx.tipo==="controle")
@@ -3179,6 +3179,21 @@ function layoutSpec(spec){
   const _sgap=S.paper==="A5"?5:9, _bgap=S.paper==="A5"?3:5;
   const signH=measOne(signBlock())+_sgap*PXMM;
   const boxesH=spec.boxes?measOne(spec.boxes)+_bgap*PXMM:0;
+  // ==== auto-ajuste: encolhe (zoom) p/ caber em 1 página, só quando o conteúdo excede ====
+  if(spec.fit){
+    mbEl.innerHTML=spec.blocks.join(""); const contentH=mbEl.offsetHeight; mbEl.innerHTML="";
+    const need=contentH+signH+boxesH, target=avail1*0.985, FLOOR=0.66;
+    if(need>target){
+      const fit=target/need;
+      if(fit>=FLOOR){
+        const title=`${spec.via?`<div class="via">${esc(spec.via)}</div>`:""}<div class="dtitle">${spec.title}</div>`;
+        const inner=`${title}<div class="fitwrap" style="zoom:${fit.toFixed(3)}"><div class="docbody" style="min-height:0">${spec.blocks.join("")}</div>${signBlock()}${spec.boxes||""}</div>`;
+        return [{inner,first:true}];
+      }
+      // fit<FLOOR: conteúdo grande demais p/ 1 página — cai na paginação normal abaixo
+    }
+    // need<=target: cabe sem encolher — a paginação normal produz 1 página
+  }
   // empacota blocos
   mbEl.innerHTML="";
   const chunks=[]; let cur=[]; let avail=avail1;

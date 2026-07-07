@@ -223,7 +223,9 @@ function paginaEditorAvancado(schema, { alvo, tipo, raw, campos }) {
     </form>`);
 }
 
-const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade' };
+const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade', ambos: 'Visibilidade + obrigatoriedade' };
+// tipos "físicos" que um tipo de UI escreve no schema
+const TIPOS_ALVO = { cond: ['cond'], requiredCond: ['requiredCond'], ambos: ['cond', 'requiredCond'] };
 
 function shell(titulo, body) {
   return `<!DOCTYPE html><html lang="pt-BR"><head>
@@ -282,8 +284,14 @@ function paginaLista(schema) {
     for (const c of (sec.campos || [])) {
       if (!c.key) continue;
       const alvoLabel = `<strong>${esc(c.label || c.key)}</strong><br><span class="nota">${esc(c.key)} · seção: ${esc(secaoTitulo(sec))}</span>`;
-      if (c.cond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'cond' }, alvoLabel, 'Visibilidade', '', descreverCond(c.cond, campos), true) + '</tr>');
-      if (c.requiredCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'requiredCond' }, alvoLabel, 'Obrigatoriedade', 'ob', descreverCond(c.requiredCond, campos), true) + '</tr>');
+      const parIdentico = c.cond && c.requiredCond
+        && JSON.stringify(c.cond) === JSON.stringify(c.requiredCond);
+      if (parIdentico) {
+        linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'ambos' }, alvoLabel, 'Visib. + obrigat.', 'ob', descreverCond(c.cond, campos), true) + '</tr>');
+      } else {
+        if (c.cond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'cond' }, alvoLabel, 'Visibilidade', '', descreverCond(c.cond, campos), true) + '</tr>');
+        if (c.requiredCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'requiredCond' }, alvoLabel, 'Obrigatoriedade', 'ob', descreverCond(c.requiredCond, campos), true) + '</tr>');
+      }
       if (c.required === true) {
         const nota = c.minChars ? `mínimo de ${c.minChars} caracteres` : 'preenchimento exigido';
         linhas.push(`
@@ -542,13 +550,19 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
     try {
       const schema = await getFormSchema(pool, inst);
       const alvo = req.query.alvo ? String(req.query.alvo) : '';
-      let tipo = req.query.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
+      let tipo = ['requiredCond', 'ambos'].includes(req.query.tipo) ? req.query.tipo : 'cond';
       let juncao = 'all', conds = [], escopo = 'campo', complexo = false, raw = null;
       if (alvo) {
         const r = resolverAlvo(schema, alvo);
         escopo = r.escopo;
         if (escopo === 'secao') tipo = 'cond';
-        const ex = extrairRegra(r.obj ? r.obj[tipo] : null);
+        // se cond e requiredCond forem idênticas, oferece edição unificada
+        if (tipo !== 'ambos' && r.obj && r.obj.cond && r.obj.requiredCond
+            && JSON.stringify(r.obj.cond) === JSON.stringify(r.obj.requiredCond)) {
+          tipo = 'ambos';
+        }
+        const tipoLeitura = tipo === 'ambos' ? 'cond' : tipo;   // ambos → lê de cond
+        const ex = extrairRegra(r.obj ? r.obj[tipoLeitura] : null);
         juncao = ex.juncao; conds = ex.conds; complexo = !!ex.complexo; raw = ex.raw || null;
       }
       res.send(paginaEditor(schema, { alvo, escopo, tipo, juncao, conds, complexo, raw }));
@@ -563,20 +577,23 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const schema = await getFormSchema(pool, inst);
       const r = resolverAlvo(schema, b.alvo);
       if (!r.obj) return res.status(400).send('Alvo não encontrado: ' + esc(b.alvo));
-      let tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
+      let tipo = ['requiredCond', 'ambos'].includes(b.tipo) ? b.tipo : 'cond';
       if (r.escopo === 'secao') tipo = 'cond'; // seção só tem visibilidade
+      const alvos = TIPOS_ALVO[tipo] || ['cond'];
       if (b.modo === 'json') {
         const txt = String(b.cond_json || '').trim();
-        if (!txt) { delete r.obj[tipo]; }
+        if (!txt) { alvos.forEach(t => delete r.obj[t]); }
         else {
           let parsed;
           try { parsed = JSON.parse(txt); }
           catch (e2) { return res.status(400).send('JSON inválido: ' + esc(e2.message) + ' — <a href="javascript:history.back()">voltar</a>'); }
-          if (parsed && typeof parsed === 'object') r.obj[tipo] = parsed; else delete r.obj[tipo];
+          if (parsed && typeof parsed === 'object') alvos.forEach(t => { r.obj[t] = parsed; });
+          else alvos.forEach(t => delete r.obj[t]);
         }
       } else {
         const cond = montarCond(b);
-        if (cond) r.obj[tipo] = cond; else delete r.obj[tipo];
+        if (cond) alvos.forEach(t => { r.obj[t] = cond; });
+        else alvos.forEach(t => delete r.obj[t]);
       }
       await saveFormSchema(pool, inst, schema, req.user?.id || null);
       res.redirect('/atb/admin/regras-form');
@@ -589,9 +606,10 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const b = req.body || {};
       const schema = await getFormSchema(pool, inst);
       const r = resolverAlvo(schema, b.alvo);
-      let tipo = b.tipo === 'requiredCond' ? 'requiredCond' : 'cond';
+      let tipo = ['requiredCond', 'ambos'].includes(b.tipo) ? b.tipo : 'cond';
       if (r.escopo === 'secao') tipo = 'cond';
-      if (r.obj) { delete r.obj[tipo]; await saveFormSchema(pool, inst, schema, req.user?.id || null); }
+      const alvos = TIPOS_ALVO[tipo] || ['cond'];
+      if (r.obj) { alvos.forEach(t => delete r.obj[t]); await saveFormSchema(pool, inst, schema, req.user?.id || null); }
       res.redirect('/atb/admin/regras-form');
     } catch (e) { res.status(500).send('Erro ao excluir: ' + esc(e.message)); }
   });

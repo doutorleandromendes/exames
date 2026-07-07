@@ -29,6 +29,7 @@ import { ensureHemoSchema, registerHemoRoutes } from './atb-hemocultura-routes.j
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
+import { registerFormEditorRoutes } from './atb-form-editor-routes.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
 import { registerRegrasFormRoutes, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
@@ -96,6 +97,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerConsultaRoutes(app, pool);
   ensureHealthcheckTable(pool).then(() => startHealthcheckSchedule(pool)).catch(e => console.error('[atb] healthcheck:', e.message));
   registerHealthcheckRoutes(app, pool, adminRequired);
+  registerFormEditorRoutes(app, pool, adminRequired, renderShell);
   ensureRegrasCheckTable(pool).then(() => startRegrasCheckSchedule(pool)).catch(e => console.error('[atb] regras-check:', e.message));
   registerRegrasCheckRoutes(app, pool, adminRequired);
   registerNomesRoutes(app, pool, adminRequired);
@@ -1313,7 +1315,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
               <h1 style="margin:0">Editor do formulário</h1>
               <p class="mut" style="margin:4px 0 0">${safe(def.titulo || '')} · ${safe(inst)} · versão ${def.versao || 1}</p>
             </div>
-            <a href="/atb/admin">← Dashboard</a>
+            <div class="right">
+              <a href="/atb/admin/form/estrutura?inst=${encodeURIComponent(inst)}">Editor estrutural</a>
+              <a href="/atb/admin">← Dashboard</a>
+            </div>
           </div>
           <p class="mut" style="font-size:13px;margin-top:12px">
             Edite as opções dos campos de seleção. Ao salvar, uma nova versão é criada

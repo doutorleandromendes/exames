@@ -255,7 +255,12 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '') {
 
   // acessos
   const links = [];
-  if (f.link_exames) links.push(`<a class="acesso" target="_blank" rel="noopener" href="${s(f.link_exames)}">🔗 Exames / imagens</a>`);
+  // Exames de imagem: SCMI via rota interna (atb-pacs-scmi.js → Medilab)
+  if ((f.instituicao || '') === 'SCMI') {
+    links.push(`<a class="acesso" target="_blank" rel="noopener" href="/atb/scmi/pacs?ficha=${f.id}">🔗 Exames / imagens</a>`);
+  } else if (f.link_exames) {
+    links.push(`<a class="acesso" target="_blank" rel="noopener" href="${s(f.link_exames)}">🔗 Exames / imagens</a>`);
+  }
   // SCMI: labs via rota interna (atb-lab-scmi.js); ignora link_labs gravado (LIS HUSF)
   if ((f.instituicao || '') === 'SCMI') {
     links.push(`<a class="acesso" target="_blank" rel="noopener" href="/atb/scmi/lab?ficha=${f.id}">🔬 Resultados (lab)</a>`);

@@ -31,6 +31,7 @@ import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 import { registerFormEditorRoutes } from './atb-form-editor-routes.js';
 import { registerLabScmiRoutes } from './atb-lab-scmi.js';
+import { registerPacsScmiRoutes } from './atb-pacs-scmi.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
 import { registerRegrasFormRoutes, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
@@ -104,6 +105,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerNomesRoutes(app, pool, adminRequired);
   registerCulturasRoutes(app, pool, adminRequired);
   registerLabScmiRoutes(app, pool, adminRequired);
+  registerPacsScmiRoutes(app, pool, adminRequired);
   registerPacsNomeRoutes(app, pool, adminRequired);
   registerHemoRoutes(app, pool, adminRequired);
   registerScihAcessoRoutes(app, pool, adminRequired);
@@ -607,8 +609,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
                 · Prontuário ${safe(f.prontuario||'—')}
                 · Atend. ${safe(f.atendimento||'—')}
               </p>
-              ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" style="font-size:12px">🔗 Exames</a>`:''}
-              ${f.link_labs?` · <a href="${safe(f.link_labs)}" target="_blank" style="font-size:12px">🔬 LIS</a>`:''}
+              ${f.instituicao==='SCMI'?`<a href="/atb/scmi/pacs?ficha=${id}" target="_blank" style="font-size:12px">🔗 Exames</a>`:(f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" style="font-size:12px">🔗 Exames</a>`:'')}
+              ${f.instituicao==='SCMI'?` · <a href="/atb/scmi/lab?ficha=${id}" target="_blank" style="font-size:12px">🔬 Lab</a>`:(f.link_labs?` · <a href="${safe(f.link_labs)}" target="_blank" style="font-size:12px">🔬 LIS</a>`:'')}
             </div>
             <a href="/atb/admin/complementar/${id}" style="background:#00469e;color:#fff;padding:6px 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;margin-right:12px">+ Complementar dados</a>
             <a href="/atb/admin/grid">← Grade</a>
@@ -924,6 +926,19 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
                f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,f.retrospectiva,
                f.link_exames, f.link_labs, f.data_referencia, f.jotform_created_at, f.created_at,
                i.sigla AS instituicao, np.nome_pacs_norm AS _pacs_norm,
+               EXISTS(SELECT 1 FROM atb_culturas c WHERE
+                   c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+                   AND ( (COALESCE(f.prontuario,'') <> '' AND c.prontuario = f.prontuario)
+                        OR (COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento) )
+                   AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
+                   AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')) AS _tem_cult,
+               EXISTS(SELECT 1 FROM atb_culturas c WHERE
+                   c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+                   AND ( (COALESCE(f.prontuario,'') <> '' AND c.prontuario = f.prontuario)
+                        OR (COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento) )
+                   AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
+                   AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')
+                   AND c.resistencia IS NOT NULL AND c.resistencia <> '') AS _cult_mr,
                a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data,
                ${extraSelectSql(cols)}(SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='pdf')    AS n_pdf,
                (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='imagem') AS n_img
@@ -949,7 +964,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         return `<tr data-ficha="${f.id}"${temParecer?' class="com-parecer"':''}>
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
-            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}${_divPacs?'<span title="Nome diverge do PACS — abra o card para corrigir" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#a32d2d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">≠PACS</span>':''}
+            <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}${_divPacs?'<span title="Nome diverge do PACS — abra o card para corrigir" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#a32d2d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">≠PACS</span>':''}${f._tem_cult?(f._cult_mr?'<span title="Cultura multirresistente (janela 30d/5d)" style="display:inline-block;margin-left:6px;font-size:11px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:1px 5px;vertical-align:middle">🦠 MR</span>':'<span title="Cultura positiva (janela 30d/5d)" style="margin-left:6px;font-size:14px;vertical-align:middle">🦠</span>'):''}
             <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>
@@ -970,7 +985,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <td class="edit"><input data-field="desfecho_data" type="date" value="${dd}" style="width:120px"></td>
           ${renderExtraCells(f, cols, safe)}
           <td style="text-align:center;white-space:nowrap">
-            ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" title="Exames">🔗</a>`:''}
+            ${f.instituicao==='SCMI'?`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" title="Exames / imagens">🔗</a>`:(f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" title="Exames">🔗</a>`:'')}
             ${f.instituicao==='SCMI'?`<a href="/atb/scmi/lab?ficha=${f.id}" target="_blank" title="Resultados lab" style="margin-left:3px">🔬</a>`:(f.link_labs?`<a href="${safe(f.link_labs)}" target="_blank" title="LIS" style="margin-left:3px">🔬</a>`:'')}
           </td>
           <td><span class="saved">✓</span></td>

@@ -93,9 +93,12 @@ async function fetchJar(jar, url, opts = {}, maxRedirs = 6) {
 }
 
 // ── Login ────────────────────────────────────────────────────────────────────
-// O form de login posta em /auth com loginUsuario/loginSenha (+ hidden action e
-// g-recaptcha-response vazio). Sucesso = não voltar para /login e ter cookie.
-
+// Contrato do login (confirmado por inspeção 2026-07-08):
+// O portal trata /auth em modo AJAX quando recebe X-Requested-With: XMLHttpRequest
+// — responde HTTP 200 com JSON `[{"status":"1"}]` no sucesso (sem campo `falha`),
+// ou `[{"falha":"T","status":"0","msg":"..."}]` no erro. É NESSE POST que a sessão
+// é estabelecida (não há redirect no modo AJAX). Sem o header, o servidor
+// responde com 302 (fluxo de form nativo) — evitamos esse caminho.
 async function fazerLogin() {
   const senha = senhaEnv();
   if (!senha) throw new Error('SCMI_MEDILAB_SENHA não configurada');
@@ -115,22 +118,27 @@ async function fazerLogin() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Requested-With': 'XMLHttpRequest',   // ativa o modo AJAX → JSON de status
       'Origin': BASE_URL,
       'Referer': BASE_URL + '/login',
     },
     body: dados.toString(),
   });
 
-  const urlFinal = String(r.urlFinal || '');
-  if (/\/login(\?|$)/.test(urlFinal)) {
-    throw new Error('Login recusado (voltou para /login — credencial ou CAPTCHA)');
+  // Resposta esperada: JSON [{status:"1"}] (ok) ou [{falha:"T",status:"0",msg}] (erro)
+  let obj = null;
+  try {
+    const txt = await r.text();
+    const j = JSON.parse(txt);
+    obj = Array.isArray(j) ? j[0] : j;
+  } catch {
+    throw new Error(`Login: resposta inesperada de /auth (HTTP ${r.status})`);
   }
-  // Sanidade: /exames deve responder autenticado
-  const rc = await fetchJar(jar, BASE_URL + '/exames');
-  const ctc = rc.headers.get('content-type') || '';
-  const htmlc = ctc.includes('text/html') ? await rc.text() : '';
-  if (/type\s*=\s*["']?password/i.test(htmlc) && /loginSenha/i.test(htmlc)) {
-    throw new Error('Sessão não autenticada (/exames devolveu tela de login)');
+
+  const ok = obj && (String(obj.status) === '1') && (obj.falha == null || obj.falha === 'F');
+  if (!ok) {
+    const msg = (obj && obj.msg) ? String(obj.msg) : 'credencial recusada';
+    throw new Error(`Login recusado pelo Medilab: ${msg}`);
   }
   return jar;
 }

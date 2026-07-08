@@ -4,7 +4,7 @@
 // inspeção (2026-07-08):
 //   • Login:  POST /auth   campos loginUsuario / loginSenha  → cookie de sessão
 //             (o g-recaptcha-response é vestigial: sem script/sitekey no portal)
-//   • Busca:  POST /lista_laudos  (JSON)
+//   • Busca:  POST /lista_laudos  (form-urlencoded — NÃO json)
 //               { order, limit, offset, data_inicio, data_final, estado:"todos",
 //                 tipo_filtro:"NOMEPACIENTE", filtro:<NOME>, filtroFiliais:"NONE" }
 //             → { result:"ok", total, rows:[ {nome, patientID, dataNasc, data,
@@ -161,20 +161,29 @@ function semAcentos(s) {
 }
 
 async function listaLaudos(jar, nome, dataIni, dataFim) {
+  // IMPORTANTE: o /lista_laudos só aplica o filtro por nome quando o corpo vem
+  // FORM-URLENCODED. Com application/json o servidor ignora o filtro e responde
+  // total geral com rows:[] (confirmado por inspeção 2026-07-08).
+  const params = new URLSearchParams();
+  params.set('order', 'DESC');
+  params.set('limit', String(MAX_LINHAS));
+  params.set('offset', '0');
+  params.set('data_inicio', dataIni);
+  params.set('data_final', dataFim);
+  params.set('estado', 'todos');
+  params.set('tipo_filtro', 'NOMEPACIENTE');
+  params.set('filtro', nome);
+  params.set('filtroFiliais', 'NONE');
+
   const res = await fetchJar(jar, `${BASE_URL}/lista_laudos`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
       'X-Requested-With': 'XMLHttpRequest',
       'Origin': BASE_URL,
       'Referer': `${BASE_URL}/exames`,
     },
-    body: JSON.stringify({
-      order: 'DESC', limit: MAX_LINHAS, offset: 0,
-      data_inicio: dataIni, data_final: dataFim,
-      estado: 'todos', tipo_filtro: 'NOMEPACIENTE',
-      filtro: nome, filtroFiliais: 'NONE',
-    }),
+    body: params.toString(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const ct = res.headers.get('content-type') || '';

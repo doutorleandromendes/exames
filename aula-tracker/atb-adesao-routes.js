@@ -84,6 +84,26 @@ export async function ensureAdesaoSchema(pool) {
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS adesao_troca_atb TEXT`);
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS adesao_por INTEGER REFERENCES users(id)`);
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS adesao_em TIMESTAMPTZ`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS atb_adesao_item (
+      ficha_id          BIGINT REFERENCES atb_fichas(id) ON DELETE CASCADE,
+      atb               TEXT,
+      adesao_desfecho   TEXT,
+      adesao_troca_atb  TEXT,
+      adesao_por        INTEGER REFERENCES users(id),
+      adesao_em         TIMESTAMPTZ,
+      PRIMARY KEY (ficha_id, atb)
+    )`);
+  // Migração (opção a): fichas de 1 ATB herdam a adesão já gravada por ficha;
+  // fichas multi-ATB começam do zero. Roda uma vez (só com a tabela vazia).
+  await pool.query(`
+    INSERT INTO atb_adesao_item (ficha_id, atb, adesao_desfecho, adesao_troca_atb, adesao_por, adesao_em)
+    SELECT f.id, (f.atb_solicitado->>0), f.adesao_desfecho, f.adesao_troca_atb, f.adesao_por, f.adesao_em
+      FROM atb_fichas f
+     WHERE f.adesao_desfecho IS NOT NULL
+       AND jsonb_typeof(f.atb_solicitado)='array' AND jsonb_array_length(f.atb_solicitado)=1
+       AND NOT EXISTS (SELECT 1 FROM atb_adesao_item)
+    ON CONFLICT (ficha_id, atb) DO NOTHING`);
 }
 
 // data de referência do parecer (emissão; cai pra data da ficha nas históricas)
@@ -108,7 +128,7 @@ function paginaAdesao(rows, mes, somentePendentes) {
   const c = { adesao: 0, nao_adesao: 0, alta: 0, obito: 0, revisar: 0, a_avaliar: 0, aguardando: 0 };
   rows.forEach(f => {
     const ehVelho = f.data_parecer && new Date(f.data_parecer) <= tresDiasAtras;
-    const cl = classificarAdesao(f.adesao_desfecho, _arr(f.atb_solicitado), f.adesao_troca_atb);
+    const cl = classificarAdesao(f.adesao_desfecho, [f.atb], f.adesao_troca_atb);
     if (cl === 'pendente') { if (ehVelho) c.a_avaliar++; else c.aguardando++; }
     else c[cl]++;
   });
@@ -120,7 +140,7 @@ function paginaAdesao(rows, mes, somentePendentes) {
     `<div class="ind ${destaque ? 'ind-d' : ''}" ${cor ? `style="border-left-color:${cor}"` : ''}>
        <div class="iv">${valor}</div><div class="il">${rotulo}</div></div>`;
   const painel = `
-    ${card('Negativos no mês', total, '#5f6368')}
+    ${card('Linhas (ATB) no mês', total, '#5f6368')}
     ${card('Adesão' + (taxa != null ? ` · ${taxa}%` : ''), c.adesao, '#1a8a5a', true)}
     ${card('Não adesão', c.nao_adesao, '#c0392b')}
     ${card('Alta &lt;72h', c.alta, '#d98a3d', true)}
@@ -135,10 +155,10 @@ function paginaAdesao(rows, mes, somentePendentes) {
 
   const linhas = rows.filter(f => !somentePendentes || !f.adesao_desfecho).map(f => {
     const nome = f.paciente_nome || f.paciente_nome_raw || '—';
-    const atb = _arr(f.atb_solicitado).join(', ');
+    const atb = f.atb || '';
     const ehTroca = f.adesao_desfecho === 'Suspenso_troca';
     const ehVelho = f.data_parecer && new Date(f.data_parecer) <= tresDiasAtras;
-    const cl = classificarAdesao(f.adesao_desfecho, _arr(f.atb_solicitado), f.adesao_troca_atb);
+    const cl = classificarAdesao(f.adesao_desfecho, [f.atb], f.adesao_troca_atb);
     let situacao;
     if (cl === 'pendente') situacao = ehVelho
       ? '<span class="sit" style="color:#5f6368">A avaliar</span>'
@@ -149,7 +169,7 @@ function paginaAdesao(rows, mes, somentePendentes) {
       ? `<td>${_selDesfecho(f.id, f.adesao_desfecho || '')}</td><td>${_selTroca(f.id, f.adesao_troca_atb || '', ehTroca)}</td>`
       : `<td colspan="2" class="aguard">aguardando 72h</td>`;
 
-    return `<tr data-id="${f.id}"${f.adesao_desfecho ? ' class="resolvida"' : ''}>
+    return `<tr data-id="${f.id}" data-atb="${_safe(atb)}"${f.adesao_desfecho ? ' class="resolvida"' : ''}>
       <td class="dt">${dt(f.data_parecer)}</td>
       <td><a href="/atb/admin/ficha/${f.id}" class="nome">${_safe(nome)}</a></td>
       <td>${_safe(f.prontuario || '')}</td>
@@ -224,12 +244,13 @@ function paginaAdesao(rows, mes, somentePendentes) {
   (function(){
     function salvar(tr){
       var id = tr.getAttribute('data-id');
+      var atb = tr.getAttribute('data-atb') || '';
       var desf = tr.querySelector('.ad-desf');
       var troca = tr.querySelector('.ad-troca');
       var ehTroca = desf.value === 'Suspenso_troca';
       troca.disabled = !ehTroca;
       if(!ehTroca) troca.value = '';
-      var body = new URLSearchParams({ desfecho: desf.value, troca: troca.value });
+      var body = new URLSearchParams({ atb: atb, desfecho: desf.value, troca: troca.value });
       fetch('/atb/admin/api/adesao/' + id, {
         method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: body.toString()
       }).then(function(r){ return r.json(); }).then(function(j){
@@ -257,14 +278,19 @@ async function buscarNegativosMes(pool, ano, m, inst) {
   }
   const { rows } = await pool.query(`
     SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
-           f.atb_solicitado, f.adesao_desfecho, f.adesao_troca_atb,
+           s.atb AS atb, ai.adesao_desfecho, ai.adesao_troca_atb,
            ${DATA_PARECER_SQL} AS data_parecer
     FROM atb_fichas f
+    CROSS JOIN LATERAL jsonb_array_elements_text(
+         CASE WHEN jsonb_typeof(f.atb_solicitado)='array' AND jsonb_array_length(f.atb_solicitado)>0
+              THEN f.atb_solicitado ELSE '[""]'::jsonb END
+       ) WITH ORDINALITY AS s(atb, ord)
+    LEFT JOIN atb_adesao_item ai ON ai.ficha_id=f.id AND ai.atb=s.atb
     WHERE jsonb_typeof(f.recomendacao_scih)='array'
       AND f.recomendacao_scih @> '["Não"]'::jsonb
       AND EXTRACT(YEAR FROM ${DATA_PARECER_SQL}) = $1
       AND EXTRACT(MONTH FROM ${DATA_PARECER_SQL}) = $2${escopo}
-    ORDER BY ${DATA_PARECER_SQL} DESC`, params);
+    ORDER BY ${DATA_PARECER_SQL} DESC, f.id, s.ord`, params);
   return rows;
 }
 
@@ -299,9 +325,9 @@ export function registerAdesaoRoutes(app, pool, adminRequired) {
       const dt = d => d ? new Date(d).toLocaleDateString('pt-BR') : '';
       const linhas = [['Data parecer', 'Paciente', 'Prontuário', 'Setor', 'ATB solicitado', 'Desfecho', 'ATB troca', 'Situação'].join(';')];
       rows.forEach(f => {
-        const cl = classificarAdesao(f.adesao_desfecho, _arr(f.atb_solicitado), f.adesao_troca_atb);
+        const cl = classificarAdesao(f.adesao_desfecho, [f.atb], f.adesao_troca_atb);
         linhas.push([dt(f.data_parecer), f.paciente_nome || f.paciente_nome_raw || '', f.prontuario || '',
-          f.setor || '', _arr(f.atb_solicitado).join(' + '), f.adesao_desfecho || '',
+          f.setor || '', f.atb || '', f.adesao_desfecho || '',
           f.adesao_troca_atb || '', ADESAO_LABEL[cl] || cl].map(esc).join(';'));
       });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -316,27 +342,39 @@ export function registerAdesaoRoutes(app, pool, adminRequired) {
   app.post('/atb/admin/api/adesao/:id', adminRequired, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
+      const atb = (req.body.atb || '').trim();
       let desfecho = (req.body.desfecho || '').trim();
       let troca = (req.body.troca || '').trim();
+      if (!atb) return res.status(400).json({ ok: false, error: 'atb obrigatório' });
       if (desfecho && !ADESAO_DESFECHOS.includes(desfecho)) return res.status(400).json({ ok: false, error: 'desfecho inválido' });
       if (troca && !ATB_TROCA.includes(troca)) return res.status(400).json({ ok: false, error: 'ATB de troca inválido' });
       if (desfecho !== 'Suspenso_troca') troca = '';  // troca só faz sentido em Suspenso_troca
 
-      // Escopo por instituição: em modo travado, não atualiza ficha de outro hospital.
+      // Valida ficha, escopo do tenant e que o ATB pertence à ficha.
       const inst = req.atbTenant;
-      const params = [desfecho || null, troca || null, req.user?.id || null, id];
-      let escopo = '';
-      if (inst) {
-        params.push(inst);
-        escopo = ` AND (instituicao_id = (SELECT id FROM atb_instituicoes WHERE sigla=$${params.length})`
-               + ` OR (instituicao_id IS NULL AND $${params.length}='HUSF'))`;
-      }
-      const r = await pool.query(`
-        UPDATE atb_fichas
-           SET adesao_desfecho = $1, adesao_troca_atb = $2, adesao_por = $3, adesao_em = now()
-         WHERE id = $4${escopo}`, params);
-      if (inst && r.rowCount === 0) return res.status(404).json({ ok: false, error: 'ficha não encontrada' });
+      const { rows: [f] } = await pool.query(
+        `SELECT instituicao_id, atb_solicitado,
+                (SELECT sigla FROM atb_instituicoes WHERE id=instituicao_id) AS sigla
+           FROM atb_fichas WHERE id=$1`, [id]);
+      if (!f) return res.status(404).json({ ok: false, error: 'ficha não encontrada' });
+      if (inst && !(f.sigla === inst || (f.instituicao_id === null && inst === 'HUSF')))
+        return res.status(404).json({ ok: false, error: 'ficha não encontrada' });
+      const solic = Array.isArray(f.atb_solicitado) ? f.atb_solicitado : [];
+      if (solic.length && solic.indexOf(atb) === -1)
+        return res.status(400).json({ ok: false, error: 'ATB não pertence à ficha' });
 
+      if (!desfecho) {
+        // limpar o desfecho remove o item (volta a pendente)
+        await pool.query(`DELETE FROM atb_adesao_item WHERE ficha_id=$1 AND atb=$2`, [id, atb]);
+      } else {
+        await pool.query(`
+          INSERT INTO atb_adesao_item (ficha_id, atb, adesao_desfecho, adesao_troca_atb, adesao_por, adesao_em)
+          VALUES ($1,$2,$3,$4,$5, now())
+          ON CONFLICT (ficha_id, atb) DO UPDATE SET
+            adesao_desfecho=EXCLUDED.adesao_desfecho, adesao_troca_atb=EXCLUDED.adesao_troca_atb,
+            adesao_por=EXCLUDED.adesao_por, adesao_em=now()`,
+          [id, atb, desfecho, troca || null, req.user?.id || null]);
+      }
       res.json({ ok: true });
     } catch (e) {
       console.error('[atb] adesao save error:', e.message);

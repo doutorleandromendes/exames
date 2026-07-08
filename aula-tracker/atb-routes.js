@@ -30,6 +30,7 @@ import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-ace
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
 import { registerFormEditorRoutes } from './atb-form-editor-routes.js';
+import { registerLabScmiRoutes } from './atb-lab-scmi.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
 import { registerRegrasFormRoutes, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
@@ -102,6 +103,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerRegrasCheckRoutes(app, pool, adminRequired);
   registerNomesRoutes(app, pool, adminRequired);
   registerCulturasRoutes(app, pool, adminRequired);
+  registerLabScmiRoutes(app, pool, adminRequired);
   registerPacsNomeRoutes(app, pool, adminRequired);
   registerHemoRoutes(app, pool, adminRequired);
   registerScihAcessoRoutes(app, pool, adminRequired);
@@ -217,7 +219,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       if (_faltas.length) {
         return res.status(400).json({ error: _faltas[0].msg, campos: _faltas.map(f => f.key) });
       }
-      const parsed = parseFormPayload(d);
+      const parsed = parseFormPayload(d, inst);
       // Modo dry-run: exercita validação + parse e retorna sem gravar (harness de testes).
       if (body.dryrun === true) {
         return res.json({ ok: true, dryrun: true, paciente: parsed.paciente_nome || null });
@@ -969,7 +971,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           ${renderExtraCells(f, cols, safe)}
           <td style="text-align:center;white-space:nowrap">
             ${f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" title="Exames">🔗</a>`:''}
-            ${f.link_labs?`<a href="${safe(f.link_labs)}" target="_blank" title="LIS" style="margin-left:3px">🔬</a>`:''}
+            ${f.instituicao==='SCMI'?`<a href="/atb/scmi/lab?ficha=${f.id}" target="_blank" title="Resultados lab" style="margin-left:3px">🔬</a>`:(f.link_labs?`<a href="${safe(f.link_labs)}" target="_blank" title="LIS" style="margin-left:3px">🔬</a>`:'')}
           </td>
           <td><span class="saved">✓</span></td>
         </tr>`;

@@ -256,7 +256,12 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '') {
   // acessos
   const links = [];
   if (f.link_exames) links.push(`<a class="acesso" target="_blank" rel="noopener" href="${s(f.link_exames)}">🔗 Exames / imagens</a>`);
-  if (f.link_labs)   links.push(`<a class="acesso" target="_blank" rel="noopener" href="${s(f.link_labs)}">🔬 LIS (labs)</a>`);
+  // SCMI: labs via rota interna (atb-lab-scmi.js); ignora link_labs gravado (LIS HUSF)
+  if ((f.instituicao || '') === 'SCMI') {
+    links.push(`<a class="acesso" target="_blank" rel="noopener" href="/atb/scmi/lab?ficha=${f.id}">🔬 Resultados (lab)</a>`);
+  } else if (f.link_labs) {
+    links.push(`<a class="acesso" target="_blank" rel="noopener" href="${s(f.link_labs)}">🔬 LIS (labs)</a>`);
+  }
   const acessosHtml = links.length ? `<div class="bloco"><h3>Acessos</h3><div class="acessos">${links.join('')}</div></div>` : '';
 
   const meta = [

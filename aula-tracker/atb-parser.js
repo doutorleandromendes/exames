@@ -245,7 +245,7 @@ export function parseWebhookRaw(rawRequest) {
 
 // ── Parser do formulário React próprio ───────────────────────────────────
 
-export function parseFormPayload(d) {
+export function parseFormPayload(d, inst = null) {
   const toB = v => v === 'Sim' ? true : v === 'Não' ? false : null;
   const toD = v => v || null;
   const toN = v => v !== '' && v != null ? parseFloat(v) : null;
@@ -290,7 +290,10 @@ export function parseFormPayload(d) {
   const pron = String(d.prontuario || '').replace(/\D/g, '') || null; // prontuário: só dígitos
   const dn   = toD(d.pac_dn);
   const link_exames = montarLinkExames(pron, dn);
-  const link_labs = paciente_nome_raw
+  // link_labs (localhost:3000) é o buscador LIS do HUSF — não gravar em fichas
+  // SCMI, cujo botão de labs é renderizado dinamicamente (atb-lab-scmi.js).
+  // Sem tenant informado (healthcheck, chamadas legadas) mantém o comportamento antigo.
+  const link_labs = (paciente_nome_raw && (!inst || inst === 'HUSF'))
     ? `http://localhost:3000/api/buscar?nome=${String(paciente_nome_raw).trim().replace(/\s+/g,"+")}`
     : null;
 

@@ -201,7 +201,13 @@ function renderCardBody(f, evol, s) {
   // ── ACESSOS (links gerados) — sempre no topo quando existirem ──────────────
   const links = [];
   if (f.link_exames) links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
-  if (f.link_labs)   links.push(`<a href="${s(f.link_labs)}" target="_blank" rel="noopener" class="fc-link">🔬 LIS (labs)</a>`);
+  // SCMI: resultados de laboratório via rota interna (atb-lab-scmi.js) — link
+  // dinâmico por tenant; ignora o link_labs gravado (que apontava pro LIS HUSF).
+  if ((f.instituicao || '') === 'SCMI') {
+    links.push(`<a href="/atb/scmi/lab?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔬 Resultados (lab)</a>`);
+  } else if (f.link_labs) {
+    links.push(`<a href="${s(f.link_labs)}" target="_blank" rel="noopener" class="fc-link">🔬 LIS (labs)</a>`);
+  }
   if (links.length) {
     blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
   }

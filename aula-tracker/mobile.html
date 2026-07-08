@@ -192,6 +192,18 @@ function screenHome(root){
     grid.appendChild(el);
   });
   root.appendChild(t);
+
+  // atalhos p/ a grade mobile do Controle ATB (um por hospital/tenant)
+  const atb=document.createElement("div");
+  atb.innerHTML=`<div class="card"><h2>SCIH · Controle ATB</h2>
+    <p class="hint" style="margin:0 0 12px">Grade mobile de fichas e pareceres (login próprio de cada unidade).</p>
+    <div class="tiles">
+      <a class="tile" style="display:block;text-decoration:none;color:inherit" href="https://app.lcmendes.med.br/atb/m" target="_blank" rel="noopener">
+        <div class="ic">🏥</div><div class="t">HUSF</div><div class="d">app.lcmendes.med.br</div></a>
+      <a class="tile" style="display:block;text-decoration:none;color:inherit" href="https://scmi.lcmendes.med.br/atb/m" target="_blank" rel="noopener">
+        <div class="ic">🏥</div><div class="t">SCMI</div><div class="d">scmi.lcmendes.med.br</div></a>
+    </div></div>`;
+  root.appendChild(atb);
 }
 
 /* ================= FORM ================= */

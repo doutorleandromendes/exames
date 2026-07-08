@@ -39,6 +39,7 @@ import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
 import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes } from './atb-parecer-frases.js';
 import { registerFormTestRoutes } from './atb-form-test-routes.js';
 import { tenantLock, tenantMode, getTenantLogo } from './atb-tenant.js';
+import { registerGridMobileRoutes } from './atb-grid-mobile-routes.js';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +93,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerComplementoRoutes(app, pool, adminRequired);
   registerFichaCardRoutes(app, pool, adminRequired);
   registerFichaViewRoutes(app, pool, adminRequired);
+  registerGridMobileRoutes(app, pool, gridRequired);   // grade mobile (/atb/m)
   registerAnexosRoutes(app, pool, adminRequired);
   registerParecerImagemRoutes(app, pool, adminRequired);
   registerFichaRetroRoutes(app, pool, adminRequired);

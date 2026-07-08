@@ -200,7 +200,13 @@ function renderCardBody(f, evol, s) {
 
   // ── ACESSOS (links gerados) — sempre no topo quando existirem ──────────────
   const links = [];
-  if (f.link_exames) links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
+  // Exames de imagem: SCMI usa a rota interna (atb-pacs-scmi.js → Medilab), que
+  // vale para todas as fichas sem depender do link_exames gravado (autologin HUSF).
+  if ((f.instituicao || '') === 'SCMI') {
+    links.push(`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
+  } else if (f.link_exames) {
+    links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
+  }
   // SCMI: resultados de laboratório via rota interna (atb-lab-scmi.js) — link
   // dinâmico por tenant; ignora o link_labs gravado (que apontava pro LIS HUSF).
   if ((f.instituicao || '') === 'SCMI') {

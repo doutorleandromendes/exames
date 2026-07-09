@@ -275,10 +275,10 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ORDER BY created_at ASC`)).rows;
 
       const usuarios = (await pool.query(
-        `SELECT id, full_name, email, scih, super_admin, pront,
+        `SELECT id, full_name, email, scih, super_admin, pront, agenda, recepcao,
                 (set_pw_token IS NOT NULL AND (set_pw_expires IS NULL OR set_pw_expires > now())) AS pendente_senha
            FROM users
-          WHERE scih = true OR super_admin = true OR pront = true
+          WHERE scih = true OR super_admin = true OR pront = true OR agenda = true OR recepcao = true
           ORDER BY super_admin DESC, LOWER(email) ASC`)).rows;
 
       const linhasPend = pend.map(r => `
@@ -309,11 +309,14 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           <td>${esc(u.email)}</td>
           <td>${u.super_admin ? '<span class="pill on">super admin</span>' : (u.scih ? '<span class="pill on">SCIH</span>' : '<span class="pill off">—</span>')}</td>
           <td>${u.super_admin ? '<span class="pill on">sempre</span>' : (u.pront ? '<span class="pill on">liberado</span>' : '<span class="pill off">—</span>')}</td>
+          <td>${u.super_admin ? '<span class="pill on">sempre</span>' : (u.agenda ? '<span class="pill on">secretaria</span>' : (u.recepcao ? '<span class="pill on">recepção</span>' : '<span class="pill off">—</span>'))}</td>
           <td>${u.pendente_senha ? '<span class="pill off">aguardando definir senha</span>' : '<span class="mut">ativa</span>'}</td>
           <td class="row">
             ${u.super_admin ? '<span class="mut">protegido</span>' : `
               <form method="POST" action="/atb/admin/scih/toggle/${u.id}" class="inline"><button class="ghost">${u.scih ? 'Remover SCIH' : 'Tornar SCIH'}</button></form>
               <form method="POST" action="/atb/admin/scih/pront-toggle/${u.id}" class="inline"><button class="ghost">${u.pront ? 'Remover prontuário' : 'Liberar prontuário'}</button></form>
+              <form method="POST" action="/atb/admin/scih/agenda-toggle/${u.id}" class="inline"><button class="ghost">${u.agenda ? 'Remover secretaria' : 'Agenda: secretaria'}</button></form>
+              <form method="POST" action="/atb/admin/scih/recepcao-toggle/${u.id}" class="inline"><button class="ghost">${u.recepcao ? 'Remover recepção' : 'Agenda: recepção'}</button></form>
               <form method="POST" action="/atb/admin/scih/link/${u.id}" class="inline"><button class="ghost">Gerar link de senha</button></form>`}
           </td>
         </tr>`).join('');
@@ -343,7 +346,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <div class="card">
           <h2>Usuários com acesso</h2>
           <table>
-            <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Prontuário</th><th>Senha</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Prontuário</th><th>Agenda</th><th>Senha</th><th>Ações</th></tr></thead>
             <tbody>${linhasUsr}</tbody>
           </table>
           <div class="mt">
@@ -356,6 +359,12 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
             <form method="POST" action="/atb/admin/scih/pront-marcar" class="row">
               <input name="email" type="email" placeholder="email@dominio" required style="max-width:340px">
               <button class="ghost">Liberar prontuário</button>
+            </form>
+            <h2 style="margin-top:18px">Agenda: liberar papel por e-mail</h2>
+            <form method="POST" action="/atb/admin/scih/agenda-marcar" class="row">
+              <input name="email" type="email" placeholder="email@dominio" required style="max-width:340px">
+              <select name="papel" style="max-width:180px"><option value="agenda">Secretaria</option><option value="recepcao">Recepção</option></select>
+              <button class="ghost">Liberar agenda</button>
             </form>
             <p class="mut" style="font-size:13px">Use isto só para contas que já existem. Para gente nova, cadastre primeiro em /admin/alunos.</p>
           </div>
@@ -511,6 +520,30 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     } catch (err) { console.error('[scih] pront-toggle:', err); res.status(500).send('Falha ao alternar prontuário'); }
   });
 
+  // liga/desliga o papel de SECRETARIA na agenda (agenda/edita/cancela/fatura)
+  app.post('/atb/admin/scih/agenda-toggle/:userId', adminSuper, async (req, res) => {
+    try {
+      const uid = parseInt(req.params.userId, 10);
+      const u = (await pool.query('SELECT agenda, super_admin FROM users WHERE id=$1', [uid])).rows[0];
+      if (u && !u.super_admin) {
+        await pool.query('UPDATE users SET agenda=$1 WHERE id=$2', [!u.agenda, uid]);
+      }
+      res.redirect('/atb/admin/scih');
+    } catch (err) { console.error('[scih] agenda-toggle:', err); res.status(500).send('Falha ao alternar agenda'); }
+  });
+
+  // liga/desliga o papel de RECEPÇÃO na agenda (vê o dia + check-in)
+  app.post('/atb/admin/scih/recepcao-toggle/:userId', adminSuper, async (req, res) => {
+    try {
+      const uid = parseInt(req.params.userId, 10);
+      const u = (await pool.query('SELECT recepcao, super_admin FROM users WHERE id=$1', [uid])).rows[0];
+      if (u && !u.super_admin) {
+        await pool.query('UPDATE users SET recepcao=$1 WHERE id=$2', [!u.recepcao, uid]);
+      }
+      res.redirect('/atb/admin/scih');
+    } catch (err) { console.error('[scih] recepcao-toggle:', err); res.status(500).send('Falha ao alternar recepção'); }
+  });
+
   // libera acesso ao prontuário para um e-mail já existente
   app.post('/atb/admin/scih/pront-marcar', adminSuper, async (req, res) => {
     try {
@@ -521,6 +554,19 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       }
       res.redirect('/atb/admin/scih');
     } catch (err) { console.error('[scih] pront-marcar:', err); res.status(500).send('Falha ao liberar prontuário'); }
+  });
+
+  // libera papel da agenda (secretaria ou recepção) para um e-mail já existente
+  app.post('/atb/admin/scih/agenda-marcar', adminSuper, async (req, res) => {
+    try {
+      const email = String(req.body?.email || '').trim().toLowerCase();
+      const papel = req.body?.papel === 'recepcao' ? 'recepcao' : 'agenda';
+      const r = await pool.query(`UPDATE users SET ${papel}=true WHERE email=$1 RETURNING id`, [email]);
+      if (!r.rowCount) {
+        return res.status(404).send(page('Não encontrado', `<div class="card"><h1>E-mail não cadastrado</h1><p class="mut">${esc(email)} não existe em usuários. Cadastre primeiro em /admin/alunos.</p><a href="/atb/admin/scih">Voltar</a></div>`));
+      }
+      res.redirect('/atb/admin/scih');
+    } catch (err) { console.error('[scih] agenda-marcar:', err); res.status(500).send('Falha ao liberar agenda'); }
   });
 
   // (re)gera link de definição de senha para um usuário existente

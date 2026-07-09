@@ -20,6 +20,8 @@ import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 import { runProntMigrations } from './pront-db.js';
 import { registerProntRoutes } from './pront-routes.js';
+import { runAgendaMigrations } from './agenda-db.js';
+import { registerAgendaRoutes } from './agenda-routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -255,6 +257,24 @@ const medicoRequired = async (req,res,next)=>{
   }catch{ return res.redirect('/'); }
 };
 
+// Agenda: exige login com flag agenda (secretária), recepcao (recepção) ou super_admin; adm é break-glass.
+// A granularidade fina (editar × só check-in) é resolvida dentro das rotas via req.user.
+const agendaRequired = async (req,res,next)=>{
+  const adm = isAdmin(req);
+  const uid = req.cookies?.uid;
+  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+  try{
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,super_admin,agenda,recepcao FROM users WHERE id=$1',[uid]);
+    const user = rows[0];
+    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    const exp = parseISO(user.expires_at);
+    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+    req.user = user;
+    if(user.agenda || user.recepcao || user.super_admin || adm) return next();
+    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito à agenda</h1><p class="mut">Sua conta não tem permissão para a agenda. Fale com o Dr. Leandro.</p><a href="/inicio">Início</a></div>`));
+  }catch{ return res.redirect('/'); }
+};
+
 // ====== MIGRAÇÕES ======
 async function migrate(){
   await migratorPool.query(`
@@ -389,7 +409,9 @@ await migratorPool.query(`CREATE INDEX IF NOT EXISTS access_requests_email_idx  
 migrate().catch(e=>console.error('migration error', e));
 runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
 runAtbMigrations(migratorPool).catch(e => console.error('atb migration error', e));   // ← ADICIONAR
-runProntMigrations(migratorPool).catch(e => console.error('pront migration error', e));
+runProntMigrations(migratorPool)
+  .then(() => runAgendaMigrations(migratorPool))   // agenda depende de pront_pacientes
+  .catch(e => console.error('pront/agenda migration error', e));
 
 
 // ====== Clonar curso (formulário com lista de aulas + ferramentas por linha) ======
@@ -4553,6 +4575,8 @@ try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
+try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }
+catch (e) { console.error('ERRO registerAgendaRoutes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

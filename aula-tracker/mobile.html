@@ -204,6 +204,16 @@ function screenHome(root){
         <div class="ic">🏥</div><div class="t">SCMI</div><div class="d">scmi.lcmendes.med.br</div></a>
     </div></div>`;
   root.appendChild(atb);
+
+  // atalho p/ o controle de estoque dos testes rápidos do consultório
+  const est=document.createElement("div");
+  est.innerHTML=`<div class="card"><h2>Consultório</h2>
+    <p class="hint" style="margin:0 0 12px">Controle de estoque dos testes rápidos.</p>
+    <div class="tiles">
+      <a class="tile" style="display:block;text-decoration:none;color:inherit;grid-column:1/-1" href="/estoque">
+        <div class="ic">📦</div><div class="t">Estoque</div><div class="d">Contagem e reposição</div></a>
+    </div></div>`;
+  root.appendChild(est);
 }
 
 /* ================= FORM ================= */

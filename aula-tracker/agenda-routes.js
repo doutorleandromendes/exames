@@ -34,6 +34,26 @@ function horaHM(t){ return String(t || '').slice(0,5); }                 // '12:
 function brl(n){ return Number(n || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' }); }
 function fmtTs(ts){ return ts ? new Date(ts).toLocaleString('pt-BR', { timeZone: TZ, day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : ''; }
 
+// WhatsApp: normaliza telefone BR e monta link wa.me com a mensagem de lembrete pronta
+function waNumero(tel){
+  let d = String(tel || '').replace(/\D/g, '');
+  if (!d) return null;
+  if (d.length === 10 || d.length === 11) d = '55' + d;   // DDD+numero → prefixa país
+  if (d.length < 12 || d.length > 13) return null;
+  return d;
+}
+function waLink(ev){
+  const n = waNumero(ev.paciente_telefone);
+  if (!n) return null;
+  const data = String(ev.data).slice(0,10);
+  const onde = ev.modalidade === 'teleconsulta'
+    ? (ev.link_video ? `por teleconsulta, no link: ${ev.link_video}` : 'por teleconsulta (o link será enviado em breve)')
+    : (ev.local === 'campinas' ? 'na unidade de Campinas'
+       : 'na Clínica Kadri (Praça Maastrich, 200, sala 64, Bragança Paulista)');
+  const msg = `Olá, ${ev.paciente_nome}! Lembrete da sua consulta com o Dr. Leandro Mendes: ${dataBR(data)} às ${horaHM(ev.hora_inicio)}, ${onde}. Em caso de imprevisto, por favor avise. Obrigado!`;
+  return `https://wa.me/${n}?text=${encodeURIComponent(msg)}`;
+}
+
 const TIPOS = {
   caso_novo:   { rotulo:'Caso novo',   cor:'#0c447c' },
   retorno:     { rotulo:'Retorno',     cor:'#1a7f4e' },
@@ -152,6 +172,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
       : `📍 ${safe(LOCAIS[ev.local] || ev.local || '')}`;
     const chegouInfo = ev.chegou_em ? `<span>✔ chegou ${fmtTs(ev.chegou_em)}</span>` : '';
     const podeChegar = canCheck(req) && ['agendado','confirmado'].includes(ev.status);
+    const wa = canEdit(req) && ['agendado','confirmado'].includes(ev.status) ? waLink(ev) : null;
     return `<div class="ev ${ev.status==='cancelado'?'cancelado':''}" style="border-left-color:${t.cor}">
       <div class="hora">${horaHM(ev.hora_inicio)}</div>
       <div class="quem">
@@ -161,6 +182,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
           <span>${modal}${tel}</span> ${chegouInfo}
         </div>
       </div>
+      ${wa ? `<a class="btn-mini btn-ghost" style="text-decoration:none;align-self:center" href="${wa}" target="_blank" rel="noopener" title="Lembrar via WhatsApp">💬</a>` : ''}
       ${podeChegar ? `<form method="post" action="/agenda/evento/${ev.id}/chegou">
         <button class="btn-mini" type="submit">Chegou</button></form>` : ''}
     </div>`;
@@ -370,6 +392,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const ev = rows[0];
     if (!ev) return res.status(404).send(renderShell('Não encontrado', `<div class="card"><h1>Agendamento não encontrado</h1><a href="/agenda">← Agenda</a></div>`));
     const { rows: itens } = await pool.query(`SELECT * FROM agenda_fatura_itens WHERE evento_id=$1 ORDER BY id`, [ev.id]);
+    const { rows: lembretes } = await pool.query(`SELECT * FROM agenda_lembretes WHERE evento_id=$1 ORDER BY canal`, [ev.id]);
     const totalItens = itens.reduce((s,i) => s + Number(i.valor), 0);
     const total = Number(ev.valor_consulta) + totalItens;
     const dataIso = String(ev.data).slice(0,10);
@@ -440,6 +463,11 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
       ${ev.chegou_em ? `<p class="mut mt">✔ Chegada registrada em ${fmtTs(ev.chegou_em)} por ${safe(ev.chegou_por || '')}</p>` : ''}
       ${ev.status === 'cancelado' ? `<p class="mt" style="color:#b3261e">Cancelado em ${fmtTs(ev.cancelado_em)} por ${safe(ev.cancelado_por || '')}${ev.cancelamento_motivo ? ' — ' + safe(ev.cancelamento_motivo) : ''}</p>` : ''}
       ${ev.pagamento_status === 'pago' ? `<p class="mut">Pago em ${fmtTs(ev.pago_em)}${ev.pagamento_meio ? ' via ' + safe(MEIOS[ev.pagamento_meio] || ev.pagamento_meio) : ''} (${safe(ev.pagamento_por || '')})</p>` : ''}
+      ${lembretes.length ? `<p class="mut" style="margin:4px 0 0">Lembretes: ${lembretes.map(l =>
+        `${l.canal === 'email' ? '✉' : '💬'} ${l.status === 'enviado' ? 'enviado ' + fmtTs(l.enviado_em) : l.status}${l.status === 'erro' && l.erro ? ' <span title="' + safe(l.erro) + '">(!)</span>' : ''}`).join(' · ')}</p>`
+        : (ev.paciente_email && !['cancelado','finalizado','faltou'].includes(ev.status) ? `<p class="mut" style="margin:4px 0 0">✉ Lembrete por e-mail será enviado automaticamente na véspera.</p>` : '')}
+      ${(() => { const wa = canEdit(req) && ev.status !== 'cancelado' ? waLink(ev) : null;
+        return wa ? `<p class="mt"><a class="btn-mini btn-ghost" style="text-decoration:none;display:inline-block" href="${wa}" target="_blank" rel="noopener">💬 Enviar lembrete pelo WhatsApp</a></p>` : ''; })()}
       ${acoesStatus}
       ${podeEditar ? `<p class="mt"><a href="/agenda/evento/${ev.id}/editar">✎ Editar dados do agendamento</a></p>` : ''}
       <hr style="border:none;border-top:1px solid var(--bd);margin:18px 0">

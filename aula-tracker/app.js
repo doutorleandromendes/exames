@@ -22,6 +22,7 @@ import { runProntMigrations } from './pront-db.js';
 import { registerProntRoutes } from './pront-routes.js';
 import { runAgendaMigrations } from './agenda-db.js';
 import { registerAgendaRoutes } from './agenda-routes.js';
+import { startAgendaLembretes } from './agenda-lembretes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -4577,6 +4578,8 @@ try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, 
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }
 catch (e) { console.error('ERRO registerAgendaRoutes', e); }
+try { startAgendaLembretes(pool); }
+catch (e) { console.error('ERRO startAgendaLembretes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));
 
 // ====== KEEPALIVE SUPABASE ======

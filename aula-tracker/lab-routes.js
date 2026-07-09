@@ -387,15 +387,11 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
   });
 
   // GET /lab/admin/api/exames
-  app.get('/lab/admin/api/exames', adminRequired, async (req, res) => {
-    try {
-      const apiUrl = 'https://api.github.com/repos/doutorleandromendes/exames/contents/products.csv?ref=main';
+  const rawUrl = 'https://raw.githubusercontent.com/doutorleandromendes/exames/main/products.csv';
 
-      const headers = {
-        'Accept':               'application/vnd.github.raw',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent':           'lab-portal-lm',
-      };
+      const resp = await fetch(rawUrl + '?_ts=' + Date.now(), {
+        headers: { 'User-Agent': 'lab-portal-lm' },
+      });
       // sem Authorization — repo público não precisa
 
       const resp = await fetch(apiUrl, { headers });

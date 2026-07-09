@@ -21,6 +21,8 @@ import { registerProntRoutes } from './pront-routes.js';
 import { runAgendaMigrations } from './agenda-db.js';
 import { registerAgendaRoutes } from './agenda-routes.js';
 import { registerSecretariaRoutes } from './secretaria-routes.js';
+import { runEstoqueMigrations } from './estoque-db.js';
+import { registerEstoqueRoutes } from './estoque-routes.js';
 import { startAgendaLembretes } from './agenda-lembretes.js';
 import { renderShell } from './ui-shell.js';
 import { createAuthMiddlewares } from './auth-middlewares.js';
@@ -124,6 +126,8 @@ runProntMigrations(migratorPool)
   .then(() => runAgendaMigrations(migratorPool))   // agenda depende de pront_pacientes
   .catch(e => console.error('pront/agenda migration error', e));
 
+runEstoqueMigrations(migratorPool).catch(e => console.error('estoque migration error', e));
+
 
 
 // ====== Health ======
@@ -150,6 +154,8 @@ try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }
 catch (e) { console.error('ERRO registerAgendaRoutes', e); }
 try { registerSecretariaRoutes(app, pool, secretariaRequired, renderShell); }
 catch (e) { console.error('ERRO registerSecretariaRoutes', e); }
+try { registerEstoqueRoutes(app, pool, secretariaRequired, renderShell); }
+catch (e) { console.error('ERRO registerEstoqueRoutes', e); }
 try { startAgendaLembretes(pool); }
 catch (e) { console.error('ERRO startAgendaLembretes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));

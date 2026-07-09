@@ -53,7 +53,24 @@ app.use((req, res, next) => {
 });
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use(cookieParser());
-app.use(express.static(__dirname));
+// ====== Static com WHITELIST ======
+// Antes: express.static(__dirname) servia o diretório inteiro (código-fonte,
+// CSVs, seeds internos). Agora só arquivos explicitamente públicos são servidos.
+// Auditoria (jul/2026): apenas estes 3 são buscados por <script src> nos HTMLs.
+const STATIC_PUBLIC = new Set([
+  '/med-seed.js',        // gerador-documentos.html (base ANVISA/CMED)
+  '/poso-seed.js',       // gerador-documentos.html (formulário de posologias)
+  '/lab-admin-coleta.js' // tela de coleta do lab (lab-routes.js)
+]);
+app.use((req, res, next) => {
+  if (req.method === 'GET' && STATIC_PUBLIC.has(req.path)) {
+    return res.sendFile(req.path.slice(1), { root: __dirname });
+  }
+  next();
+});
+// Compatibilidade: PWAs antigos instalados a partir das URLs estáticas
+app.get('/mobile.html', (req, res) => res.redirect(301, '/pront/mobile'));
+app.get('/mobile-secretaria.html', (req, res) => res.redirect(301, '/secretaria'));
 
 const PORT = process.env.PORT || 3000;
 

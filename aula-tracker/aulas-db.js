@@ -12,6 +12,7 @@ export async function runAulasMigrations(migratorPool){
       expires_at TIMESTAMPTZ
     );`);
   await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS scih BOOLEAN DEFAULT false`);
+  await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT false`);
   await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS super_admin BOOLEAN DEFAULT false`);
   await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS micro BOOLEAN DEFAULT false`);
   await migratorPool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pront BOOLEAN DEFAULT false`);

@@ -24,6 +24,10 @@ import { runAgendaMigrations } from './agenda-db.js';
 import { registerAgendaRoutes } from './agenda-routes.js';
 import { registerSecretariaRoutes } from './secretaria-routes.js';
 import { startAgendaLembretes } from './agenda-lembretes.js';
+import { safe, renderShell } from './ui-shell.js';
+import { createAuthMiddlewares } from './auth-middlewares.js';
+import { fmt, normalizeDateStr, fmtDTLocal } from './aulas-utils.js';
+import { generateSignedUrlForKey } from './aulas-storage.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -99,201 +103,20 @@ async function sendWelcomeAndMark({ userId, email, name, login, plain }) {
   );
 }
 
-// ====== HTML helpers ======
-
-function safe(s){
-  return String(s ?? '')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
-}
-
-function renderShell(title, body) {
-  return `<!doctype html>
-  <html lang="pt-br">
-  <head>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width,initial-scale=1"/>
-    <title>${title}</title>
-    <style>
-      :root{--bg:#f4f6f9;--card:#ffffff;--txt:#1b2330;--mut:#5b6472;--pri:#0c447c;--bd:#e0e2e6}
-      *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Arial;background:var(--bg);color:var(--txt)}
-      .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
-      .card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:24px;box-shadow:0 1px 3px rgba(16,24,40,.06),0 6px 18px rgba(16,24,40,.05)}
-      label{display:block;margin:8px 0 4px}
-      input,select,textarea{width:100%;padding:12px;border-radius:10px;border:1px solid #cdd3db;background:#fff;color:var(--txt)}
-      input:focus,select:focus,textarea:focus{outline:none;border-color:var(--pri);box-shadow:0 0 0 3px rgba(12,68,124,.12)}
-      button{background:var(--pri);color:#fff;border:0;border-radius:12px;padding:12px 16px;cursor:pointer;font-weight:600}
-      button:hover{filter:brightness(1.08)}
-      .row{display:grid;gap:16px;grid-template-columns:1fr 1fr}
-      .mt{margin-top:16px}.mt2{margin-top:24px}.mut{color:var(--mut)} a{color:var(--pri)}
-      table{width:100%;border-collapse:collapse} th,td{padding:8px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
-      .video{position:relative;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden}
-      .wm{position:absolute;right:12px;bottom:12px;opacity:.65;background:rgba(0,0,0,.35);padding:6px 10px;border-radius:10px;font-size:12px;color:#fff}
-      code{background:#eef1f5;border:1px solid var(--bd);border-radius:8px;padding:0 6px}
-      .right{display:flex;gap:12px;align-items:center}
-      form.inline{display:inline}
-      .admin-back-top{margin-bottom:16px}
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div id="admin-back" class="admin-back-top" style="display:none">
-        <a href="/aulas">← Voltar para aulas</a>
-      </div>
-      ${body}
-    </div>
-    <script>
-      if (location.pathname.startsWith('/admin')) {
-        document.getElementById('admin-back').style.display = 'block';
-      }
-    </script>
-  </body>
-  </html>`;
-}
-
-const parseISO = s => (s ? new Date(s) : null);
-const fmt = d => d ? new Date(d).toLocaleString('pt-BR') : '';
-const fmtDTLocal = d => d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
-
-// ====== Auth helpers ======
-const isAdmin = req => req.cookies?.adm === '1';
-const adminRequired = (req,res,next)=>{ if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado'); if(!isAdmin(req)) return res.redirect('/admin'); next(); };
-const authRequired = async (req,res,next)=>{
-  const uid = req.cookies?.uid;
-  if(!uid) return res.redirect('/');
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user) return res.redirect('/');
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    next();
-  }catch{
-    return res.redirect('/');
-  }
-};
-
-// SCIH: exige login com flag scih/super_admin; ADMIN_SECRET (cookie adm) é break-glass
-const scihRequired = async (req,res,next)=>{
-  const adm = isAdmin(req);
-  const uid = req.cookies?.uid;
-  if(!uid){
-    if(adm){ req.user = null; return next(); }
-    return res.redirect('/');
-  }
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,instituicao FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    if(user.scih || user.super_admin || adm){
-      // Fase 3: vínculo de instituição. super_admin e break-glass (adm) cruzam tudo.
-      // Só restringe com portal travado (req.atbTenant) e usuário vinculado a OUTRO hospital.
-      // Sem trava ou sem vínculo → não restringe (idêntico ao atual).
-      if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
-        return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
-      return next();
-    }
-    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao SCIH</h1><p class="mut">Sua conta não tem permissão para esta área. Fale com a coordenação.</p><a href="/inicio">Início</a></div>`));
-  }catch{ return res.redirect('/'); }
-};
-
-// Grade ATB: SCIH, super_admin OU coordenação de microbiologia (micro); adm é break-glass
-const gridRequired = async (req,res,next)=>{
-  const adm = isAdmin(req);
-  const uid = req.cookies?.uid;
-  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,instituicao FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    if(user.scih || user.super_admin || user.micro || adm){
-      // Fase 3: vínculo de instituição (super_admin e break-glass cruzam tudo). micro
-      // segue a mesma regra. Só restringe com portal travado e vínculo a outro hospital.
-      if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
-        return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
-      return next();
-    }
-    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito</h1><p class="mut">Sua conta não tem permissão para a grade.</p><a href="/inicio">Início</a></div>`));
-  }catch{ return res.redirect('/'); }
-};
-
-// Prontuário: exige login com flag pront (ou super_admin); ADMIN_SECRET (cookie adm) é break-glass
-const prontRequired = async (req,res,next)=>{
-  const adm = isAdmin(req);
-  const uid = req.cookies?.uid;
-  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,pront FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    if(user.pront || user.super_admin || adm) return next();
-    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao prontuário</h1><p class="mut">Sua conta não tem permissão para o prontuário. Fale com o Dr. Leandro.</p><a href="/inicio">Início</a></div>`));
-  }catch{ return res.redirect('/'); }
-};
-
-// Médico (gerador de documentos / ações clínicas): exige super_admin; ADMIN_SECRET (cookie adm) é break-glass
-const medicoRequired = async (req,res,next)=>{
-  const adm = isAdmin(req);
-  const uid = req.cookies?.uid;
-  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro,pront FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    if(user.super_admin || adm) return next();
-    return res.status(403).send(renderShell('Área do médico', `<div class="card"><h1>Área do médico</h1><p class="mut">O gerador de documentos é restrito ao médico responsável.</p><a href="/pront">Voltar ao prontuário</a></div>`));
-  }catch{ return res.redirect('/'); }
-};
-
-// Agenda: exige login com flag agenda (secretária), recepcao (recepção) ou super_admin; adm é break-glass.
-// A granularidade fina (editar × só check-in) é resolvida dentro das rotas via req.user.
-const agendaRequired = async (req,res,next)=>{
-  const adm = isAdmin(req);
-  const uid = req.cookies?.uid;
-  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,super_admin,agenda,recepcao FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    if(user.agenda || user.recepcao || user.super_admin || adm) return next();
-    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito à agenda</h1><p class="mut">Sua conta não tem permissão para a agenda. Fale com o Dr. Leandro.</p><a href="/inicio">Início</a></div>`));
-  }catch{ return res.redirect('/'); }
-};
-
-// Secretária (flag agenda): app mobile próprio — pacientes, docs, agenda, orçamento.
-// Recepção (flag recepcao) NÃO entra aqui: ela só faz check-in em /agenda.
-const secretariaRequired = async (req,res,next)=>{
-  const adm = isAdmin(req);
-  const uid = req.cookies?.uid;
-  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-  try{
-    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,super_admin,agenda,pront FROM users WHERE id=$1',[uid]);
-    const user = rows[0];
-    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
-    const exp = parseISO(user.expires_at);
-    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
-    req.user = user;
-    if(user.agenda || user.super_admin || adm) return next();
-    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Área da secretaria</h1><p class="mut">Esta área é restrita à secretária. Recepção usa o check-in em <a href="/agenda">/agenda</a>.</p><a href="/inicio">Início</a></div>`));
-  }catch{ return res.redirect('/'); }
-};
+// ====== HTML helpers / Auth / Utils (extraídos) ======
+// safe/renderShell -> ui-shell.js | middlewares -> auth-middlewares.js
+// normalizeDateStr/fmtDTLocal -> aulas-utils.js | R2 -> aulas-storage.js
+const {
+  isAdmin,
+  adminRequired,
+  authRequired,
+  scihRequired,
+  gridRequired,
+  prontRequired,
+  medicoRequired,
+  agendaRequired,
+  secretariaRequired,
+} = createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell });
 
 // ====== MIGRAÇÕES ======
 async function migrate(){
@@ -735,95 +558,6 @@ let sortInputs   = getArr('sort_index').map(trim);
 });
 
 
-// ====== SigV4 (R2) ======
-function hmac(key, msg) { return crypto.createHmac('sha256', key).update(msg).digest(); }
-function sha256Hex(msg) { return crypto.createHash('sha256').update(msg).digest('hex'); }
-function getV4SigningKey(secretKey, dateStamp, region, service) {
-  const kDate = hmac('AWS4'+secretKey, dateStamp);
-  const kRegion = hmac(kDate, region);
-  const kService = hmac(kRegion, service);
-  const kSigning = hmac(kService, 'aws4_request');
-  return kSigning;
-}
-
-function generateSignedUrlForKey(key, opts = {}) {
-  const { contentType = 'video/mp4', disposition } = opts;
-  if (!R2_BUCKET || !R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) return null;
-
-  const urlObj = new URL(R2_ENDPOINT.replace(/\/+$/,''));
-  const host = urlObj.host;
-
-  const method = 'GET';
-  const service = 's3';
-  const region = 'auto';
-
-  const encodedKey = String(key).split('/').map(encodeURIComponent).join('/');
-  const canonicalUri = `/${encodeURIComponent(R2_BUCKET)}/${encodedKey}`;
-
-  const now = new Date();
-  const amzdate = now.toISOString().replace(/[:-]|\.\d{3}/g,''); // YYYYMMDDTHHMMSSZ
-  const datestamp = amzdate.slice(0,8);
-  const credentialScope = `${datestamp}/${region}/${service}/aws4_request`;
-
-  const encodeRFC3986 = s => encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
-
-  const qp = [
-    ['X-Amz-Algorithm','AWS4-HMAC-SHA256'],
-    ['X-Amz-Credential', `${R2_ACCESS_KEY_ID}/${credentialScope}`],
-    ['X-Amz-Date', amzdate],
-    ['X-Amz-Expires', '86400'],
-    ['X-Amz-SignedHeaders','host'],
-  ];
-  if (contentType) qp.push(['response-content-type', contentType]);
-  if (disposition) qp.push(['response-content-disposition', disposition]);
-
-  qp.sort((a,b)=> a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-  const canonicalQuerystring = qp.map(([k,v]) => `${encodeRFC3986(k)}=${encodeRFC3986(v)}`).join('&');
-
-  const canonicalHeaders = `host:${host}\n`;
-  const signedHeaders = 'host';
-  const payloadHash = 'UNSIGNED-PAYLOAD';
-
-  const canonicalRequest = [
-    method,
-    canonicalUri,
-    canonicalQuerystring,
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash
-  ].join('\n');
-
-  // use top-level ESM import: crypto
-  const algorithm = 'AWS4-HMAC-SHA256';
-  const stringToSign = [
-    algorithm,
-    amzdate,
-    credentialScope,
-    crypto.createHash('sha256').update(canonicalRequest).digest('hex')
-  ].join('\n');
-
-  const kDate = crypto.createHmac('sha256', 'AWS4' + R2_SECRET_ACCESS_KEY).update(datestamp).digest();
-  const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
-  const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
-  const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
-
-  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
-
-  return `${R2_ENDPOINT.replace(/\/+$/,'')}/${encodeURIComponent(R2_BUCKET)}/${encodedKey}?${canonicalQuerystring}&X-Amz-Signature=${signature}`;
-}
-
-// ====== Utils ======
-function normalizeDateStr(s) {
-  if (!s) return null;
-  s = String(s).trim();
-  if (!s) return null;
-  if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(s)) return s;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T23:59:59-03:00`;
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) return `${s}:00-03:00`;
-  const d = new Date(s);
-  return isFinite(d) ? d.toISOString() : null;
-}
-const fmtDT = (d)=> d ? new Date(d).toISOString().replace('T',' ').slice(0,16) : '';
 
 // ====== Health ======
 app.get('/healthz', (req,res)=> res.status(200).send('ok'));

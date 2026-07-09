@@ -585,7 +585,9 @@ function telaResultado(blob, verifUrl, code, tipo, salvo){
     root.innerHTML=`<div class="card">
       <div class="msg show o">✓ Documento assinado (ICP-Brasil)${salvo?" · salvo no prontuário":" · avulso"}</div>
       ${code?`<div class="codebox"><div class="lbl">Código de acesso (verificação)</div><div class="code">${code}</div>${verifUrl?`<a href="${verifUrl}" target="_blank">${verifUrl}</a>`:""}</div>`:""}
-      <button class="btn ok" id="share">Compartilhar / Enviar PDF</button>
+      ${verifUrl?`<button class="btn ok" id="copylink">Copiar link do paciente</button>
+      <button class="btn ok" id="walink" style="margin-top:10px">Enviar pelo WhatsApp</button>`:""}
+      <button class="btn sec" id="share" style="margin-top:10px">Compartilhar PDF</button>
       <button class="btn sec" id="dl" style="margin-top:10px">Abrir / Baixar PDF</button>
       <button class="btn sec" id="novo" style="margin-top:10px;border-color:var(--line);color:var(--mut)">Novo documento</button>
       <p class="hint">O PDF já contém o QR e o código para validação no portal do ITI.</p>
@@ -597,6 +599,11 @@ function telaResultado(blob, verifUrl, code, tipo, salvo){
         else{ abrirPDF(blob,nome); }
       }catch(e){ /* usuário cancelou */ }
     };
+    if(verifUrl){
+      const waHref="https://wa.me/?text="+encodeURIComponent("Segue seu documento médico assinado (Dr. Leandro Mendes): "+verifUrl);
+      const cl=$("#copylink"); if(cl) cl.onclick=async()=>{ try{ await navigator.clipboard.writeText(verifUrl); cl.textContent="Link copiado ✓"; setTimeout(()=>{cl.textContent="Copiar link do paciente";},1500);}catch(e){ window.prompt("Copie o link:",verifUrl); } };
+      const wl=$("#walink"); if(wl) wl.onclick=()=>window.open(waHref,"_blank");
+    }
     $("#dl").onclick=()=>abrirPDF(blob,nome);
     $("#novo").onclick=()=>reset(screenHome,"Documentos");
   }, "Pronto");

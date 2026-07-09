@@ -191,6 +191,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       `SELECT id, tipo, paper, assinado, secret_code, verif_token, descricao, to_char(criado_em,'YYYY-MM-DD') data
          FROM pront_docs_emitidos WHERE paciente_id=$1 ORDER BY criado_em DESC`, [id])).rows;
     const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado", laudo: "Laudo" };
+    const pubBase = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
+    const waNumber = (tel) => { const dg = String(tel || "").replace(/\D/g, ""); return dg ? (dg.length <= 11 ? "55" + dg : dg) : ""; };
 
     const dados = [
       p.dn && `<b>Nasc.:</b> ${toBR(p.dn)}${idade(p.dn) != null ? ` (${idade(p.dn)} anos)` : ""}`,
@@ -246,7 +248,13 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       <div class="card mt">
         <table>
           <thead><tr><th>Data</th><th>Documento</th><th>Papel</th><th>Assinatura</th><th>Ações</th></tr></thead>
-          <tbody>${docsEmitidos.map(d => `
+          <tbody>${docsEmitidos.map(d => {
+            const pacLink = pubBase + "/verificar/" + d.verif_token;
+            const waMsg = (TIPO_DOC[d.tipo] || d.tipo) + " — Dr. Leandro Mendes: " + pacLink;
+            const shareLinks = (d.assinado && d.verif_token)
+              ? ` · <a href="#" class="doc-copy" data-link="${pacLink}">copiar link</a> · <a href="https://wa.me/${waNumber(p.telefone)}?text=${encodeURIComponent(waMsg)}" target="_blank" rel="noopener">WhatsApp</a>`
+              : "";
+            return `
             <tr>
               <td>${toBR(d.data)}</td>
               <td><b>${TIPO_DOC[d.tipo] || safe(d.tipo)}</b>${d.descricao ? `<div class="mut" style="font-size:.88em;line-height:1.3;margin-top:2px;max-width:38ch">${safe(d.descricao)}</div>` : ""}</td>
@@ -256,10 +264,10 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
                 : `<span class="mut">—</span>`}</td>
               <td style="white-space:nowrap">
                 <a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a>
-                · <a href="/pront/paciente/${id}/documento?dup=${d.id}">duplicar</a>
+                · <a href="/pront/paciente/${id}/documento?dup=${d.id}">duplicar</a>${shareLinks}
                 · <a href="#" class="doc-del" data-del="${d.id}" data-desc="${safe((TIPO_DOC[d.tipo] || d.tipo) + (d.descricao ? " — " + d.descricao : ""))}" style="color:#b91c1c">excluir</a>
               </td>
-            </tr>`).join("")}</tbody>
+            </tr>`; }).join("")}</tbody>
         </table>
       </div>
       <script>(function(){
@@ -273,6 +281,15 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
               if(r.ok){var tr=a.closest('tr');if(tr)tr.parentNode.removeChild(tr);}
               else{a.textContent='falhou';a.style.color='#b91c1c';a.style.pointerEvents='';}
             }).catch(function(){a.textContent='erro';a.style.pointerEvents='';});
+          });
+        });
+        document.querySelectorAll('a.doc-copy').forEach(function(a){
+          a.addEventListener('click',function(ev){
+            ev.preventDefault();
+            var link=a.getAttribute('data-link')||'';
+            function ok(){var o=a.textContent;a.textContent='copiado ✓';a.style.color='#0e7a4b';setTimeout(function(){a.textContent=o;a.style.color='';},1500);}
+            if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(link).then(ok).catch(function(){window.prompt('Copie o link:',link);});}
+            else{window.prompt('Copie o link:',link);}
           });
         });
       })();</script>` : ""}
@@ -1111,6 +1128,7 @@ window.__READY=1;`;
       const docs = (await pool.query(
         `SELECT id, tipo, paper, assinado, secret_code, verif_token, descricao, to_char(criado_em,'YYYY-MM-DD') data
            FROM pront_docs_emitidos WHERE paciente_id IS NULL ORDER BY ${orderBy}`)).rows;
+      const pubBase = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
 
       const th = (key, label) => {
         const active = sort === key;
@@ -1129,7 +1147,13 @@ window.__READY=1;`;
         <div class="card mt">
           <table>
             <thead><tr>${th("data", "Data")}${th("tipo", "Tipo")}${th("descricao", "Descrição")}<th>Assinatura</th><th>Ações</th></tr></thead>
-            <tbody>${docs.map(d => `
+            <tbody>${docs.map(d => {
+              const pacLink = pubBase + "/verificar/" + d.verif_token;
+              const waMsg = (TIPO_DOC[d.tipo] || d.tipo) + " — Dr. Leandro Mendes: " + pacLink;
+              const shareLinks = (d.assinado && d.verif_token)
+                ? ` · <a href="#" class="doc-copy" data-link="${pacLink}">copiar link</a> · <a href="https://wa.me/?text=${encodeURIComponent(waMsg)}" target="_blank" rel="noopener">WhatsApp</a>`
+                : "";
+              return `
               <tr>
                 <td>${toBR(d.data)}</td>
                 <td><b>${TIPO_DOC[d.tipo] || safe(d.tipo)}</b></td>
@@ -1139,10 +1163,10 @@ window.__READY=1;`;
                   : `<span class="mut">—</span>`}</td>
                 <td style="white-space:nowrap">
                   <a href="/pront/documento-emitido/${d.id}/pdf" target="_blank">abrir PDF</a>
-                  · <a href="/pront/documento?dup=${d.id}" target="_blank">duplicar</a>
+                  · <a href="/pront/documento?dup=${d.id}" target="_blank">duplicar</a>${shareLinks}
                   · <a href="#" class="doc-del" data-del="${d.id}" data-desc="${safe((TIPO_DOC[d.tipo] || d.tipo) + (d.descricao ? " — " + d.descricao : ""))}" style="color:#b91c1c">excluir</a>
                 </td>
-              </tr>`).join("")}</tbody>
+              </tr>`; }).join("")}</tbody>
           </table>
         </div>
         <script>(function(){
@@ -1156,6 +1180,15 @@ window.__READY=1;`;
                 if(r.ok){var tr=a.closest('tr');if(tr)tr.parentNode.removeChild(tr);}
                 else{a.textContent='falhou';a.style.color='#b91c1c';a.style.pointerEvents='';}
               }).catch(function(){a.textContent='erro';a.style.pointerEvents='';});
+            });
+          });
+          document.querySelectorAll('a.doc-copy').forEach(function(a){
+            a.addEventListener('click',function(ev){
+              ev.preventDefault();
+              var link=a.getAttribute('data-link')||'';
+              function ok(){var o=a.textContent;a.textContent='copiado ✓';a.style.color='#0e7a4b';setTimeout(function(){a.textContent=o;a.style.color='';},1500);}
+              if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(link).then(ok).catch(function(){window.prompt('Copie o link:',link);});}
+              else{window.prompt('Copie o link:',link);}
             });
           });
         })();</script>` : `<div class="card mt"><p class="mut">Nenhum documento avulso emitido ainda. <a href="/pront/documento" target="_blank">Emitir o primeiro →</a></p></div>`}`;

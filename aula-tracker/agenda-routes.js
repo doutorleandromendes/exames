@@ -12,6 +12,8 @@
 //   import { registerAgendaRoutes } from './agenda-routes.js';
 //   registerAgendaRoutes(app, pool, agendaRequired, renderShell);
 
+import { criarTeleconsulta, atualizarTeleconsulta, removerEvento, googleConfigurado } from './agenda-google.js';
+
 const safe = s => String(s ?? '')
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -295,7 +297,8 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
             </select></div>
         </div>
         <div id="wrap-link" style="display:none"><label>Link da teleconsulta (Meet)</label>
-          <input name="link_video" placeholder="https://meet.google.com/…" value="${safe(e.link_video || '')}"></div>
+          <input name="link_video" placeholder="deixe vazio para gerar um Meet automaticamente" value="${safe(e.link_video || '')}">
+          <p class="mut" style="font-size:12px;margin:4px 0 0">Se ficar em branco, o sistema cria uma sala do Google Meet e a inclui no lembrete por e-mail e WhatsApp.</p></div>
         <div class="row mt">
           <div><label>Valor da consulta (R$)</label><input name="valor_consulta" id="f-valor" type="number" min="0" step="0.01" value="${safe(e.valor_consulta ?? '')}" placeholder="0,00"></div>
           <div><label>Pagamento</label>
@@ -383,7 +386,15 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
       [e.paciente_id, e.paciente_nome, e.paciente_telefone, e.paciente_email, e.data, e.hora_inicio, e.duracao_min,
        e.tipo, e.modalidade, e.local, e.link_video, e.obs, e.valor_consulta, e.pagamento_status, quem(req)]);
-    res.redirect(`/agenda/evento/${rows[0].id}`);
+    const novoId = rows[0].id;
+    // Teleconsulta sem link manual → gera sala do Meet via Calendar (best-effort, não bloqueia)
+    if (e.modalidade === 'teleconsulta' && !e.link_video && googleConfigurado()) {
+      const g = await criarTeleconsulta({ id: novoId, ...e });
+      if (g) await pool.query(
+        `UPDATE agenda_eventos SET link_video=$1, google_event_id=$2 WHERE id=$3`,
+        [g.meetLink, g.eventId, novoId]);
+    }
+    res.redirect(`/agenda/evento/${novoId}`);
   });
 
   // ===== DETALHE DO EVENTO =====
@@ -492,13 +503,37 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const e = lerEvento(req);
     if (!e.paciente_nome || !isDataValida(e.data) || !/^\d{2}:\d{2}/.test(e.hora_inicio || ''))
       return res.send(renderShell('Editar agendamento', formEvento(req, { id: req.params.id, ...req.body }, 'Preencha nome, data e hora.')));
+
+    // estado anterior para decidir a sincronização com o Calendar
+    const prev = (await pool.query(`SELECT modalidade, google_event_id, link_video FROM agenda_eventos WHERE id=$1`, [req.params.id])).rows[0] || {};
+    let googleId = prev.google_event_id || null;
+    let linkFinal = e.link_video;
+
+    if (googleConfigurado()) {
+      const eraTele = prev.modalidade === 'teleconsulta' && prev.google_event_id;
+      const viraTele = e.modalidade === 'teleconsulta';
+      if (viraTele && !eraTele && !e.link_video) {
+        // presencial → tele (sem link manual): cria sala nova
+        const g = await criarTeleconsulta({ id: req.params.id, ...e });
+        if (g) { googleId = g.eventId; linkFinal = g.meetLink; }
+      } else if (viraTele && eraTele) {
+        // continua tele: atualiza horário/dados do evento existente (mantém o mesmo link)
+        await atualizarTeleconsulta(prev.google_event_id, { id: req.params.id, ...e });
+        if (!linkFinal) linkFinal = prev.link_video;   // preserva link se o form veio vazio
+      } else if (!viraTele && eraTele) {
+        // tele → presencial: remove o evento do Calendar
+        await removerEvento(prev.google_event_id);
+        googleId = null;
+      }
+    }
+
     await pool.query(
       `UPDATE agenda_eventos SET paciente_id=$1,paciente_nome=$2,paciente_telefone=$3,paciente_email=$4,data=$5,hora_inicio=$6,
          duracao_min=$7,tipo=$8,modalidade=$9,local=$10,link_video=$11,obs=$12,valor_consulta=$13,pagamento_status=$14,
-         atualizado_por=$15,atualizado_em=now()
-       WHERE id=$16`,
+         google_event_id=$15,atualizado_por=$16,atualizado_em=now()
+       WHERE id=$17`,
       [e.paciente_id, e.paciente_nome, e.paciente_telefone, e.paciente_email, e.data, e.hora_inicio, e.duracao_min,
-       e.tipo, e.modalidade, e.local, e.link_video, e.obs, e.valor_consulta, e.pagamento_status, quem(req), req.params.id]);
+       e.tipo, e.modalidade, e.local, linkFinal, e.obs, e.valor_consulta, e.pagamento_status, googleId, quem(req), req.params.id]);
     res.redirect(`/agenda/evento/${req.params.id}`);
   });
 
@@ -524,9 +559,12 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
 
   app.post('/agenda/evento/:id/cancelar', agendaRequired, async (req, res) => {
     if (!canEdit(req)) return negar(res, 'Somente a secretaria ou o médico cancelam agendamentos.');
+    // remove a sala do Meet do Calendar, se houver (best-effort); mantém link_video no registro para histórico
+    const g = (await pool.query(`SELECT google_event_id FROM agenda_eventos WHERE id=$1`, [req.params.id])).rows[0];
+    if (g?.google_event_id && googleConfigurado()) await removerEvento(g.google_event_id);
     await pool.query(
       `UPDATE agenda_eventos SET status='cancelado', cancelado_em=now(), cancelado_por=$1, cancelamento_motivo=$2,
-         atualizado_por=$1, atualizado_em=now() WHERE id=$3`,
+         google_event_id=NULL, atualizado_por=$1, atualizado_em=now() WHERE id=$3`,
       [quem(req), String(req.body?.motivo || '').trim() || null, req.params.id]);
     res.redirect(`/agenda/evento/${req.params.id}`);
   });

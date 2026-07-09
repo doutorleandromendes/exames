@@ -20,7 +20,8 @@ export async function runAgendaMigrations(pool) {
     tipo               TEXT NOT NULL DEFAULT 'caso_novo',   -- caso_novo | retorno | reavaliacao | social
     modalidade         TEXT NOT NULL DEFAULT 'presencial',  -- presencial | teleconsulta
     local              TEXT,                                -- braganca | campinas | NULL (tele)
-    link_video         TEXT,                                -- link do Meet (manual no Lote 1; Calendar API depois)
+    link_video         TEXT,                                -- link do Meet (manual ou gerado via Calendar API)
+    google_event_id    TEXT,                                -- id do evento no Google Calendar (teleconsulta), p/ update/delete
     obs                TEXT,
     status             TEXT NOT NULL DEFAULT 'agendado',    -- agendado|confirmado|chegou|em_atendimento|finalizado|faltou|cancelado
     chegou_em          TIMESTAMPTZ,          -- log da recepção
@@ -42,6 +43,7 @@ export async function runAgendaMigrations(pool) {
   CREATE INDEX IF NOT EXISTS idx_agenda_ev_data ON agenda_eventos (data, hora_inicio);
   CREATE INDEX IF NOT EXISTS idx_agenda_ev_pac  ON agenda_eventos (paciente_id);
   CREATE INDEX IF NOT EXISTS idx_agenda_ev_pag  ON agenda_eventos (pagamento_status);
+  ALTER TABLE agenda_eventos ADD COLUMN IF NOT EXISTS google_event_id TEXT;   -- retrocompatível: tabela criada no Lote 1
 
   -- Itens adicionais de faturamento (exames, procedimentos) — total = valor_consulta + soma(itens)
   CREATE TABLE IF NOT EXISTS agenda_fatura_itens (

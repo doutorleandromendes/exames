@@ -22,6 +22,7 @@ import { runProntMigrations } from './pront-db.js';
 import { registerProntRoutes } from './pront-routes.js';
 import { runAgendaMigrations } from './agenda-db.js';
 import { registerAgendaRoutes } from './agenda-routes.js';
+import { registerSecretariaRoutes } from './secretaria-routes.js';
 import { startAgendaLembretes } from './agenda-lembretes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -273,6 +274,24 @@ const agendaRequired = async (req,res,next)=>{
     req.user = user;
     if(user.agenda || user.recepcao || user.super_admin || adm) return next();
     return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito à agenda</h1><p class="mut">Sua conta não tem permissão para a agenda. Fale com o Dr. Leandro.</p><a href="/inicio">Início</a></div>`));
+  }catch{ return res.redirect('/'); }
+};
+
+// Secretária (flag agenda): app mobile próprio — pacientes, docs, agenda, orçamento.
+// Recepção (flag recepcao) NÃO entra aqui: ela só faz check-in em /agenda.
+const secretariaRequired = async (req,res,next)=>{
+  const adm = isAdmin(req);
+  const uid = req.cookies?.uid;
+  if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+  try{
+    const { rows } = await pool.query('SELECT id,email,full_name,expires_at,super_admin,agenda,pront FROM users WHERE id=$1',[uid]);
+    const user = rows[0];
+    if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    const exp = parseISO(user.expires_at);
+    if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+    req.user = user;
+    if(user.agenda || user.super_admin || adm) return next();
+    return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Área da secretaria</h1><p class="mut">Esta área é restrita à secretária. Recepção usa o check-in em <a href="/agenda">/agenda</a>.</p><a href="/inicio">Início</a></div>`));
   }catch{ return res.redirect('/'); }
 };
 
@@ -4578,6 +4597,8 @@ try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, 
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }
 catch (e) { console.error('ERRO registerAgendaRoutes', e); }
+try { registerSecretariaRoutes(app, pool, secretariaRequired, renderShell); }
+catch (e) { console.error('ERRO registerSecretariaRoutes', e); }
 try { startAgendaLembretes(pool); }
 catch (e) { console.error('ERRO startAgendaLembretes', e); }
 app.listen(PORT, ()=> console.log(`Aula Tracker (Postgres) rodando na porta ${PORT}`));

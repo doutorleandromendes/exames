@@ -402,10 +402,28 @@ function paginaEditor(schema, { alvo, escopo, tipo, juncao, conds, complexo, raw
         var campo=row.querySelector('.campo').value, op=row.querySelector('.op').value;
         var val=row.querySelector('.val'), dl=document.getElementById('dl_'+i);
         var ops=CAMPOS[campo]||[];
-        dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');
         var modo=OPVALOR[op]||'um';
-        if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
-        else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+        var usaLista=(modo==='varios') && ops.length>0;   // op de lista + campo com opções → multi-select
+        var cur = val ? (val.tagName==='SELECT'
+            ? Array.prototype.filter.call(val.options,function(o){return o.selected;}).map(function(o){return o.value;})
+            : String(val.value||'').split(',').map(function(s){return s.trim();}).filter(Boolean)) : [];
+        if(usaLista){
+          if(!val || val.tagName!=='SELECT'){
+            var sel=document.createElement('select'); sel.className='val'; sel.name='val_'+i; sel.multiple=true;
+            sel.size=Math.min(6,ops.length); sel.title='Shift/Ctrl para selecionar vários';
+            val.parentNode.replaceChild(sel,val); val=sel;
+          }
+          val.innerHTML=''; ops.forEach(function(o){ var o2=document.createElement('option'); o2.value=o; o2.textContent=o; if(cur.indexOf(o)!==-1) o2.selected=true; val.appendChild(o2); });
+          val.disabled=false;
+        } else {
+          if(val && val.tagName!=='INPUT'){
+            var inp=document.createElement('input'); inp.className='val'; inp.name='val_'+i; inp.setAttribute('list','dl_'+i);
+            inp.value=cur.join(', '); val.parentNode.replaceChild(inp,val); val=inp;
+          }
+          if(dl) dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');
+          if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
+          else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+        }
         var av=document.getElementById('av_'+i);
         if(av){
           if(ops.length>0 && op==='text_contains_any'){
@@ -434,9 +452,10 @@ function montarCond(body) {
     const op = String(body['op_' + i] || '').trim();
     if (!campo || !op) continue;
     const modo = OP_VALOR[op] || 'um';
-    const raw = String(body['val_' + i] || '').trim();
+    const rawV = body['val_' + i];
+    const raw = Array.isArray(rawV) ? rawV.join(',') : String(rawV || '').trim();
     const c = { campo, op };
-    if (modo === 'varios') c.valor = raw.split(',').map(s => s.trim()).filter(Boolean);
+    if (modo === 'varios') c.valor = (Array.isArray(rawV) ? rawV : raw.split(',')).map(s => String(s).trim()).filter(Boolean);
     else if (modo === 'um') c.valor = raw;
     if (modo !== 'nenhum' && (c.valor === '' || (Array.isArray(c.valor) && c.valor.length === 0))) continue;
     conds.push(c);
@@ -519,10 +538,28 @@ function paginaEditorPreench(schema, { idx, juncao, conds, complexo, raw, campo,
         var campo=row.querySelector('.campo').value, op=row.querySelector('.op').value;
         var val=row.querySelector('.val'), dl=document.getElementById('dl_'+i);
         var ops=CAMPOS[campo]||[];
-        dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');
         var modo=OPVALOR[op]||'um';
-        if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
-        else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+        var usaLista=(modo==='varios') && ops.length>0;   // op de lista + campo com opções → multi-select
+        var cur = val ? (val.tagName==='SELECT'
+            ? Array.prototype.filter.call(val.options,function(o){return o.selected;}).map(function(o){return o.value;})
+            : String(val.value||'').split(',').map(function(s){return s.trim();}).filter(Boolean)) : [];
+        if(usaLista){
+          if(!val || val.tagName!=='SELECT'){
+            var sel=document.createElement('select'); sel.className='val'; sel.name='val_'+i; sel.multiple=true;
+            sel.size=Math.min(6,ops.length); sel.title='Shift/Ctrl para selecionar vários';
+            val.parentNode.replaceChild(sel,val); val=sel;
+          }
+          val.innerHTML=''; ops.forEach(function(o){ var o2=document.createElement('option'); o2.value=o; o2.textContent=o; if(cur.indexOf(o)!==-1) o2.selected=true; val.appendChild(o2); });
+          val.disabled=false;
+        } else {
+          if(val && val.tagName!=='INPUT'){
+            var inp=document.createElement('input'); inp.className='val'; inp.name='val_'+i; inp.setAttribute('list','dl_'+i);
+            inp.value=cur.join(', '); val.parentNode.replaceChild(inp,val); val=inp;
+          }
+          if(dl) dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');
+          if(modo==='nenhum'){ val.value=''; val.disabled=true; val.placeholder='(sem valor)'; }
+          else { val.disabled=false; val.placeholder=(modo==='varios')?'vários: separe por vírgula':'valor'; }
+        }
       }
       ${jsAlvo}
       for(var i=0;i<MAXC;i++) syncVal(i);

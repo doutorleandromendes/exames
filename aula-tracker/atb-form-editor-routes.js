@@ -408,7 +408,7 @@ function clienteJS() {
     if (!linhas.length) return null;
     var conds = linhas.map(function(l){
       var c={ campo:l.campo, op:l.op };
-      if (OPS_LISTA.indexOf(l.op)>=0) c.valor = l.valor.split(',').map(function(x){return x.trim();}).filter(Boolean);
+      if (OPS_LISTA.indexOf(l.op)>=0) c.valor = (Array.isArray(l.valor) ? l.valor : String(l.valor||'').split(',')).map(function(x){return String(x).trim();}).filter(Boolean);
       else if (OPS_VALOR_UNICO.indexOf(l.op)>=0) c.valor = l.valor;
       return c;
     });
@@ -574,13 +574,28 @@ function clienteJS() {
       var opsHtml = Object.keys(OP_LABEL).map(function(o){ return '<option value="'+o+'"'+(o===l.op?' selected':'')+'>'+OP_LABEL[o]+'</option>'; }).join('');
       var ksHtml = ks.map(function(k){ return '<option value="'+esc(k)+'"'+(k===l.campo?' selected':'')+'>'+esc(k)+'</option>'; }).join('');
       var semValor = OPS_SEM_VALOR.indexOf(l.op)>=0;
+      // op de lista + campo com opções → multi-select (Shift/Ctrl), sem digitação livre.
+      var ref=acharCampo(l.campo); var opc=(ref&&ref.campo&&Array.isArray(ref.campo.options))?ref.campo.options:[];
+      var usaLista=OPS_LISTA.indexOf(l.op)>=0 && opc.length>0;
+      var valorHtml;
+      if (semValor) valorHtml='';
+      else if (usaLista){
+        var selArr=Array.isArray(l.valor)?l.valor:String(l.valor||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
+        valorHtml='<select data-c="valor" multiple size="'+Math.min(6,opc.length)+'" title="Shift/Ctrl para selecionar vários">'+
+          opc.map(function(o){ return '<option value="'+esc(o)+'"'+(selArr.indexOf(o)>=0?' selected':'')+'>'+esc(o)+'</option>'; }).join('')+'</select>';
+      } else {
+        valorHtml='<input type="text" data-c="valor" placeholder="'+(OPS_LISTA.indexOf(l.op)>=0?'valores separados por vírgula':'valor')+'" value="'+esc(Array.isArray(l.valor)?l.valor.join(', '):(l.valor||''))+'">';
+      }
       d.innerHTML='<select data-c="campo"><option value="">— campo —</option>'+ksHtml+'</select>'+
-        '<select data-c="op">'+opsHtml+'</select>'+
-        (semValor?'':'<input type="text" data-c="valor" placeholder="'+(OPS_LISTA.indexOf(l.op)>=0?'valores separados por vírgula':'valor')+'" value="'+esc(l.valor)+'">')+
+        '<select data-c="op">'+opsHtml+'</select>'+ valorHtml +
         '<button type="button" class="fe-mini warn" data-c="x">×</button>';
-      d.querySelector('[data-c=campo]').onchange=function(){ l.campo=this.value; aplica(); };
+      d.querySelector('[data-c=campo]').onchange=function(){ l.campo=this.value; aplica(); montarCondBuilder(host,obj,prop); };
       d.querySelector('[data-c=op]').onchange=function(){ l.op=this.value; aplica(); montarCondBuilder(host,obj,prop); };
-      var vi=d.querySelector('[data-c=valor]'); if (vi) vi.oninput=function(){ l.valor=this.value; aplica(); };
+      var vi=d.querySelector('[data-c=valor]');
+      if (vi){
+        if (vi.tagName==='SELECT' && vi.multiple) vi.onchange=function(){ l.valor=Array.prototype.filter.call(this.options,function(o){return o.selected;}).map(function(o){return o.value;}); aplica(); };
+        else vi.oninput=function(){ l.valor=this.value; aplica(); };
+      }
       d.querySelector('[data-c=x]').onclick=function(){ sim.linhas.splice(idx,1); aplica(); montarCondBuilder(host,obj,prop); };
       return d;
     }

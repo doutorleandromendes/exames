@@ -16,6 +16,7 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
+import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADICIONAR (numeradores CVE)
 import { runProntMigrations } from './pront-db.js';
 import { registerProntRoutes } from './pront-routes.js';
 import { runAgendaMigrations } from './agenda-db.js';
@@ -148,6 +149,8 @@ try { registerLabRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabRoutes', e); }
 try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
+try { registerCveNumeradoresRoutes(app, pool); }
+catch (e) { console.error('ERRO registerCveNumeradoresRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }

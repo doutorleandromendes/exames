@@ -263,7 +263,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     <div class="card" style="max-width:680px;margin:0 auto">
       <h1 style="margin-top:0">${ev ? 'Editar agendamento' : 'Novo agendamento'}</h1>
       ${erro ? `<p style="color:#b3261e"><b>${safe(erro)}</b></p>` : ''}
-      <form method="post" action="${ev ? `/agenda/evento/${ev.id}/editar` : '/agenda/novo'}">
+      <form method="post" id="form-evento" action="${ev ? `/agenda/evento/${ev.id}/editar` : '/agenda/novo'}">
         <label>Paciente</label>
         <input id="pac-busca" autocomplete="off" placeholder="Buscar no prontuário (nome ou nº)…" value="">
         <div id="pac-result" style="border:1px solid var(--bd);border-radius:10px;display:none;background:#fff;max-height:180px;overflow:auto"></div>
@@ -308,7 +308,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
         </div>
         <label>Observações</label><textarea name="obs" rows="2">${safe(e.obs || '')}</textarea>
         <div class="mt2" style="display:flex;gap:10px">
-          <button type="submit">${ev ? 'Salvar alterações' : 'Agendar'}</button>
+          <button type="submit" id="btn-salvar">${ev ? 'Salvar alterações' : 'Agendar'}</button>
           <a href="/agenda/dia/${dataIso}" style="align-self:center">Cancelar</a>
         </div>
       </form>
@@ -346,6 +346,16 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
         function ajModal(){ var tele = modal.value === 'teleconsulta'; wl.style.display = tele?'none':''; wk.style.display = tele?'':'none'; }
         modal.addEventListener('change', ajModal); ajModal();
       })();
+      // trava anti-duplo-clique: desabilita o botão no 1º envio (o INSERT pode demorar se gerar Meet)
+      (function(){
+        var f = document.getElementById('form-evento'), b = document.getElementById('btn-salvar');
+        if (!f || !b) return;
+        f.addEventListener('submit', function(){
+          if (f.dataset.enviando) return;
+          f.dataset.enviando = '1';
+          setTimeout(function(){ b.disabled = true; b.textContent = 'Aguarde…'; }, 0);
+        });
+      })();
     </script>`;
   }
 
@@ -380,6 +390,16 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const e = lerEvento(req);
     if (!e.paciente_nome || !isDataValida(e.data) || !/^\d{2}:\d{2}/.test(e.hora_inicio || ''))
       return res.send(renderShell('Novo agendamento', formEvento(req, { ...req.body }, 'Preencha nome, data e hora.')));
+    // Backstop anti-duplicata: se um evento idêntico foi criado há menos de 20s, é reenvio
+    // acidental (duplo clique / timeout na criação do Meet) — reaproveita em vez de duplicar.
+    // Overbooking intencional (mesmo horário de propósito) é feito com minutos de intervalo, então não é pego.
+    const dup = await pool.query(
+      `SELECT id FROM agenda_eventos
+        WHERE paciente_nome=$1 AND data=$2 AND hora_inicio=$3 AND tipo=$4
+          AND status <> 'cancelado' AND criado_em > now() - interval '20 seconds'
+        ORDER BY id LIMIT 1`,
+      [e.paciente_nome, e.data, e.hora_inicio, e.tipo]);
+    if (dup.rows[0]) return res.redirect(`/agenda/evento/${dup.rows[0].id}`);
     const { rows } = await pool.query(
       `INSERT INTO agenda_eventos (paciente_id,paciente_nome,paciente_telefone,paciente_email,data,hora_inicio,duracao_min,
          tipo,modalidade,local,link_video,obs,valor_consulta,pagamento_status,criado_por)

@@ -93,6 +93,8 @@
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const tcase = s => String(s||"").toLowerCase().replace(/(^|[\s;(/+-])([a-zà-ú])/g,(m,a,b)=>a+b.toUpperCase());
+const medNome = o => o.p ? tcase(o.p) : tcase((o.s||"").replace(/;/g," + "));
 const app = $("#app"), title = $("#title"), backBtn = $("#back");
 let stack = [];
 
@@ -504,7 +506,7 @@ function autocomplete(inp){
       box.innerHTML="";
       list.slice(0,12).forEach(o=>{
         const d=document.createElement("div");
-        const nome=o.p||o.s;
+        const nome=medNome(o);
         d.innerHTML=`${nome}${o.a?` <span class="sub">${o.a}</span>`:""}`;
         d.onclick=()=>{ inp.value=(nome+(o.a?" "+o.a:"")).trim(); inp.dispatchEvent(new Event("input")); box.classList.add("hide"); };
         box.appendChild(d);

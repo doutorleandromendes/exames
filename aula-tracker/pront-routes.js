@@ -1486,11 +1486,15 @@ window.__READY=1;`;
       if (q.length < 2) return res.json([]);
       const terms = q.split(" ").filter(Boolean);
       const idx = await _carregarMedIdx();
-      const out = [];
-      for (const o of idx) {
-        if (terms.every(t => o.n.includes(t))) { out.push({ s: o.s, p: o.p, a: o.a }); if (out.length >= 20) break; }
-      }
-      res.json(out);
+      const matches = idx.filter(o => terms.every(t => o.n.includes(t)));
+      matches.sort((a, b) => {
+        const ga = a.p ? 0 : 1, gb = b.p ? 0 : 1;          // genérico (produto vazio) primeiro
+        if (ga !== gb) return gb - ga;
+        const pa = a.n.startsWith(terms[0]) ? 1 : 0, pb = b.n.startsWith(terms[0]) ? 1 : 0;
+        if (pa !== pb) return pb - pa;
+        return a.n.length - b.n.length;
+      });
+      res.json(matches.slice(0, 20).map(o => ({ s: o.s, p: o.p, a: o.a })));
     } catch (e) {
       console.error("MED-BUSCA ERROR", e);
       res.status(500).json([]);

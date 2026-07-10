@@ -2653,7 +2653,7 @@ function medSearch(q,limit=12){
   const res=[];
   for(const it of MEDDB){
     if(terms.every(t=>it.n.includes(t))){
-      let score=10+(it.n.startsWith(terms[0])?5:0)+(it.p?0:1);
+      let score=10+(it.n.startsWith(terms[0])?5:0)+(it.p?0:8);
       res.push({...it,score});
     }
   }
@@ -2663,8 +2663,9 @@ function medSearch(q,limit=12){
   for(const r of res){const lbl=(r.p||r.s)+"|"+r.a; if(seen.has(lbl))continue; seen.add(lbl); outl.push(r); if(outl.length>=limit)break;}
   return outl;
 }
-function medLabel(o){return `${o.p?titlecase(o.p)+" — ":""}${titlecase(o.s)}`;}
-function medFill(o){return `${o.p?titlecase(o.p):titlecase(o.s)} ${o.a}`.replace(/\s+/g," ").trim();}
+function dcb(s){return titlecase((s||"").replace(/;/g," + "));}
+function medLabel(o){return `${o.p?titlecase(o.p)+" — ":""}${dcb(o.s)}`;}
+function medFill(o){return `${o.p?titlecase(o.p):dcb(o.s)} ${o.a}`.replace(/\s+/g," ").trim();}
 /* ----- Biblioteca pessoal de posologias ----- */
 let POSO={};
 async function loadPoso(){try{const r=await window.storage.get("posologias");if(r&&r.value)POSO=JSON.parse(r.value);}catch(e){}}

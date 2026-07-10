@@ -81,6 +81,22 @@ export async function buscarHemoDaFicha(pool, ficha) {
 
 export function hemoTemAlerta(alertas) { return !!(alertas && alertas.length); }
 
+// Banner do card: alerta precoce de bacteremia (Gram parcial), em destaque vermelho.
+export function renderHemoCard(alertas) {
+  if (!alertas || !alertas.length) return '';
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const dt = d => d ? new Date(d).toLocaleDateString('pt-BR') : '—';
+  const itens = alertas.slice(0, 5).map(a =>
+    `<div style="margin-top:4px;font-size:12px">🩸 <b>${esc(a.gram || 'Hemocultura positiva (parcial)')}</b>`
+    + ` <span style="color:#b45309">${dt(a.data_positividade)}</span>`
+    + (a.amostras ? ` · ${esc(a.amostras)}` : '')
+    + (a.setor ? ` · ${esc(a.setor)}` : '') + `</div>`
+  ).join('');
+  return `<div style="background:#fef2f2;border:1px solid #fca5a5;border-left:3px solid #dc2626;border-radius:8px;padding:10px 12px;margin-bottom:10px">`
+    + `<div style="font-weight:700;color:#b91c1c;font-size:13px">⚠ Hemocultura parcial positiva — alerta precoce</div>`
+    + itens + `</div>`;
+}
+
 export function registerHemoRoutes(app, pool, adminRequired) {
   // Ingestão dos alertas (Apps Script). Aceita 1 alerta ou vários (um e-mail
   // pode conter múltiplos pacientes). Auth por token (X-Hemo-Token).

@@ -27,6 +27,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { buscarCulturasDaFicha, culturasTemMR, renderCulturasCard } from './atb-culturas-routes.js';
+import { buscarHemoDaFicha, renderHemoCard } from './atb-hemocultura-routes.js';
 import { buscarNomePacs, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 
 function _safe(s) {
@@ -458,6 +459,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
       if (f.obito) metaParts.push('✝ óbito' + (f.data_obito ? ' ' + _dt(f.data_obito) : ''));
 
       const culturas = await buscarCulturasDaFicha(pool, f);
+      const hemo = await buscarHemoDaFicha(pool, f);
       const _np = await buscarNomePacs(pool, f.instituicao_id, f.prontuario);
       const _divergePacs = _np && nomeDivergePacs(f.paciente_nome_raw || f.paciente_nome, _np.nome_pacs_norm);
       res.json({
@@ -465,7 +467,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         nome: _safe(nome),
         meta: _safe(metaParts.join(' · ')),
         prontuario: f.prontuario || '',
-        html: renderCulturasCard(culturas) + renderCardBody(f, evol, _safe),
+        html: renderHemoCard(hemo) + renderCulturasCard(culturas) + renderCardBody(f, evol, _safe),
         mr: culturasTemMR(culturas) ? '⚠ Multirresistente' : null,
         nomePacs: _divergePacs ? _safe(_np.nome_pacs) : null,
       });

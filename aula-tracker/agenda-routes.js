@@ -27,7 +27,15 @@ const DIAS_ABREV = ['dom','seg','ter','qua','qui','sex','sáb'];
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
 function dObj(iso){ return new Date(iso + 'T12:00:00'); }               // meio-dia evita rollover de fuso
-function isoAdd(iso, dias){ const d = dObj(iso); d.setDate(d.getDate()+dias); return d.toISOString().slice(0,10); }
+// node-postgres devolve coluna DATE como objeto Date; normaliza (Date OU string) para 'YYYY-MM-DD'
+function isoDate(v){
+  if (v instanceof Date && !isNaN(v)) {
+    const y = v.getFullYear(), m = String(v.getMonth()+1).padStart(2,'0'), d = String(v.getDate()).padStart(2,'0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(v ?? '').slice(0,10);
+}
+function isoAdd(iso, dias){ const d = dObj(iso); if (isNaN(d)) return isoDate(iso); d.setDate(d.getDate()+dias); return d.toISOString().slice(0,10); }
 function dataExtenso(iso){ const d = dObj(iso); return `${DIAS[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`; }
 function dataCurta(iso){ const d = dObj(iso); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`; }
 function dataBR(iso){ const d = dObj(iso); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
@@ -47,7 +55,7 @@ function waNumero(tel){
 function waLink(ev){
   const n = waNumero(ev.paciente_telefone);
   if (!n) return null;
-  const data = String(ev.data).slice(0,10);
+  const data = isoDate(ev.data);
   const onde = ev.modalidade === 'teleconsulta'
     ? (ev.link_video ? `por teleconsulta, no link: ${ev.link_video}` : 'por teleconsulta (o link será enviado em breve)')
     : (ev.local === 'campinas' ? 'na unidade de Campinas'
@@ -218,8 +226,8 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
       `SELECT * FROM agenda_eventos WHERE data BETWEEN $1 AND $2 ORDER BY data, hora_inicio, id`, [seg, sab]);
     const fers = await feriadosEntre(seg, sab);
     const porDia = {}; for (let i=0;i<6;i++) porDia[isoAdd(seg,i)] = [];
-    for (const e of evs) (porDia[String(e.data).slice(0,10)] ||= []).push(e);
-    const ferPorDia = {}; for (const f of fers) (ferPorDia[String(f.data).slice(0,10)] ||= []).push(f);
+    for (const e of evs) (porDia[isoDate(e.data)] ||= []).push(e);
+    const ferPorDia = {}; for (const f of fers) (ferPorDia[isoDate(f.data)] ||= []).push(f);
     const hoje = hojeSP();
     const cols = Object.keys(porDia).map((iso, i) => {
       const fs = ferPorDia[iso] || [];
@@ -257,7 +265,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
   // ===== FORMULÁRIO (novo / editar) =====
   function formEvento(req, ev, erro){
     const e = ev || {};
-    const dataIso = e.data ? String(e.data).slice(0,10) : (isDataValida(req.query?.data) ? req.query.data : hojeSP());
+    const dataIso = e.data ? isoDate(e.data) : (isDataValida(req.query?.data) ? req.query.data : hojeSP());
     const sel = (v, atual) => v === atual ? 'selected' : '';
     return `${css}
     <div class="card" style="max-width:680px;margin:0 auto">
@@ -426,7 +434,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const { rows: lembretes } = await pool.query(`SELECT * FROM agenda_lembretes WHERE evento_id=$1 ORDER BY canal`, [ev.id]);
     const totalItens = itens.reduce((s,i) => s + Number(i.valor), 0);
     const total = Number(ev.valor_consulta) + totalItens;
-    const dataIso = String(ev.data).slice(0,10);
+    const dataIso = isoDate(ev.data);
     const podeEditar = canEdit(req);
     const sel = (v, atual) => v === atual ? 'selected' : '';
 
@@ -563,7 +571,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const { rows } = await pool.query(
       `UPDATE agenda_eventos SET status='chegou', chegou_em=now(), chegou_por=$1, atualizado_por=$1, atualizado_em=now()
         WHERE id=$2 AND status IN ('agendado','confirmado') RETURNING data`, [quem(req), req.params.id]);
-    res.redirect(rows[0] ? `/agenda/dia/${String(rows[0].data).slice(0,10)}` : '/agenda');
+    res.redirect(rows[0] ? `/agenda/dia/${isoDate(rows[0].data)}` : '/agenda');
   });
 
   app.post('/agenda/evento/:id/status', agendaRequired, async (req, res) => {
@@ -640,7 +648,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
       </form>
       ${fers.length ? `<table class="mt"><tr><th>Data</th><th>Feriado</th><th>Escopo</th><th></th></tr>
         ${fers.map(f => `<tr>
-          <td>${dataBR(String(f.data).slice(0,10))}</td>
+          <td>${dataBR(isoDate(f.data))}</td>
           <td>${safe(f.nome)}${f.facultativo ? ' <span class="mut">(facultativo)</span>' : ''}</td>
           <td>${ESCOPOS[f.escopo] || safe(f.escopo)}</td>
           <td><form method="post" action="/agenda/feriados/${f.id}/excluir" class="inline"><button class="btn-mini btn-red" type="submit">×</button></form></td>
@@ -703,7 +711,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
   app.post('/agenda/feriados/:id/excluir', agendaRequired, async (req, res) => {
     if (!canEdit(req)) return negar(res, 'Área da secretaria/médico.');
     const { rows } = await pool.query(`DELETE FROM agenda_feriados WHERE id=$1 RETURNING data`, [req.params.id]);
-    res.redirect(rows[0] ? `/agenda/feriados/${String(rows[0].data).slice(0,4)}` : '/agenda/feriados');
+    res.redirect(rows[0] ? `/agenda/feriados/${isoDate(rows[0].data).slice(0,4)}` : '/agenda/feriados');
   });
 
   // ===== FATURAMENTO MENSAL (médico) =====
@@ -745,7 +753,7 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
         ${evs.map(e => {
           const tot = Number(e.valor_consulta) + Number(e.itens_total);
           return `<tr>
-            <td>${dataBR(String(e.data).slice(0,10))} ${horaHM(e.hora_inicio)}</td>
+            <td>${dataBR(isoDate(e.data))} ${horaHM(e.hora_inicio)}</td>
             <td><a href="/agenda/evento/${e.id}">${safe(e.paciente_nome)}</a></td>
             <td>${badgeTipo(e.tipo)}</td>
             <td>${badgeStatus(e.status)}</td>

@@ -147,7 +147,7 @@ function paginaRestrito(req) {
     </div>`);
 }
 
-function paginaConsulta(rows, cardHtml = '') {
+function paginaConsulta(rows, cardHtml = '', mostrarDias = false) {
   const dt = d => d ? new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—';
   const linhas = rows.map(f => {
     const nome = f.paciente_nome || f.paciente_nome_raw || '—';
@@ -161,6 +161,7 @@ function paginaConsulta(rows, cardHtml = '') {
       <td>${_safe(f.prontuario || '')}</td>
       <td>${_safe(f.setor || '')}</td>
       <td class="atb">${_safe(atb)}</td>
+      ${mostrarDias ? `<td class="dias" style="text-align:center;white-space:nowrap">${f.tempo_previsto != null && f.tempo_previsto !== '' ? _safe(String(f.tempo_previsto)) : '—'}</td>` : ''}
       <td>${_parecerPill(f.recomendacao_scih)}${espec}</td>
     </tr>`;
   }).join('');
@@ -177,8 +178,8 @@ function paginaConsulta(rows, cardHtml = '') {
     </div>
     <div class="wrap">
       <table>
-        <thead><tr><th>Data</th><th>Paciente</th><th>Prontuário</th><th>Setor</th><th>ATB</th><th>Parecer</th></tr></thead>
-        <tbody id="corpo">${linhas || `<tr><td colspan="6" class="vazio">Nenhuma ficha nos últimos 30 dias.</td></tr>`}</tbody>
+        <thead><tr><th>Data</th><th>Paciente</th><th>Prontuário</th><th>Setor</th><th>ATB</th>${mostrarDias ? '<th title="Tempo previsto de tratamento solicitado na ficha">Dias</th>' : ''}<th>Parecer</th></tr></thead>
+        <tbody id="corpo">${linhas || `<tr><td colspan="${mostrarDias?7:6}" class="vazio">Nenhuma ficha nos últimos 30 dias.</td></tr>`}</tbody>
       </table>
     </div>
     <script>
@@ -218,14 +219,15 @@ export function registerConsultaRoutes(app, pool) {
       }
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
-               f.atb_solicitado, f.recomendacao_scih, f.recomendacoes_especificacao,
+               f.atb_solicitado, f.tempo_previsto, f.recomendacao_scih, f.recomendacoes_especificacao,
                COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) AS data_ficha
         FROM atb_fichas f
         WHERE f.deletado_em IS NULL
           AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'${escopo}
         ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`, params);
       const hc = await getLatestHealthcheck(pool, inst || 'HUSF').catch(() => null);
-      res.send(paginaConsulta(rows, renderHealthCard(hc)));
+      const mostrarDias = !inst || String(inst).toUpperCase() === 'HUSF';
+      res.send(paginaConsulta(rows, renderHealthCard(hc), mostrarDias));
     } catch (e) {
       console.error('[atb] consulta error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

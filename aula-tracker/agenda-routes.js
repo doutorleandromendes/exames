@@ -43,6 +43,7 @@ function segundaDaSemana(iso){ const d = dObj(iso); const dow = d.getDay(); cons
 function horaHM(t){ return String(t || '').slice(0,5); }                 // '12:00:00' → '12:00'
 function brl(n){ return Number(n || 0).toLocaleString('pt-BR', { style:'currency', currency:'BRL' }); }
 function fmtTs(ts){ return ts ? new Date(ts).toLocaleString('pt-BR', { timeZone: TZ, day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }) : ''; }
+function horaTs(ts){ return ts ? new Date(ts).toLocaleTimeString('pt-BR', { timeZone: TZ, hour:'2-digit', minute:'2-digit' }) : ''; }
 
 // WhatsApp: normaliza telefone BR e monta link wa.me com a mensagem de lembrete pronta
 function waNumero(tel){
@@ -108,37 +109,79 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
   // ===== fragmentos de UI =====
   const css = `
   <style>
-    .ag-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin-bottom:12px}
-    .ag-nav{display:flex;gap:6px;align-items:center}
-    .ag-nav a{display:inline-block;padding:8px 12px;border:1px solid var(--bd);border-radius:10px;background:#fff;text-decoration:none;font-weight:600}
+    /* ===== app bar fixo ===== */
+    .agbar{position:sticky;top:0;z-index:20;background:var(--pri);border-radius:16px;padding:12px 14px;margin-bottom:14px;box-shadow:0 4px 14px rgba(12,68,124,.18)}
+    .agbar .r1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .agbar .r1 .t{color:#fff;font-size:16px;font-weight:700}
+    .agmenu{position:relative}
+    .agmenu>summary{list-style:none;cursor:pointer;color:#cfe1f5;width:38px;height:38px;border-radius:10px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700}
+    .agmenu>summary::-webkit-details-marker{display:none}
+    .agmenu[open]>summary{background:rgba(255,255,255,.28);color:#fff}
+    .agmenu .drop{position:absolute;right:0;top:44px;background:#fff;border:1px solid var(--bd);border-radius:12px;box-shadow:0 8px 24px rgba(16,24,40,.16);min-width:180px;padding:6px;z-index:30}
+    .agmenu .drop a{display:block;padding:11px 12px;border-radius:8px;text-decoration:none;color:var(--txt);font-weight:600;font-size:14px}
+    .agmenu .drop a:hover{background:#f1f5ff}
+    .agstep{display:flex;align-items:center;gap:8px;margin-top:12px}
+    .agstep .arw{width:42px;height:42px;flex-shrink:0;border-radius:12px;background:rgba(255,255,255,.16);color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;text-decoration:none;font-weight:700}
+    .agstep .arw:active{background:rgba(255,255,255,.32)}
+    .agstep .ctr{flex:1;text-align:center;text-decoration:none;color:#fff;min-width:0}
+    .agstep .ctr b{display:block;font-size:15px;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .agstep .ctr span{font-size:11px;color:#b5d4f4}
+    .agseg{display:flex;background:rgba(255,255,255,.16);border-radius:12px;padding:3px;margin-top:12px}
+    .agseg a{flex:1;text-align:center;font-size:14px;font-weight:700;color:#cfe1f5;padding:9px;border-radius:9px;text-decoration:none}
+    .agseg a.on{background:#fff;color:var(--pri)}
+
+    /* ===== cards de evento ===== */
+    .evcard{background:#fff;border:1px solid var(--bd);border-radius:14px;margin-top:10px;display:flex;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,.05)}
+    .evcard.cancelado{opacity:.5}
+    .evrail{width:6px;flex-shrink:0}
+    .evbody{flex:1;min-width:0;padding:11px 12px;display:flex;align-items:center;gap:11px}
+    .evhr{text-align:center;flex-shrink:0;min-width:46px}
+    .evhr b{display:block;font-size:16px;font-weight:800;color:var(--txt);line-height:1.1}
+    .evhr span{font-size:10px;color:var(--mut)}
+    .evmid{flex:1;min-width:0}
+    .evmid .nm{display:block;font-size:14.5px;font-weight:700;color:var(--txt);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .evmeta{display:flex;align-items:center;gap:6px;margin-top:3px;min-width:0}
+    .evmeta .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .evmeta small{font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .evtag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;flex-shrink:0;white-space:nowrap}
+    .evarrived{display:flex;align-items:center;gap:3px;font-size:10.5px;color:#1a7f4e;margin-top:4px}
+    .evact{display:flex;gap:6px;flex-shrink:0}
+    .evact form{margin:0}
+    .tapbtn{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:19px;border:0;cursor:pointer;padding:0}
+    .tapbtn.ch{background:var(--pri);color:#fff;font-size:20px;font-weight:700}
+    .tapbtn.wa{background:#e1f5ee;color:#0f6e56;border:1px solid #b9e4d5}
+
+    .fer-banner{background:#fdf3f3;border:1px solid #eecaca;border-radius:12px;padding:10px 14px;margin-top:10px;font-size:13px}
+
+    /* ===== semana (grid no desktop, lista por dia no mobile) ===== */
+    .semana{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:4px}
+    .semana .dia{border:1px solid var(--bd);border-radius:14px;background:#fff;padding:10px}
+    .semana .dia.hoje{border-color:var(--pri);box-shadow:0 0 0 2px rgba(12,68,124,.15)}
+    .semana .dia.feriado{background:#fdf3f3}
+    .semana .dia h3{margin:0 0 8px;font-size:13px}
+    .semana .dia h3 a{text-decoration:none;color:var(--pri);font-weight:700}
+    .semana .mini-ev{display:flex;align-items:center;gap:6px;font-size:12.5px;padding:8px 9px;border-radius:9px;color:#fff;margin-top:6px;text-decoration:none;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+    .kpi{border:1px solid var(--bd);border-radius:14px;padding:14px;background:#fff}
+    .kpi b{display:block;font-size:22px}.kpi span{color:var(--mut);font-size:12px}
+
+    /* usados nas telas de detalhe / faturamento / feriados */
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;white-space:nowrap}
-    .ev{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--bd);border-left-width:5px;border-radius:12px;padding:10px 12px;margin-top:8px;background:#fff}
-    .ev.cancelado{opacity:.55}
-    .ev .hora{font-weight:700;min-width:52px;font-size:15px}
-    .ev .quem{flex:1;min-width:0}
-    .ev .quem a{font-weight:600;text-decoration:none}
-    .ev .meta{font-size:12px;color:var(--mut);margin-top:2px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-    .ev form{margin:0}
-    .btn-mini{padding:6px 10px;font-size:13px;border-radius:8px}
+    .btn-mini{padding:8px 12px;font-size:13px;border-radius:9px}
     .btn-ghost{background:#fff;color:var(--pri);border:1px solid var(--pri)}
     .btn-red{background:#b3261e}
-    .semana{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:12px}
-    .semana .dia{border:1px solid var(--bd);border-radius:12px;background:#fff;padding:8px;min-height:120px}
-    .semana .dia.hoje{outline:2px solid var(--pri)}
-    .semana .dia.feriado{background:#fdf3f3}
-    .semana .dia h3{margin:0 0 6px;font-size:13px}
-    .semana .dia h3 a{text-decoration:none}
-    .semana .mini-ev{display:block;font-size:12px;padding:3px 6px;border-radius:6px;color:#fff;margin-top:4px;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .fer-banner{background:#fdf3f3;border:1px solid #eecaca;border-radius:12px;padding:10px 14px;margin-top:8px}
-    .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
-    .kpi{border:1px solid var(--bd);border-radius:12px;padding:12px;background:#fff}
-    .kpi b{display:block;font-size:20px}
-    .kpi span{color:var(--mut);font-size:12px}
+    .ag-nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .ag-nav a{display:inline-block;padding:8px 12px;border:1px solid var(--bd);border-radius:10px;background:#fff;text-decoration:none;font-weight:600}
+
+    /* FAB */
+    .fab{position:fixed;right:18px;bottom:22px;width:58px;height:58px;border-radius:18px;background:var(--pri);color:#fff;display:flex;align-items:center;justify-content:center;font-size:32px;line-height:1;text-decoration:none;box-shadow:0 8px 20px rgba(12,68,124,.4);z-index:40}
+    .fab:active{filter:brightness(1.12)}
+
     @media (max-width:720px){
-      .semana{grid-template-columns:1fr}
-      .ev{flex-wrap:wrap}
-      .ag-top{flex-direction:column;align-items:stretch}
-      .ag-nav{flex-wrap:wrap}
+      .semana{grid-template-columns:1fr;gap:12px}
+      .semana .dia{padding:12px}
+      .semana .mini-ev{font-size:13.5px;padding:10px 11px}
     }
   </style>`;
 
@@ -147,25 +190,49 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
   function badgeStatus(s){ const x = STATUS[s] || { rotulo:s, cor:'#5b6472' }; return badge(x.rotulo, x.cor); }
   function badgePag(p){ const x = PAG[p] || { rotulo:p, cor:'#5b6472' }; return badge(x.rotulo, x.cor); }
 
-  function topNav(req, dataIso, visao){
-    const prev = isoAdd(dataIso, visao === 'semana' ? -7 : -1);
-    const next = isoAdd(dataIso, visao === 'semana' ? 7 : 1);
-    const base = visao === 'semana' ? '/agenda/semana' : '/agenda/dia';
-    return `<div class="ag-top">
-      <div class="ag-nav">
-        <a href="${base}/${prev}">‹</a>
-        <a href="${base}/${hojeSP()}">Hoje</a>
-        <a href="${base}/${next}">›</a>
-        <a href="/agenda/dia/${dataIso}" ${visao==='dia'?'style="background:var(--pri);color:#fff"':''}>Dia</a>
-        <a href="/agenda/semana/${dataIso}" ${visao==='semana'?'style="background:var(--pri);color:#fff"':''}>Semana</a>
+  function topNav(req, dataIso, visao, subtitle){
+    const isSem = visao === 'semana';
+    const prev = isoAdd(dataIso, isSem ? -7 : -1);
+    const next = isoAdd(dataIso, isSem ? 7 : 1);
+    const base = isSem ? '/agenda/semana' : '/agenda/dia';
+    let ctrB, ctrS;
+    if (isSem){
+      const seg = segundaDaSemana(dataIso), sab = isoAdd(seg, 5);
+      ctrB = `${dataCurta(seg)} – ${dataCurta(sab)}`;
+      const h = hojeSP();
+      ctrS = (h >= seg && h <= sab) ? 'esta semana' : 'semana';
+    } else {
+      const d = dObj(dataIso);
+      ctrB = `${DIAS_ABREV[d.getDay()]}, ${d.getDate()} ${MESES[d.getMonth()].slice(0,3)}`;
+      ctrS = dataIso === hojeSP() ? 'hoje' : `${d.getFullYear()}`;
+    }
+    if (subtitle != null) ctrS = subtitle;
+    const links = [];
+    if (canEdit(req))  links.push(`<a href="/agenda/feriados">Feriados</a>`);
+    if (isMedico(req)) links.push(`<a href="/agenda/faturamento">Faturamento</a>`);
+    links.push(`<a href="/pront">Prontuário</a>`);
+    return `<div class="agbar">
+      <div class="r1">
+        <span class="t">Agenda</span>
+        <details class="agmenu"><summary aria-label="mais opções">⋯</summary>
+          <div class="drop">${links.join('')}</div>
+        </details>
       </div>
-      <div class="ag-nav">
-        ${canEdit(req) ? `<a href="/agenda/novo?data=${dataIso}" style="background:var(--pri);color:#fff">+ Agendamento</a>` : ''}
-        ${canEdit(req) ? `<a href="/agenda/feriados">Feriados</a>` : ''}
-        ${isMedico(req) ? `<a href="/agenda/faturamento">Faturamento</a>` : ''}
-        <a href="/pront">Prontuário</a>
+      <div class="agstep">
+        <a class="arw" href="${base}/${prev}" aria-label="anterior">‹</a>
+        <a class="ctr" href="${base}/${hojeSP()}"><b>${ctrB}</b><span>${ctrS}</span></a>
+        <a class="arw" href="${base}/${next}" aria-label="próximo">›</a>
+      </div>
+      <div class="agseg">
+        <a href="/agenda/dia/${dataIso}" class="${visao==='dia'?'on':''}">Dia</a>
+        <a href="/agenda/semana/${dataIso}" class="${visao==='semana'?'on':''}">Semana</a>
       </div>
     </div>`;
+  }
+
+  // botão flutuante de novo agendamento (só para quem pode criar)
+  function fab(dataIso){
+    return `<a class="fab" href="/agenda/novo?data=${dataIso}" title="Novo agendamento" aria-label="Novo agendamento">+</a>`;
   }
 
   async function feriadosEntre(ini, fim){
@@ -175,26 +242,38 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
   }
 
   function eventoCard(req, ev){
-    const t = TIPOS[ev.tipo] || { cor:'#5b6472' };
-    const tel = ev.paciente_telefone ? ` · ${safe(ev.paciente_telefone)}` : '';
-    const modal = ev.modalidade === 'teleconsulta'
-      ? `🖥 Tele${ev.link_video ? ` — <a href="${safe(ev.link_video)}" target="_blank" rel="noopener">link</a>` : ''}`
-      : `📍 ${safe(LOCAIS[ev.local] || ev.local || '')}`;
-    const chegouInfo = ev.chegou_em ? `<span>✔ chegou ${fmtTs(ev.chegou_em)}</span>` : '';
+    const t = TIPOS[ev.tipo] || { cor:'#5b6472', rotulo:ev.tipo };
+    const st = STATUS[ev.status] || { cor:'#5b6472', rotulo:ev.status };
+    const isTele = ev.modalidade === 'teleconsulta';
+    const localTxt = isTele ? 'Teleconsulta' : (LOCAIS[ev.local] || ev.local || '');
+    // status no texto só quando é informativo (agendado é o "normal"; chegou tem linha própria)
+    const statusExtra = ['agendado','chegou'].includes(ev.status) ? '' : ` · ${st.rotulo}`;
+    const metaTxt = `${t.rotulo} · ${localTxt}${statusExtra}`;
+    const dur = isTele ? 'tele' : `${ev.duracao_min}min`;
     const podeChegar = canCheck(req) && ['agendado','confirmado'].includes(ev.status);
     const wa = canEdit(req) && ['agendado','confirmado'].includes(ev.status) ? waLink(ev) : null;
-    return `<div class="ev ${ev.status==='cancelado'?'cancelado':''}" style="border-left-color:${t.cor}">
-      <div class="hora">${horaHM(ev.hora_inicio)}</div>
-      <div class="quem">
-        <a href="/agenda/evento/${ev.id}">${safe(ev.paciente_nome)}</a>
-        <div class="meta">
-          ${badgeTipo(ev.tipo)} ${badgeStatus(ev.status)} ${badgePag(ev.pagamento_status)}
-          <span>${modal}${tel}</span> ${chegouInfo}
+    const pagTag = ev.pagamento_status === 'pendente'
+      ? `<span class="evtag" style="background:#fbf0dc;color:#8a5d12">Pend.</span>`
+      : ev.pagamento_status === 'pago'
+        ? `<span class="evtag" style="background:#e1f3e8;color:#1a6b42">Pago</span>` : '';
+    const arrived = ev.chegou_em ? `<div class="evarrived">✔ chegou ${horaTs(ev.chegou_em)}</div>` : '';
+    const actions = (wa || podeChegar) ? `<div class="evact">
+        ${wa ? `<a class="tapbtn wa" href="${wa}" target="_blank" rel="noopener" title="Lembrar via WhatsApp">💬</a>` : ''}
+        ${podeChegar ? `<form method="post" action="/agenda/evento/${ev.id}/chegou">
+          <button class="tapbtn ch" type="submit" title="Marcar chegada">✓</button></form>` : ''}
+      </div>` : '';
+    return `<div class="evcard ${ev.status==='cancelado'?'cancelado':''}">
+      <div class="evrail" style="background:${t.cor}"></div>
+      <div class="evbody">
+        <div class="evhr"><b>${horaHM(ev.hora_inicio)}</b><span>${dur}</span></div>
+        <div class="evmid">
+          <a class="nm" href="/agenda/evento/${ev.id}">${safe(ev.paciente_nome)}</a>
+          <div class="evmeta"><span class="dot" style="background:${st.cor}"></span><small>${safe(metaTxt)}</small></div>
+          ${arrived}
         </div>
+        ${pagTag}
+        ${actions}
       </div>
-      ${wa ? `<a class="btn-mini btn-ghost" style="text-decoration:none;align-self:center" href="${wa}" target="_blank" rel="noopener" title="Lembrar via WhatsApp">💬</a>` : ''}
-      ${podeChegar ? `<form method="post" action="/agenda/evento/${ev.id}/chegou">
-        <button class="btn-mini" type="submit">Chegou</button></form>` : ''}
     </div>`;
   }
 
@@ -207,13 +286,12 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const ferHtml = fers.length ? `<div class="fer-banner">🎌 ${fers.map(f =>
       `<b>${safe(f.nome)}</b> <span class="mut">(${ESCOPOS[f.escopo] || f.escopo}${f.facultativo ? ', facultativo' : ''})</span>`).join(' · ')}</div>` : '';
     const ativos = evs.filter(e => e.status !== 'cancelado').length;
-    const body = `${css}${topNav(req, dataIso, 'dia')}
-      <div class="card">
-        <h1 style="margin:0;font-size:20px">${safe(dataExtenso(dataIso))}</h1>
-        <p class="mut" style="margin:4px 0 0">${ativos} agendamento(s)</p>
-        ${ferHtml}
-        ${evs.length ? evs.map(e => eventoCard(req, e)).join('') : '<p class="mut mt">Nenhum agendamento neste dia.</p>'}
-      </div>`;
+    const sub = `${ativos} ${ativos === 1 ? 'paciente' : 'pacientes'}${dataIso === hojeSP() ? ' · hoje' : ''}`;
+    const body = `${css}${topNav(req, dataIso, 'dia', sub)}
+      ${ferHtml}
+      ${evs.length ? evs.map(e => eventoCard(req, e)).join('')
+        : '<div class="card"><p class="mut" style="margin:0">Nenhum agendamento neste dia.</p></div>'}
+      ${canEdit(req) ? fab(dataIso) : ''}`;
     res.send(renderShell('Agenda — ' + dataBR(dataIso), body));
   });
 
@@ -231,22 +309,25 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     const hoje = hojeSP();
     const cols = Object.keys(porDia).map((iso, i) => {
       const fs = ferPorDia[iso] || [];
-      const evHtml = (porDia[iso] || []).map(e => {
+      const doDia = porDia[iso] || [];
+      const ativosDia = doDia.filter(e => e.status !== 'cancelado').length;
+      const evHtml = doDia.map(e => {
         const t = TIPOS[e.tipo] || { cor:'#5b6472' };
+        const stc = (STATUS[e.status] || { cor:'#fff' }).cor;
         const risco = e.status === 'cancelado' ? 'text-decoration:line-through;opacity:.6;' : '';
-        return `<a class="mini-ev" style="background:${t.cor};${risco}" href="/agenda/evento/${e.id}">${horaHM(e.hora_inicio)} ${safe(e.paciente_nome)}${e.modalidade==='teleconsulta'?' 🖥':''}</a>`;
+        return `<a class="mini-ev" style="background:${t.cor};${risco}" href="/agenda/evento/${e.id}">
+          <span style="width:7px;height:7px;border-radius:50%;background:${stc};flex-shrink:0;box-shadow:0 0 0 1.5px rgba(255,255,255,.7)"></span>
+          ${horaHM(e.hora_inicio)} ${safe(e.paciente_nome)}${e.modalidade==='teleconsulta'?' 🖥':''}</a>`;
       }).join('');
       return `<div class="dia ${iso===hoje?'hoje':''} ${fs.length?'feriado':''}">
-        <h3><a href="/agenda/dia/${iso}">${DIAS_ABREV[dObj(iso).getDay()]} ${dataCurta(iso)}</a></h3>
+        <h3><a href="/agenda/dia/${iso}">${DIAS_ABREV[dObj(iso).getDay()]} ${dataCurta(iso)}${ativosDia?` · ${ativosDia}`:''}</a></h3>
         ${fs.map(f=>`<div style="font-size:11px;color:#a33">🎌 ${safe(f.nome)}</div>`).join('')}
         ${evHtml || '<span class="mut" style="font-size:12px">—</span>'}
       </div>`;
     }).join('');
     const body = `${css}${topNav(req, ref, 'semana')}
-      <div class="card">
-        <h1 style="margin:0;font-size:20px">Semana de ${dataBR(seg)} a ${dataBR(sab)}</h1>
-        <div class="semana">${cols}</div>
-      </div>`;
+      <div class="semana">${cols}</div>
+      ${canEdit(req) ? fab(ref) : ''}`;
     res.send(renderShell('Agenda — semana', body));
   });
 

@@ -13,6 +13,7 @@ import { Pool } from 'pg';
 import { runLabMigrations } from './lab-db.js';       // ← ADICIONAR
 import { registerLabRoutes } from './lab-routes.js';  // ← ADICIONAR
 import { registerLfaRoutes } from './lab-lfa-routes.js';  // LFA Strip Analyzer
+import { registerLabEmissorRoutes } from './lab-emissor-routes.js';  // Emissor de laudos redesenhado (paralelo, coexiste com o atual)
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
@@ -152,6 +153,9 @@ catch (e) { console.error('ERRO registerLabRoutes', e); }
 
 try { registerLfaRoutes(app, pool, adminRequired); }
 catch (e) { console.error('ERRO registerLfaRoutes', e); }
+
+try { registerLabEmissorRoutes(app, pool, adminRequired, renderShell); }
+catch (e) { console.error('ERRO registerLabEmissorRoutes', e); }
 try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerCveNumeradoresRoutes(app, pool); }

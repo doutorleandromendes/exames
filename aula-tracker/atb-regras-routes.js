@@ -32,6 +32,19 @@ const SUB_FICHAS_72H = `(
      AND COALESCE(o.data_referencia,o.jotform_created_at,o.created_at) <  COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)
 )`;
 
+// Fichas REPETIDAS: nº de OUTRAS fichas (mesmo tenant + prontuário) com ATB sobreposto,
+// nas 72h anteriores à própria. Espelha fichas_72h_mesmo_atb do aplicarRegras.
+const SUB_FICHAS_72H_ATB = `(
+  SELECT COUNT(*)::int FROM atb_fichas o
+   WHERE o.id <> f.id AND o.deletado_em IS NULL
+     AND o.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+     AND o.prontuario = f.prontuario
+     AND jsonb_typeof(f.atb_solicitado)='array' AND jsonb_typeof(o.atb_solicitado)='array'
+     AND o.atb_solicitado ?| ARRAY(SELECT jsonb_array_elements_text(f.atb_solicitado))
+     AND COALESCE(o.data_referencia,o.jotform_created_at,o.created_at) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at) - interval '72 hours')
+     AND COALESCE(o.data_referencia,o.jotform_created_at,o.created_at) <  COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)
+)`;
+
 // Match cultura↔ficha por ATENDIMENTO na janela −30d/+5d (backfill/testar). O caminho
 // VIVO (aplicarRegras) usa buscarCulturasDaFicha, que também casa por nome; aqui, por
 // simplicidade/perf no lote, casamos só por atendimento (cobre os internados do HUSF).
@@ -78,6 +91,7 @@ const EXTRAS = [
   { key:'dias_internacao', label:'Dias desde a internação', tipo:'numero', calc:true },
   { key:'dias_uti', label:'Dias desde admissão na UTI', tipo:'numero', calc:true },
   { key:'fichas_72h_mesmo_setor', label:'Outras fichas (mesmo prontuário+setor, 72h)', tipo:'numero', calc:true },
+  { key:'fichas_72h_mesmo_atb', label:'Solicitações repetidas (mesmo prontuário+ATB, 72h)', tipo:'numero', calc:true },
   { key:'cultura_positiva',   label:'Cultura positiva (30d antes / 5d depois)', tipo:'bool',  calc:true },
   { key:'cultura_mr',         label:'Resistências em cultura (MR, 30d/5d)',     tipo:'multi', calc:true, opcoes:['EPC','ESBL','KPC','METALO','MR','MRSA','OXA-R','VRE'] },
   { key:'cultura_organismos', label:'Microrganismos em cultura (30d/5d)',       tipo:'texto', calc:true },
@@ -431,11 +445,12 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const COLS_BANCO = (await catalogoCampos(pool, inst)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
       const cols = ['id','paciente_dn','data_referencia','jotform_created_at','created_at', ...COLS_BANCO]
         .filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
-      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras, ${SUB_FICHAS_72H} AS _fichas72h, ${SUB_CULT_POS} AS _cult_pos, ${SUB_CULT_MR} AS _cult_mr, ${SUB_CULT_ORG} AS _cult_org, ${SUB_CULT_MAT} AS _cult_mat, ${SUB_CULT_HEMO} AS _cult_hemo FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}`, [inst]);
+      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras, ${SUB_FICHAS_72H} AS _fichas72h, ${SUB_FICHAS_72H_ATB} AS _fichas72hatb, ${SUB_CULT_POS} AS _cult_pos, ${SUB_CULT_MR} AS _cult_mr, ${SUB_CULT_ORG} AS _cult_org, ${SUB_CULT_MAT} AS _cult_mat, ${SUB_CULT_HEMO} AS _cult_hemo FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}`, [inst]);
       let casam=0, ja=0, vaz=0, div=0;
       for(const f of rows){
         const ctx = contextoFicha(f);
         ctx.fichas_72h_mesmo_setor = f._fichas72h || 0;
+      ctx.fichas_72h_mesmo_atb = f._fichas72hatb || 0;
         ctx.cultura_positiva = !!f._cult_pos;
         ctx.cultura_mr = f._cult_mr || [];
         ctx.cultura_organismos = f._cult_org || '';
@@ -468,7 +483,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
     if(de){  params.push(de);  filtros.push(`${dataCanon} >= $${params.length}::date`); }
     if(ate){ params.push(ate); filtros.push(`${dataCanon} < ($${params.length}::date + interval '1 day')`); }
     const { rows } = await pool.query(
-      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid, ${SUB_FICHAS_72H} AS _fichas72h, ${SUB_CULT_POS} AS _cult_pos, ${SUB_CULT_MR} AS _cult_mr, ${SUB_CULT_ORG} AS _cult_org, ${SUB_CULT_MAT} AS _cult_mat, ${SUB_CULT_HEMO} AS _cult_hemo
+      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid, ${SUB_FICHAS_72H} AS _fichas72h, ${SUB_FICHAS_72H_ATB} AS _fichas72hatb, ${SUB_CULT_POS} AS _cult_pos, ${SUB_CULT_MR} AS _cult_mr, ${SUB_CULT_ORG} AS _cult_org, ${SUB_CULT_MAT} AS _cult_mat, ${SUB_CULT_HEMO} AS _cult_hemo
          FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
         WHERE ${filtros.join(' AND ')}`, params);
     const primeira = (ctx)=> ativas.find(r=>avaliaCond(r.condicoes, ctx));
@@ -476,6 +491,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
     for(const f of rows){
       const ctx = contextoFicha(f);
       ctx.fichas_72h_mesmo_setor = f._fichas72h || 0;
+      ctx.fichas_72h_mesmo_atb = f._fichas72hatb || 0;
       ctx.cultura_positiva = !!f._cult_pos;
       ctx.cultura_mr = f._cult_mr || [];
       ctx.cultura_organismos = f._cult_org || '';

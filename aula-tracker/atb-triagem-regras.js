@@ -244,6 +244,30 @@ export async function aplicarRegras(pool, fichaId) {
       }
     }
 
+    // Fichas REPETIDAS: nº de OUTRAS fichas do MESMO tenant + MESMO prontuário com
+    // ATB sobreposto (mesmo antimicrobiano solicitado), nas 72h ANTERIORES a esta.
+    // Permite uma regra "Solicitação repetida" (condição: fichas_72h_mesmo_atb >= 1).
+    ctx.fichas_72h_mesmo_atb = 0;
+    if (f.prontuario && Array.isArray(f.atb_solicitado) && f.atb_solicitado.length) {
+      const refData = f.data_referencia || f.jotform_created_at || f.created_at || null;
+      if (refData) {
+        const rc = await pool.query(
+          `SELECT COUNT(*)::int AS n
+             FROM atb_fichas o
+            WHERE o.id <> $1
+              AND o.deletado_em IS NULL
+              AND o.instituicao_id IS NOT DISTINCT FROM $5
+              AND o.prontuario = $2
+              AND jsonb_typeof(o.atb_solicitado) = 'array'
+              AND o.atb_solicitado ?| $3::text[]
+              AND COALESCE(o.data_referencia, o.jotform_created_at, o.created_at) >= ($4::timestamptz - interval '72 hours')
+              AND COALESCE(o.data_referencia, o.jotform_created_at, o.created_at) <  $4::timestamptz`,
+          [fichaId, f.prontuario, f.atb_solicitado, refData, f.instituicao_id]
+        );
+        ctx.fichas_72h_mesmo_atb = rc.rows[0] ? rc.rows[0].n : 0;
+      }
+    }
+
     // Campos derivados de MICROBIOLOGIA (culturas casadas na janela −30d/+5d).
     // mr = LISTA (dropdown de mecanismos, match exato); organismos/materiais = TEXTO
     // concatenado (usar text_contains_any, que ignora acento/cedilha/caixa).

@@ -289,6 +289,7 @@ export function fichaCardAssets() {
         <button type="button" class="fc-btn fc-ico" id="fc-pront" title="Copiar prontuário">📋🔢</button>
         <a class="fc-btn fc-ico" id="fc-imagem" href="#" title="Copiar imagem do parecer">📋🖼️</a>
         <a class="fc-btn" id="fc-completa" href="#">Ver ficha completa</a>
+        <a class="fc-btn" id="fc-anteriores" href="#" target="_blank" rel="noopener" title="Buscar outras fichas deste paciente">🔎 Fichas anteriores</a>
         <a class="fc-btn prim" id="fc-parecer" href="#">✎ Emitir / editar parecer</a>
       </div>
     </div>
@@ -307,6 +308,7 @@ export function fichaCardAssets() {
     var btnParecer = document.getElementById('fc-parecer');
     var btnImagem = document.getElementById('fc-imagem');
     var btnPront = document.getElementById('fc-pront');
+    var btnAnteriores = document.getElementById('fc-anteriores');
     var prontAtual = '';
     var idAtual = null;
 
@@ -329,6 +331,7 @@ export function fichaCardAssets() {
       btnCompleta.href = '/atb/admin/ficha/' + id;
       btnParecer.href  = '/atb/admin/parecer/' + id;
       btnImagem.href   = '/atb/admin/parecer/' + id + '/imagem';
+      if(btnAnteriores){ btnAnteriores.href = '#'; }
       prontAtual = '';
       carregarH2C().catch(function(){});  // pré-carrega p/ a cópia de imagem ser rápida
       nomeEl.textContent = '—'; metaEl.textContent = '';
@@ -358,6 +361,7 @@ export function fichaCardAssets() {
           }
           metaEl.textContent = j.meta || '';
           prontAtual = j.prontuario || '';
+          if(btnAnteriores){ btnAnteriores.href = j.busca ? '/atb/admin/grid?q=' + encodeURIComponent(j.busca) : '#'; }
           contentEl.innerHTML = j.html || '<div class="fc-loading">Sem dados.</div>';
         })
         .catch(function(){ contentEl.innerHTML = '<div class="fc-loading">Erro de rede.</div>'; });
@@ -467,6 +471,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         nome: _safe(nome),
         meta: _safe(metaParts.join(' · ')),
         prontuario: f.prontuario || '',
+        busca: String(f.prontuario || '').trim() || (f.paciente_nome_raw || f.paciente_nome || ''),
         html: renderHemoCard(hemo) + renderCulturasCard(culturas) + renderCardBody(f, evol, _safe),
         mr: culturasTemMR(culturas) ? '⚠ Multirresistente' : null,
         nomePacs: _divergePacs ? _safe(_np.nome_pacs) : null,

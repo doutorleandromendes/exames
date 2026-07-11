@@ -98,6 +98,52 @@ async function getCollectionData(pool, collectionId) {
 
 export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) {
 
+  // Migração idempotente (autocontida): largura de exibição por imagem (% da largura útil)
+  (async () => {
+    try { await pool.query(`ALTER TABLE lab_result_images ADD COLUMN IF NOT EXISTS display_width INTEGER`); }
+    catch (e) { console.error('EMISSOR MIGRATION display_width', e); }
+  })();
+
+  // ── Imagem: atualizar largura e/ou legenda ───────────────────
+  app.post('/lab/admin/images/:id/update', adminRequired, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const sets = [], vals = []; let i = 1;
+      if (req.body?.display_width != null) {
+        const w = Math.max(10, Math.min(100, parseInt(req.body.display_width, 10) || 50));
+        sets.push(`display_width=$${i++}`); vals.push(w);
+      }
+      if (req.body?.caption != null) {
+        sets.push(`caption=$${i++}`); vals.push(String(req.body.caption).trim() || null);
+      }
+      if (!sets.length) return res.json({ ok: true });
+      vals.push(id);
+      await pool.query(`UPDATE lab_result_images SET ${sets.join(', ')} WHERE id=$${i}`, vals);
+      res.json({ ok: true });
+    } catch (err) { console.error('EMISSOR IMG UPDATE', err); res.status(500).json({ error: err.message }); }
+  });
+
+  // ── Imagem: reordenar (troca sort_index com o vizinho) ───────
+  app.post('/lab/admin/images/:id/move', adminRequired, async (req, res) => {
+    try {
+      const id  = parseInt(req.params.id, 10);
+      const dir = req.body?.dir === 'up' ? 'up' : 'down';
+      const { rows: [cur] } = await pool.query('SELECT result_id FROM lab_result_images WHERE id=$1', [id]);
+      if (!cur) return res.status(404).json({ error: 'não encontrado' });
+      const { rows } = await pool.query(
+        'SELECT id, sort_index FROM lab_result_images WHERE result_id=$1 ORDER BY sort_index NULLS LAST, id', [cur.result_id]);
+      const idx = rows.findIndex(x => x.id === id);
+      const j = dir === 'up' ? idx - 1 : idx + 1;
+      if (idx < 0 || j < 0 || j >= rows.length) return res.json({ ok: true });
+      const a = rows[idx], b = rows[j];
+      const sa = a.sort_index == null ? idx * 10 : a.sort_index;
+      const sb = b.sort_index == null ? j   * 10 : b.sort_index;
+      await pool.query('UPDATE lab_result_images SET sort_index=$1 WHERE id=$2', [sb, a.id]);
+      await pool.query('UPDATE lab_result_images SET sort_index=$1 WHERE id=$2', [sa, b.id]);
+      res.json({ ok: true });
+    } catch (err) { console.error('EMISSOR IMG MOVE', err); res.status(500).json({ error: err.message }); }
+  });
+
   // ── Catálogo rico ─────────────────────────────────────────────
   app.get('/lab/admin/api/exames-catalogo', adminRequired, (req, res) => {
     try { res.json(catalogoParaEmissor()); }
@@ -143,10 +189,32 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
         const rich = /[\r\n*_]/.test(mainValue || '') || (mainValue || '').length > 48;
         const fmtVal = fmt(mainValue);
         const nImg = r._img_count || (r.images ? r.images.length : 0);
-        const thumbs = (r.images || []).map(im => `
-          <div class="thumb"><div class="ph" style="background-image:url('${im.dataUri}')"></div>
-            <button type="button" class="rmimg" data-del="/lab/admin/images/${im.id}/delete">×</button>
-            ${im.caption ? `<div class="cap">${safe(im.caption)}</div>` : ''}</div>`).join('');
+        const nList = (r.images || []).length;
+        const imgManager = (r.images || []).map((im, ix) => {
+          const w = Math.max(10, Math.min(100, im.display_width || 50));
+          return `
+          <div class="imgrow" data-img="${im.id}">
+            <div class="ph" style="background-image:url('${im.dataUri}')"></div>
+            <div class="imgmeta">
+              <input class="capin" value="${safe(im.caption || '')}" placeholder="legenda (opcional)" data-cap="${im.id}">
+              <div class="sizerow">
+                <div class="presets" data-size="${im.id}">
+                  <button type="button" data-w="25"  class="${w===25?'on':''}">P</button>
+                  <button type="button" data-w="50"  class="${w===50?'on':''}">M</button>
+                  <button type="button" data-w="75"  class="${w===75?'on':''}">G</button>
+                  <button type="button" data-w="100" class="${w===100?'on':''}">Full</button>
+                </div>
+                <input type="range" min="10" max="100" step="5" value="${w}" class="wslider" data-slider="${im.id}">
+                <span class="wval" data-wval="${im.id}">${w}%</span>
+              </div>
+            </div>
+            <div class="imgacts">
+              <button type="button" data-move="up"   data-id="${im.id}" ${ix===0?'disabled':''}>↑</button>
+              <button type="button" data-move="down" data-id="${im.id}" ${ix===nList-1?'disabled':''}>↓</button>
+              <button type="button" class="rmimg" data-del="/lab/admin/images/${im.id}/delete">×</button>
+            </div>
+          </div>`;
+        }).join('');
         const rightCell = rich
           ? `<div class="rvr">ref: ${safe(r.reference_value || '—')}</div>`
           : `<div class="rv" style="color:${color}">${fmtVal}</div><div class="rvr">ref: ${safe(r.reference_value || '—')}</div>`;
@@ -167,9 +235,11 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
             <button data-del="/lab/admin/resultados/${r.id}/delete">remover</button>
           </div>
           <div class="tray" id="tray${r.id}">
-            ${thumbs}
-            <button class="trayadd" data-upl="${r.id}">+ imagem</button>
-            <a class="lfabtn" href="/lab/admin/lfa?resultado=${r.id}">Analisar cassete LFA →</a>
+            <div class="imglist">${imgManager}</div>
+            <div class="trayfoot">
+              <button class="trayadd" data-upl="${r.id}">+ imagem</button>
+              <a class="lfabtn" href="/lab/admin/lfa?resultado=${r.id}">Analisar cassete LFA →</a>
+            </div>
           </div>
         </div>`;
       }).join('') || `<div class="emptylist">Nenhum exame ainda. Adicione o primeiro acima.</div>`;
@@ -244,12 +314,25 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 .res-full .rl{display:block;font-family:var(--mono);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
 .res-full .rt{font-size:.92rem;line-height:1.55;word-break:break-word}
 .acts{display:flex;gap:.9rem;padding:0 .3rem .7rem 1.3rem;font-family:var(--mono);font-size:.68rem}.acts button{background:none;border:none;color:var(--muted);padding:0;text-decoration:underline;text-underline-offset:2px}.acts button:hover{color:var(--safranin)}.acts .imgn{color:var(--safranin)}
-.tray{display:none;padding:.3rem .3rem 1rem 1.3rem;gap:.7rem;flex-wrap:wrap;align-items:flex-end}.tray.open{display:flex}
-.thumb{width:82px;position:relative}.thumb .ph{width:82px;height:82px;border-radius:9px;border:1px solid var(--hair);background:var(--slide-2) center/cover no-repeat}
-.rmimg{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(33,28,29,.6);color:#fff;border:none;font-size:.7rem;line-height:1}
-.thumb .cap{font-family:var(--mono);font-size:.56rem;color:var(--muted);margin-top:3px;text-align:center}
-.trayadd{border:1px dashed var(--hair-dark);background:transparent;border-radius:9px;width:82px;height:82px;color:var(--muted);font-size:.66rem}.trayadd:hover{border-color:var(--safranin);color:var(--safranin)}
-.lfabtn{align-self:center;background:var(--safranin);color:#fff;border:none;border-radius:9px;padding:.5rem .8rem;font-size:.74rem;font-family:var(--mono);text-decoration:none}
+.tray{display:none;padding:.5rem .3rem 1rem 1.3rem;flex-direction:column;gap:.6rem}.tray.open{display:flex}
+.imglist{display:flex;flex-direction:column;gap:.6rem}
+.imgrow{display:flex;gap:.7rem;align-items:flex-start;padding:.6rem;border:1px solid var(--hair);border-radius:10px;background:#fff}
+.imgrow .ph{width:96px;height:96px;flex:0 0 auto;border-radius:8px;border:1px solid var(--hair);background:var(--slide-2) center/cover no-repeat}
+.imgmeta{flex:1;min-width:0;display:flex;flex-direction:column;gap:.5rem}
+.capin{width:100%;padding:.4rem .6rem;border:1px solid var(--hair);border-radius:8px;font-size:.85rem;background:#fff}
+.sizerow{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.presets{display:inline-flex;border:1px solid var(--hair);border-radius:8px;overflow:hidden}
+.presets button{border:none;background:#fff;padding:.35rem .6rem;font-size:.78rem;color:var(--muted);border-right:1px solid var(--hair)}
+.presets button:last-child{border-right:none}.presets button.on{background:var(--safranin);color:#fff}
+.wslider{flex:1;min-width:90px;accent-color:var(--safranin)}
+.wval{font-family:var(--mono);font-size:.72rem;color:var(--muted);min-width:38px;text-align:right}
+.imgacts{display:flex;flex-direction:column;gap:.3rem}
+.imgacts button{width:28px;height:26px;border:1px solid var(--hair);background:#fff;border-radius:6px;color:var(--muted);font-size:.85rem}
+.imgacts button[disabled]{opacity:.35}
+.imgacts .rmimg{color:var(--safranin)}
+.trayfoot{display:flex;gap:.7rem;align-items:center}
+.trayadd{border:1px dashed var(--hair-dark);background:transparent;border-radius:9px;padding:.5rem .8rem;color:var(--muted);font-size:.74rem;font-family:var(--mono)}.trayadd:hover{border-color:var(--safranin);color:var(--safranin)}
+.lfabtn{background:var(--safranin);color:#fff;border:none;border-radius:9px;padding:.5rem .8rem;font-size:.74rem;font-family:var(--mono);text-decoration:none}
 .emptylist{padding:1.4rem .3rem;color:var(--muted-2);font-style:italic}
 .emit{position:sticky;top:76px}.emit h2{font-size:1.1rem;margin-bottom:.9rem}
 .line{display:flex;justify-content:space-between;padding:.5rem 0;font-size:.88rem;border-top:1px solid var(--slide-2)}.line:first-of-type{border-top:none}.line .k{color:var(--muted)}.line .v{font-family:var(--mono);font-weight:500}
@@ -380,12 +463,25 @@ $("#addBtn").onclick=async()=>{if(!sel||!resultVal)return;$("#addBtn").disabled=
 /* row actions (fetch + reload) */
 $("#list").addEventListener("click",async e=>{
   const b=e.target.closest("button");if(!b)return;
-  if(b.dataset.del){const msg=b.classList.contains("rmimg")?"Remover imagem?":"Remover exame?";if(!confirm(msg))return;await postForm(b.dataset.del);location.reload();}
+  if(b.dataset.del){const isImg=b.classList.contains("rmimg");const msg=isImg?"Remover imagem?":"Remover exame?";if(!confirm(msg))return;if(isImg){const rid=b.closest(".res")&&b.closest(".res").dataset.id;if(rid)sessionStorage.setItem("openTray",rid);}await postForm(b.dataset.del);location.reload();}
   else if(b.dataset.dup){const r=await fetch("/lab/admin/resultados/"+b.dataset.dup+"/json");const d=await r.json();prefillDup(d);window.scrollTo({top:0,behavior:"smooth"});}
   else if(b.dataset.edit){openEdit(b.dataset.edit);}
   else if(b.dataset.img){$("#tray"+b.dataset.img).classList.toggle("open");}
   else if(b.dataset.upl){uploadImg(b.dataset.upl);}
+  else if(b.dataset.move){const rid=b.closest(".res")&&b.closest(".res").dataset.id;moveImg(b.dataset.id,b.dataset.move,rid);}
+  else if(b.dataset.w!==undefined&&b.closest(".presets")){const id=b.closest(".presets").dataset.size;const w=+b.dataset.w;setSize(id,w);syncSize(id,w);}
 });
+/* slider de tamanho (ao vivo, com debounce) */
+let _szTimer={};
+$("#list").addEventListener("input",e=>{const s=e.target.closest(".wslider");if(!s)return;const id=s.dataset.slider,w=+s.value;syncSize(id,w);clearTimeout(_szTimer[id]);_szTimer[id]=setTimeout(()=>setSize(id,w),300);});
+/* editar legenda (ao sair do campo) */
+$("#list").addEventListener("change",e=>{const c=e.target.closest(".capin");if(!c)return;setCaption(c.dataset.cap,c.value);});
+function syncSize(id,w){const p=document.querySelector('.presets[data-size="'+id+'"]');if(p)p.querySelectorAll("button").forEach(b=>b.classList.toggle("on",+b.dataset.w===w));const s=document.querySelector('.wslider[data-slider="'+id+'"]');if(s&&+s.value!==w)s.value=w;const v=document.querySelector('[data-wval="'+id+'"]');if(v)v.textContent=w+"%";}
+async function setSize(id,w){try{await fetch("/lab/admin/images/"+id+"/update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_width:w})});}catch(e){}}
+async function setCaption(id,cap){try{await fetch("/lab/admin/images/"+id+"/update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({caption:cap})});}catch(e){}}
+async function moveImg(id,dir,rid){if(rid)sessionStorage.setItem("openTray",rid);await fetch("/lab/admin/images/"+id+"/move",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dir})});location.reload();}
+/* reabre a bandeja após reload (reordenar/remover imagem) */
+(function(){const ot=sessionStorage.getItem("openTray");if(ot){sessionStorage.removeItem("openTray");const t=document.getElementById("tray"+ot);if(t)t.classList.add("open");}})();
 
 async function postForm(action){await fetch(action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:""});}
 

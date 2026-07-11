@@ -84,10 +84,13 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
       : '';
     const imagesHtml = (r.images && r.images.length)
       ? `<div class="imgs"><div class="il">Imagens</div><div class="grid">
-           ${r.images.map(img => `<div class="im">
-             <img src="${img.dataUri}" alt="${safe(img.caption || '')}">
-             ${img.caption ? `<div class="cap">${safe(img.caption)}</div>` : ''}
-           </div>`).join('')}
+           ${r.images.map(img => {
+             const w = Math.max(10, Math.min(100, img.display_width || 50));
+             return `<div class="im" style="width:calc(${w}% - 8px)">
+               <img src="${img.dataUri}" alt="${safe(img.caption || '')}">
+               ${img.caption ? `<div class="cap">${safe(img.caption)}</div>` : ''}
+             </div>`;
+           }).join('')}
          </div></div>`
       : '';
 
@@ -161,9 +164,9 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
   .obs{margin-top:5px;font-size:10.5px;color:var(--muted);font-style:italic}
   .imgs{margin-top:7px}
   .imgs .il{font-family:var(--mono);font-size:7.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
-  .imgs .grid{display:flex;gap:8px;flex-wrap:wrap}
-  .imgs .im{width:120px}
-  .imgs .im img{width:120px;height:auto;border-radius:4px;border:1px solid var(--hair);display:block}
+  .imgs .grid{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+  .imgs .im{flex:0 0 auto;min-width:60px}
+  .imgs .im img{width:100%;height:auto;max-height:80mm;object-fit:contain;border-radius:4px;border:1px solid var(--hair);display:block}
   .imgs .cap{font-family:var(--mono);font-size:7px;color:var(--muted);margin-top:2px;text-align:center}
   /* assinatura */
   .sign{margin-top:16px;padding:12px 14px;background:var(--slide);border-radius:10px;display:flex;gap:12px;align-items:center;page-break-inside:avoid}

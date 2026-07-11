@@ -82,6 +82,10 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
     const obs = r.observation
       ? `<div class="obs">${safe(r.observation)}</div>`
       : '';
+    const _m = (r.method || '').trim().toLowerCase();
+    const stdNote = (/^(sorologia|ant[ií]geno|marcador)$/.test(_m) || /imunocrom/.test(_m))
+      ? `<div class="stdnote">Teste realizado como ferramenta propedêutica complementar a consulta médica, deve ser interpretado em conjunto com dados clínicos em caráter de triagem, sem valor diagnóstico.</div>`
+      : '';
     const imagesHtml = (r.images && r.images.length)
       ? `<div class="imgs"><div class="il">Imagens</div><div class="grid">
            ${r.images.map(img => {
@@ -108,6 +112,7 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
         </div>
         ${tcHtml}
         ${obs}
+        ${stdNote}
         ${imagesHtml}
       </div>`;
   }).join('');
@@ -162,6 +167,7 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
   .tcsec .tl{font-family:var(--mono);font-size:7.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
   .tcsec .tv{font-family:var(--mono);font-size:10px;color:var(--ink-soft);font-weight:500}
   .obs{margin-top:5px;font-size:10.5px;color:var(--muted);font-style:italic}
+  .stdnote{margin-top:5px;font-size:8.5px;color:var(--muted-2);font-style:italic;line-height:1.4}
   .imgs{margin-top:7px}
   .imgs .il{font-family:var(--mono);font-size:7.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
   .imgs .grid{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
@@ -183,12 +189,12 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
     <div class="head">
       <div class="clinic">
         <div class="nm">Consultório Dr. Leandro Mendes</div>
-        <div class="sp">Infectologia · Diagnóstico</div>
+        <div class="sp">Infectologia · Testes Complementares</div>
         <div class="reg">CRM 134.985/SP · RQE 61.808</div>
       </div>
       <div class="doc">
         <div>
-          <div class="dt">Resultado de Exame</div>
+          <div class="dt">Resultados</div>
           <div class="nl">laudo nº ${safe(lauNo)} · emitido ${todayBR}</div>
         </div>
         ${logoHtml}

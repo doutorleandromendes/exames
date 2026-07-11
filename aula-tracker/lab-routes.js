@@ -464,9 +464,9 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <td><span style="font-size:11px;background:#20242b;padding:2px 8px;border-radius:8px;color:#a7adbb">${r.exam_count} exame(s)</span></td>
           <td style="font-family:monospace;font-size:12px;color:#a7adbb">${safe(r.key_code || '—')}</td>
           <td>
-            <a href="/lab/admin/coletas/${r.id}">abrir</a> ·
-            <a href="/lab/admin/coletas/${r.id}/preview" target="_blank">preview PDF</a> ·
-            <a href="/lab/admin/coletas/${r.id}/emissor" style="color:#e6a5b3;font-weight:600">emissor ✨</a>
+            <a href="/lab/admin/coletas/${r.id}/emissor">abrir</a> ·
+            <a href="/lab/admin/coletas/${r.id}/preview2" target="_blank">preview PDF</a> ·
+            <a href="/lab/admin/coletas/${r.id}" style="color:#8a8f9a;font-size:11px">clássico</a>
           </td>
         </tr>
       `).join('');
@@ -734,10 +734,10 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <td><strong>${toBR(c.collected_at)}</strong></td>
           <td>${c.exam_count} exame(s)</td>
           <td>
-            <a href="/lab/admin/coletas/${c.id}">editar</a> ·
-            <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">preview PDF</a> ·
-            <a href="/lab/admin/coletas/${c.id}/pdf">baixar PDF</a> ·
-            <a href="/lab/admin/coletas/${c.id}/emissor" style="color:#e6a5b3;font-weight:600">emissor ✨</a>
+            <a href="/lab/admin/coletas/${c.id}/emissor">editar</a> ·
+            <a href="/lab/admin/coletas/${c.id}/preview2" target="_blank">preview PDF</a> ·
+            <a href="/lab/admin/coletas/${c.id}/pdf2">baixar PDF</a> ·
+            <a href="/lab/admin/coletas/${c.id}" style="color:#8a8f9a;font-size:11px">clássico</a>
           </td>
         </tr>
       `).join('');
@@ -846,7 +846,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
         'INSERT INTO lab_collections (patient_id, collected_at) VALUES ($1, $2) RETURNING id',
         [parseInt(patient_id, 10), collected_at]
       );
-      res.redirect(`/lab/admin/coletas/${c.id}`);
+      res.redirect(`/lab/admin/coletas/${c.id}/emissor`);
     } catch (err) {
       console.error('LAB CREATE COLLECTION ERROR', err);
       res.status(500).send('Falha ao criar coleta');

@@ -465,7 +465,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <td style="font-family:monospace;font-size:12px;color:#a7adbb">${safe(r.key_code || '—')}</td>
           <td>
             <a href="/lab/admin/coletas/${r.id}">abrir</a> ·
-            <a href="/lab/admin/coletas/${r.id}/preview" target="_blank">preview PDF</a>
+            <a href="/lab/admin/coletas/${r.id}/preview" target="_blank">preview PDF</a> ·
+            <a href="/lab/admin/coletas/${r.id}/emissor" style="color:#e6a5b3;font-weight:600">emissor ✨</a>
           </td>
         </tr>
       `).join('');
@@ -735,7 +736,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <td>
             <a href="/lab/admin/coletas/${c.id}">editar</a> ·
             <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">preview PDF</a> ·
-            <a href="/lab/admin/coletas/${c.id}/pdf">baixar PDF</a>
+            <a href="/lab/admin/coletas/${c.id}/pdf">baixar PDF</a> ·
+            <a href="/lab/admin/coletas/${c.id}/emissor" style="color:#e6a5b3;font-weight:600">emissor ✨</a>
           </td>
         </tr>
       `).join('');

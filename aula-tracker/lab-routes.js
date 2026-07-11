@@ -434,7 +434,11 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
   // ============================================================
 
   // GET /lab/admin — visão geral
-  app.get('/lab/admin', adminRequired, async (req, res) => {
+  // Landing do lab admin → Painel (hub de features)
+  app.get('/lab/admin', adminRequired, (req, res) => res.redirect('/lab/admin/painel'));
+
+  // Lista de coletas recentes (antiga landing, agrupa por paciente)
+  app.get('/lab/admin/coletas', adminRequired, async (req, res) => {
     try {
       const { rows: [s] } = await pool.query(`
         SELECT
@@ -1464,7 +1468,8 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
       const data = await getCollectionData(pool, parseInt(req.params.id, 10));
       if (!data) return res.status(404).send('Coleta não encontrada');
       const pdf = await generateLabPdf(data);
-      const fname = `Laudo_${data.patient.full_name.replace(/\s+/g, '_')}_${data.collection.collected_at}.pdf`;
+      const _iso = data.collection.collected_at instanceof Date ? data.collection.collected_at.toISOString().slice(0, 10) : String(data.collection.collected_at || '').slice(0, 10);
+      const fname = `Laudo_${data.patient.full_name.replace(/\s+/g, '_')}_${_iso}.pdf`;
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`);
       res.send(pdf);
@@ -1729,7 +1734,8 @@ json_build_object(
       if (!data) return res.status(404).send('Coleta não encontrada');
 
       const pdf   = await generateLabPdf(data);
-      const fname = `Laudo_${patient.full_name.replace(/\s+/g, '_')}_${data.collection.collected_at}.pdf`;
+      const _iso = data.collection.collected_at instanceof Date ? data.collection.collected_at.toISOString().slice(0, 10) : String(data.collection.collected_at || '').slice(0, 10);
+      const fname = `Laudo_${patient.full_name.replace(/\s+/g, '_')}_${_iso}.pdf`;
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fname)}"`);
       res.send(pdf);

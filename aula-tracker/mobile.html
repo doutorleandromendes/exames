@@ -207,11 +207,13 @@ function screenHome(root){
     </div></div>`;
   root.appendChild(atb);
 
-  // atalhos do consultório: estoque de testes rápidos + orçamento de exames
+  // atalhos do consultório: agenda + estoque de testes rápidos + orçamento de exames
   const est=document.createElement("div");
   est.innerHTML=`<div class="card"><h2>Consultório</h2>
-    <p class="hint" style="margin:0 0 12px">Estoque dos testes rápidos e orçamento de exames.</p>
+    <p class="hint" style="margin:0 0 12px">Agenda do dia, estoque dos testes rápidos e orçamento de exames.</p>
     <div class="tiles">
+      <a class="tile" style="display:block;text-decoration:none;color:inherit" href="/agenda">
+        <div class="ic">🗓️</div><div class="t">Agenda</div><div class="d">Consultas do dia</div></a>
       <a class="tile" style="display:block;text-decoration:none;color:inherit" href="/estoque">
         <div class="ic">📦</div><div class="t">Estoque</div><div class="d">Contagem e reposição</div></a>
       <a class="tile" style="display:block;text-decoration:none;color:inherit" href="/secretaria#orcamento">

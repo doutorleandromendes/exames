@@ -54,6 +54,12 @@ button{font-family:inherit;cursor:pointer}
 .seal .mono-lm{font-family:var(--serif);font-weight:540;font-size:34px;fill:currentColor}
 
 /* ---------- nav ---------- */
+.announce{background:var(--safranin);color:#f6f3ee}
+.announce-in{display:flex;align-items:center;justify-content:center;gap:.55rem;padding:.55rem 1rem;
+  text-align:center;font-size:.83rem;letter-spacing:.005em;line-height:1.35}
+.announce svg{width:17px;height:17px;flex:0 0 auto;opacity:.92}
+.announce strong{font-weight:600;color:#fff}
+@media (max-width:520px){.announce-in{font-size:.76rem;padding:.5rem .8rem}}
 .nav{position:sticky;top:0;z-index:50;background:rgba(246,243,238,.85);
   backdrop-filter:blur(10px);border-bottom:1px solid var(--hair)}
 .nav-in{display:flex;align-items:center;gap:1.5rem;padding:.7rem 0;min-height:60px}
@@ -299,6 +305,14 @@ footer{background:#191415;color:#b4a9a3;padding:3rem 0 2rem;font-size:.88rem}
 </head>
 <body>
 
+<!-- ============ ANÚNCIO / COLETA DOMICILIAR ============ -->
+<div class="announce">
+  <div class="wrap announce-in">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9h5v-5h4v5h5v-9"/></svg>
+    <span>Coleta domiciliar em <strong>Bragança Paulista e região</strong> — inclusive aos fins de semana</span>
+  </div>
+</div>
+
 <!-- ============ NAV ============ -->
 <nav class="nav">
   <div class="wrap nav-in">
@@ -524,7 +538,7 @@ footer{background:#191415;color:#b4a9a3;padding:3rem 0 2rem;font-size:.88rem}
       </div>
       <div class="foot-col">
         <h4>Consultório</h4>
-        <p>Euroville Tower Corporate<br>Praça Maastrich, 200 — sala 604<br>Bragança Paulista — SP</p>
+        <p>Euroville Tower Corporate<br>Praça Maastrich, 200 — sala 603<br>Bragança Paulista — SP</p>
       </div>
       <div class="foot-col">
         <h4>Contato</h4>

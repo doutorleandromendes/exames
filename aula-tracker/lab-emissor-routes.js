@@ -30,6 +30,11 @@ function toBR(d) {
   const dt = new Date(s.length === 10 ? s + 'T12:00:00' : s);
   return isNaN(dt) ? s : dt.toLocaleDateString('pt-BR');
 }
+// YYYY-MM-DD robusto (Date do node-postgres ou string ISO) — p/ nome de arquivo
+function isoDate(v) {
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v || '').slice(0, 10);
+}
 function ageFrom(birth) {
   const d = new Date(String(birth).slice(0, 10) + 'T12:00:00');
   if (isNaN(d)) return null;
@@ -166,7 +171,7 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
       const data = await getCollectionData(pool, parseInt(req.params.id, 10));
       if (!data) return res.status(404).send('Coleta não encontrada');
       const pdf = await generateLabPdfV2(data);
-      const fname = `Laudo_${data.patient.full_name.replace(/\s+/g, '_')}_${data.collection.collected_at}.pdf`;
+      const fname = `Laudo_${data.patient.full_name.replace(/\s+/g, '_')}_${isoDate(data.collection.collected_at)}.pdf`;
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fname)}"`);
       res.send(pdf);
@@ -541,7 +546,7 @@ function painelHtml() {
 
   const tiles = [
     tile('Pacientes', 'Cadastrar e gerenciar pacientes e chaves de acesso.', '/lab/admin/pacientes', 'users', false),
-    tile('Coletas &amp; Laudos', 'Coletas recentes, abrir no emissor e emitir laudos.', '/lab/admin', 'doc', false),
+    tile('Coletas &amp; Laudos', 'Coletas recentes, abrir no emissor e emitir laudos.', '/lab/admin/coletas', 'doc', false),
     tile('Estoque', 'Controle de estoque dos testes rápidos.', '/estoque', 'box', false),
     tile('Analisador LFA', 'Ler o cassete do teste rápido (relação T/C).', '/lab/admin/lfa', 'scan', false),
     tile('Cadastro de exames', 'Editar o catálogo — método, amostra, grupo, descrição.', 'https://consultorio.lcmendes.med.br/diagnostico/admin.html', 'list', true),

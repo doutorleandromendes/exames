@@ -48,6 +48,16 @@ function resultColorCSS(value, storedColor) {
   if (/REAGENTE|POSITIVO|PRESENTE|CRESCIMENTO|DETECTADO/.test(v)) return '#6e2c3c';
   return '#211c1d';
 }
+// Formatação de resultado para exibição na lista (espelha o PDF):
+// *negrito*, _itálico_, SENSÍVEL/RESISTENTE, e quebras de linha.
+function fmt(value) {
+  return safe((value || '').trim())
+    .replace(/\*(.+?)\*/gs, '<strong>$1</strong>')
+    .replace(/_(.+?)_/gs,   '<em>$1</em>')
+    .replace(/SENSÍVEL A:/gi,   '<span style="color:#3f6b4c;font-weight:700">SENSÍVEL A:</span>')
+    .replace(/RESISTENTE A:/gi, '<span style="color:#6e2c3c;font-weight:700">RESISTENTE A:</span>')
+    .replace(/\r\n|\r|\n/g, '<br>');
+}
 
 // Cópia local do carregador (não importa de lab-routes.js para manter
 // o módulo autocontido; devolve collection.id para o nº do laudo).
@@ -130,18 +140,26 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
         const tcMatch = r.result_value ? r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/) : null;
         const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
         const color = resultColorCSS(mainValue, r.result_color);
+        const rich = /[\r\n*_]/.test(mainValue || '') || (mainValue || '').length > 48;
+        const fmtVal = fmt(mainValue);
         const nImg = r._img_count || (r.images ? r.images.length : 0);
         const thumbs = (r.images || []).map(im => `
           <div class="thumb"><div class="ph" style="background-image:url('${im.dataUri}')"></div>
             <button type="button" class="rmimg" data-del="/lab/admin/images/${im.id}/delete">×</button>
             ${im.caption ? `<div class="cap">${safe(im.caption)}</div>` : ''}</div>`).join('');
+        const rightCell = rich
+          ? `<div class="rvr">ref: ${safe(r.reference_value || '—')}</div>`
+          : `<div class="rv" style="color:${color}">${fmtVal}</div><div class="rvr">ref: ${safe(r.reference_value || '—')}</div>`;
+        const richBlock = rich
+          ? `<div class="res-full" style="border-color:${color}"><span class="rl">Resultado</span><div class="rt" style="color:${color}">${fmtVal}</div></div>`
+          : '';
         return `
         <div class="res" data-id="${r.id}">
-          <div class="head"><div class="rail" style="background:${/(#6e2c3c)/.test(color) ? 'var(--safranin)' : 'var(--hair)'}"></div>
+          <div class="head"><div class="rail" style="background:${color === '#6e2c3c' ? 'var(--safranin)' : 'var(--hair)'}"></div>
             <div class="body"><div class="rn">${safe(r.exam_name)}</div>
               <div class="rm">${safe(r.method)} · ${safe(r.sample_type)}</div></div>
-            <div class="rr"><div class="rv" style="color:${color}">${safe(mainValue)}</div>
-              <div class="rvr">ref: ${safe(r.reference_value || '—')}</div></div></div>
+            <div class="rr">${rightCell}</div></div>
+          ${richBlock}
           <div class="acts">
             <button data-dup="${r.id}">duplicar</button>
             <button data-edit="${r.id}">editar</button>
@@ -221,7 +239,10 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 .res{border-top:1px solid var(--slide-2)}.res:first-child{border-top:none}
 .res .head{display:flex;align-items:center;gap:1rem;padding:.85rem .3rem}.res .rail{width:3px;align-self:stretch;border-radius:3px;min-height:40px}
 .res .body{flex:1;min-width:0}.res .rn{font-family:var(--serif);font-size:1.02rem;font-weight:500}.res .rm{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;color:var(--muted-2);text-transform:uppercase;margin-top:2px}
-.res .rr{text-align:right;white-space:nowrap}.res .rv{font-weight:600;font-size:.98rem}.res .rvr{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:2px}
+.res .rr{text-align:right;white-space:normal;max-width:46%}.res .rv{font-weight:600;font-size:.98rem}.res .rvr{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-top:2px}
+.res-full{margin:0 .3rem .5rem 1.3rem;padding:.55rem .75rem;border-left:2px solid var(--hair);background:var(--slide);border-radius:0 8px 8px 0}
+.res-full .rl{display:block;font-family:var(--mono);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
+.res-full .rt{font-size:.92rem;line-height:1.55;word-break:break-word}
 .acts{display:flex;gap:.9rem;padding:0 .3rem .7rem 1.3rem;font-family:var(--mono);font-size:.68rem}.acts button{background:none;border:none;color:var(--muted);padding:0;text-decoration:underline;text-underline-offset:2px}.acts button:hover{color:var(--safranin)}.acts .imgn{color:var(--safranin)}
 .tray{display:none;padding:.3rem .3rem 1rem 1.3rem;gap:.7rem;flex-wrap:wrap;align-items:flex-end}.tray.open{display:flex}
 .thumb{width:82px;position:relative}.thumb .ph{width:82px;height:82px;border-radius:9px;border:1px solid var(--hair);background:var(--slide-2) center/cover no-repeat}

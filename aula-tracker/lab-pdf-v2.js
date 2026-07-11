@@ -56,7 +56,8 @@ function formatResultText(value) {
     .replace(/_(.+?)_/gs,   '<em>$1</em>')
     .replace(/^EM ANDAMENTO$/im, '<em style="color:#8a807c">Em andamento</em>')
     .replace(/SENSÍVEL A:/gi,   '<span style="color:#3f6b4c;font-weight:700">SENSÍVEL A:</span>')
-    .replace(/RESISTENTE A:/gi, '<span style="color:#6e2c3c;font-weight:700">RESISTENTE A:</span>');
+    .replace(/RESISTENTE A:/gi, '<span style="color:#6e2c3c;font-weight:700">RESISTENTE A:</span>')
+    .replace(/\r\n|\r|\n/g, '<br>');   // quebras de linha por último (após âncoras ^/$)
 }
 
 // ── Template HTML ───────────────────────────────────────────────

@@ -253,6 +253,12 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
       res.status(500).send('Falha ao abrir o emissor: ' + safe(err.message));
     }
   });
+
+  // ── Painel do laboratório (hub de features) ──────────────────
+  app.get('/lab/admin/painel', adminRequired, (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(painelHtml());
+  });
 }
 
 // ── HTML completo da página (skin do diagnostico/) ──────────────
@@ -352,7 +358,7 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 <div class="appbar">
   <div class="seal"><span>LM</span></div>
   <div><div class="t1">Consultório Dr. Leandro Mendes</div><div class="t2">Emissor de Laudos · Infectologia</div></div>
-  <div class="crumbs"><a href="/lab/admin/coletas/${id}">← versão atual</a> &nbsp;·&nbsp; Coleta ${toBR(collection.collected_at)}</div>
+  <div class="crumbs"><a href="/lab/admin/painel" style="color:var(--safranin)">Painel</a> &nbsp;·&nbsp; <a href="/lab/admin/coletas/${id}">clássico</a> &nbsp;·&nbsp; Coleta ${toBR(collection.collected_at)}</div>
 </div>
 <div class="wrap">
   <div class="pat"><div><div class="tag">Paciente</div>
@@ -512,5 +518,79 @@ $("#editForm").addEventListener("submit",async e=>{e.preventDefault();const f=e.
   const body=new URLSearchParams(new FormData(f));
   await fetch(f.action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});location.reload();});
 </script>
+</body></html>`;
+}
+
+// ── Painel do laboratório (hub de features, skin do diagnostico/) ──
+function painelHtml() {
+  const ic = {
+    users: '<path d="M9 11a4 4 0 100-8 4 4 0 000 8zM3 21a6 6 0 0112 0M17 11a3 3 0 100-6M21 21a5 5 0 00-8-4"/>',
+    doc:   '<path d="M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6"/>',
+    box:   '<path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8"/>',
+    scan:  '<path d="M4 8V5a1 1 0 011-1h3M20 8V5a1 1 0 00-1-1h-3M4 16v3a1 1 0 001 1h3M20 16v3a1 1 0 01-1 1h-3M4 12h16"/>',
+    list:  '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+    globe: '<path d="M12 3a9 9 0 100 18 9 9 0 000-18zM3 12h18M12 3c2.5 2.5 3.5 6 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-6-3.5-9s1-6.5 3.5-9z"/>',
+    key:   '<path d="M15 7a4 4 0 11-5.7 3.6L3 17v3h3l1-1h2v-2h2l1.3-1.3A4 4 0 0115 7zM16.5 7.5h.01"/>',
+  };
+  const tile = (t, d, href, icon, ext) => `
+    <a class="tile" href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}>
+      <span class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ic[icon]}</svg></span>
+      <span class="tt">${t}${ext ? ' <span class="ext">↗</span>' : ''}</span>
+      <span class="td">${d}</span>
+    </a>`;
+
+  const tiles = [
+    tile('Pacientes', 'Cadastrar e gerenciar pacientes e chaves de acesso.', '/lab/admin/pacientes', 'users', false),
+    tile('Coletas &amp; Laudos', 'Coletas recentes, abrir no emissor e emitir laudos.', '/lab/admin', 'doc', false),
+    tile('Estoque', 'Controle de estoque dos testes rápidos.', '/estoque', 'box', false),
+    tile('Analisador LFA', 'Ler o cassete do teste rápido (relação T/C).', '/lab/admin/lfa', 'scan', false),
+    tile('Cadastro de exames', 'Editar o catálogo — método, amostra, grupo, descrição.', 'https://consultorio.lcmendes.med.br/diagnostico/admin.html', 'list', true),
+    tile('Catálogo público', 'Site “Testes Oferecidos” para os pacientes.', 'https://consultorio.lcmendes.med.br', 'globe', true),
+    tile('Portal do paciente', 'Onde o paciente acessa os resultados por chave.', '/lab', 'key', false),
+  ].join('');
+
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel do Laboratório</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,340;9..144,420;9..144,540;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#211c1d;--ink-soft:#3a2f31;--slide:#f6f3ee;--slide-2:#efeae1;--paper:#fdfcf9;--safranin:#6e2c3c;--safranin-soft:#8a3a4e;--muted:#6b615e;--muted-2:#8a807c;--hair:#e0d8cd;--hair-dark:#4a3d3f;--sans:"IBM Plex Sans",system-ui,sans-serif;--serif:"Fraunces",Georgia,serif;--mono:"IBM Plex Mono",ui-monospace,monospace}
+*{box-sizing:border-box}body{margin:0;font-family:var(--sans);color:var(--ink);line-height:1.5;background:radial-gradient(120% 90% at 82% 6%,rgba(110,44,60,.05),transparent 60%),var(--slide);-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+.appbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:1rem;padding:.7rem 1.6rem;background:rgba(246,243,238,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--hair)}
+.seal{width:38px;height:38px;border-radius:50%;border:1.5px solid var(--safranin);display:grid;place-items:center;color:var(--safranin)}
+.seal span{font-family:var(--serif);font-weight:540;font-size:19px}
+.t1{font-family:var(--serif);font-size:1rem;font-weight:540}.t2{font-family:var(--mono);font-size:.58rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.wrap{max-width:1040px;margin:0 auto;padding:2rem 1.6rem 3rem}
+.head{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.6rem}
+.tag{font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--safranin);font-weight:500}
+.head h1{font-family:var(--serif);font-weight:420;font-size:2rem;margin:.1rem 0 0;letter-spacing:-.01em}
+.newpat{background:var(--ink);color:var(--slide);border-radius:10px;padding:.6rem 1rem;font-size:.9rem;font-weight:500}.newpat:hover{background:var(--ink-soft)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+@media(max-width:820px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.grid{grid-template-columns:1fr}}
+.tile{display:flex;flex-direction:column;gap:.5rem;background:var(--paper);border:1px solid var(--hair);border-radius:16px;padding:1.2rem 1.25rem;transition:border-color .15s,transform .15s,box-shadow .15s}
+.tile:hover{border-color:var(--safranin);transform:translateY(-2px);box-shadow:0 12px 30px rgba(33,28,29,.08)}
+.ti{width:40px;height:40px;border-radius:10px;background:var(--slide-2);display:grid;place-items:center;color:var(--safranin)}
+.ti svg{width:22px;height:22px}
+.tt{font-family:var(--serif);font-size:1.12rem;font-weight:540}
+.tt .ext{font-family:var(--sans);font-size:.8rem;color:var(--muted-2)}
+.td{font-size:.85rem;color:var(--muted);line-height:1.45}
+.foot{margin-top:1.6rem;font-family:var(--mono);font-size:.68rem;color:var(--muted-2);text-align:center}
+</style></head>
+<body>
+<div class="appbar">
+  <div class="seal"><span>LM</span></div>
+  <div><div class="t1">Consultório Dr. Leandro Mendes</div><div class="t2">Painel do Laboratório · Infectologia</div></div>
+</div>
+<div class="wrap">
+  <div class="head">
+    <div><div class="tag">Laboratório</div><h1>Painel</h1></div>
+    <a class="newpat" href="/lab/admin/pacientes/novo">+ Novo paciente</a>
+  </div>
+  <div class="grid">${tiles}</div>
+  <div class="foot">Testes Complementares · uso propedêutico em caráter de triagem</div>
+</div>
 </body></html>`;
 }

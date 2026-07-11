@@ -488,6 +488,7 @@ export function registerLabRoutes(app, pool, adminRequired, renderShell) {
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h1>Portal de Resultados</h1>
             <div>
+              <a href="/lab/admin/painel" style="margin-right:12px;color:#e6a5b3;font-weight:600">Painel</a>
               <a href="/lab/admin/pacientes" style="margin-right:12px">Pacientes</a>
               <a href="/lab/admin/pacientes/novo">+ Novo paciente</a>
             </div>

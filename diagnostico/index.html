@@ -62,12 +62,12 @@ button{font-family:inherit;cursor:pointer}
 @media (max-width:520px){.announce-in{font-size:.76rem;padding:.5rem .8rem}}
 .nav{position:sticky;top:0;z-index:50;background:rgba(246,243,238,.85);
   backdrop-filter:blur(10px);border-bottom:1px solid var(--hair)}
-.nav-in{display:flex;align-items:center;gap:1.5rem;padding:.7rem 0;min-height:60px}
-.brand{display:flex;align-items:center;gap:.7rem;text-decoration:none;flex:0 0 auto}
-.brand .badge{width:36px;height:36px;flex:0 0 auto;background:var(--logo) center/contain no-repeat}
-.brand .txt{display:flex;flex-direction:column;line-height:1.05}
-.brand .t1{font-family:var(--serif);font-size:1.02rem;font-weight:540}
-.brand .t2{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.nav-in{display:flex;align-items:center;gap:1.5rem;padding:.8rem 0;min-height:66px}
+.brand{display:flex;align-items:center;gap:.8rem;text-decoration:none;flex:0 0 auto}
+.brand .badge{width:46px;height:46px;flex:0 0 auto;background:var(--logo) center/contain no-repeat}
+.brand .txt{display:flex;flex-direction:column;line-height:1.06}
+.brand .t1{font-family:var(--serif);font-size:1.3rem;font-weight:540;letter-spacing:.005em}
+.brand .t2{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-top:3px}
 .nav-links{display:flex;gap:1.4rem;margin-left:auto;align-items:center}
 .nav-links a{text-decoration:none;font-size:.9rem;color:var(--ink);opacity:.82;transition:opacity .2s}
 .nav-links a:hover{opacity:1}
@@ -97,12 +97,16 @@ button{font-family:inherit;cursor:pointer}
 .hero-visual{position:relative;display:flex;justify-content:center;align-items:center;min-height:340px}
 
 /* carimbo — assinatura visual do diferencial de rapidez */
-.stamp{position:relative;width:230px;height:230px;color:var(--safranin)}
-.stamp svg{width:100%;height:100%}
-.stamp .st-ring{fill:none;stroke:currentColor}
-.stamp .st-txt{font-family:var(--mono);font-size:10.5px;letter-spacing:.26em;fill:currentColor;font-weight:600}
-.stamp .st-big{font-family:var(--serif);font-weight:600;fill:currentColor}
-.stamp .st-sub{font-family:var(--mono);font-size:9px;letter-spacing:.2em;fill:currentColor}
+.badge-lockup{position:relative;z-index:1;display:flex;flex-direction:column;gap:.7rem;width:min(320px,86%)}
+.bl-pill{display:flex;align-items:center;border-radius:999px}
+.bl-top{border:1.5px solid var(--safranin);overflow:hidden;background:var(--paper)}
+.bl-top .bl-label{padding:.62rem 1rem;margin-right:auto;font-family:var(--serif);font-size:1.05rem;
+  font-weight:540;color:var(--safranin);letter-spacing:.005em}
+.bl-top .bl-tag{align-self:stretch;display:flex;align-items:center;background:var(--safranin);color:#fff;
+  padding:0 1.15rem;font-family:var(--serif);font-weight:600;font-size:1.15rem}
+.bl-bot{gap:.55rem;background:#f2eae0;border:1px solid var(--hair);padding:.58rem 1rem;
+  font-family:var(--mono);font-size:.74rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink)}
+.bl-bot svg{width:17px;height:17px;flex:0 0 auto;color:var(--safranin)}
 .hero-seal{position:absolute;width:118px;height:118px;opacity:.12;background:var(--logo) center/contain no-repeat;
   right:-6%;bottom:-4%}
 
@@ -351,18 +355,15 @@ footer{background:#191415;color:#b4a9a3;padding:3rem 0 2rem;font-size:.88rem}
       </div>
     </div>
     <div class="hero-visual">
-      <div class="stamp" role="img" aria-label="Resultados em até 24 horas">
-        <svg viewBox="0 0 240 240">
-          <circle class="st-ring" cx="120" cy="120" r="112" stroke-width="2"/>
-          <circle class="st-ring" cx="120" cy="120" r="92" stroke-width="1" opacity=".55"/>
-          <path id="arcTop" d="M120,120 m-100,0 a100,100 0 0,1 200,0" fill="none"/>
-          <path id="arcBot" d="M120,120 m100,0 a100,100 0 0,1 -200,0" fill="none"/>
-          <text class="st-txt"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">DIAGNÓSTICO ESPECIALIZADO</textPath></text>
-          <text class="st-txt"><textPath href="#arcBot" startOffset="50%" text-anchor="middle">DR. LEANDRO MENDES · BRAGANÇA PAULISTA</textPath></text>
-          <text class="st-big" x="120" y="118" text-anchor="middle" font-size="52">24h</text>
-          <text class="st-sub" x="120" y="146" text-anchor="middle">MÁXIMO DE ESPERA</text>
-          <line x1="72" y1="132" x2="168" y2="132" stroke="currentColor" stroke-width="1"/>
-        </svg>
+      <div class="badge-lockup" role="img" aria-label="Resultado ágil em até 24 horas; exames revisados por infectologia">
+        <div class="bl-pill bl-top">
+          <span class="bl-label">Resultado ágil</span>
+          <span class="bl-tag">≤ 24h</span>
+        </div>
+        <div class="bl-pill bl-bot">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></svg>
+          <span>Exames revisados por infectologia</span>
+        </div>
       </div>
       <span class="hero-seal" aria-hidden="true"></span>
     </div>

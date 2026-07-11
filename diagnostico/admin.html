@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel do catálogo · Consultório Dr. Leandro Mendes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,420;9..144,540&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#132430;--ink-soft:#274252;--slide:#EAEEEE;--slide-2:#E1E7E7;--paper:#FBFCFC;
+  --safranin:#A23A2B;--muted:#5A6B72;--muted-2:#7E8C91;--hair:#CBD4D5;--hair-dark:#3a5665;
+  --amber:#8a5a1c;--amber-bg:#fbf3e3;--amber-bd:#e6d2a8;
+  --slate:#3a6076;--slate-bg:#eef4f7;--slate-bd:#c4d6e0;
+  --sans:"IBM Plex Sans",system-ui,sans-serif;--serif:"Fraunces",Georgia,serif;--mono:"IBM Plex Mono",monospace;
+  --logo:url("data:image/png;base64,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");
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--slide);font-size:15px;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--serif);font-weight:420;margin:0}
+button{font-family:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--safranin);outline-offset:2px}
+a{color:var(--safranin)}
+
+/* toolbar */
+.bar{position:sticky;top:0;z-index:30;background:var(--ink);color:var(--slide);padding:.7rem 1.2rem;
+  display:flex;align-items:center;gap:1rem;flex-wrap:wrap;border-bottom:1px solid var(--hair-dark)}
+.bar .brand{display:flex;align-items:center;gap:.6rem;margin-right:auto}
+.bar .brand .badge{width:34px;height:34px;background:var(--logo) center/contain no-repeat;filter:brightness(0) invert(1);opacity:.95}
+.bar .brand b{font-family:var(--serif);font-weight:540;font-size:1.05rem;display:block;line-height:1}
+.bar .brand span{font-family:var(--mono);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:#b9c6c9}
+.btn{border:1px solid var(--hair-dark);background:transparent;color:var(--slide);padding:.5rem .85rem;border-radius:8px;
+  font-size:.85rem;font-weight:500;display:inline-flex;align-items:center;gap:.4rem;transition:.15s;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.08)}
+.btn.pri{background:var(--safranin);border-color:var(--safranin);color:#fff}
+.btn.pri:hover{background:#b8462f}
+.btn.gd{background:#2c6e49;border-color:#2c6e49;color:#fff}
+.btn.gd:hover{background:#357e56}
+.dirty{font-family:var(--mono);font-size:.7rem;color:#e6b98f}
+
+.wrap{display:grid;grid-template-columns:minmax(340px,1fr) minmax(420px,1.25fr);gap:0;height:calc(100vh - 56px)}
+.pane{overflow-y:auto;padding:1.2rem}
+.pane.list{border-right:1px solid var(--hair)}
+.pane.edit{background:var(--slide-2)}
+
+/* filtros + lista */
+.filters{display:flex;gap:.5rem;margin-bottom:.9rem;flex-wrap:wrap}
+.search{flex:1 1 180px;display:flex;align-items:center;gap:.5rem;background:var(--paper);border:1px solid var(--hair);
+  border-radius:9px;padding:.5rem .7rem}
+.search input{border:none;background:none;outline:none;width:100%;font-family:var(--sans);font-size:.9rem}
+.filters select{border:1px solid var(--hair);border-radius:9px;padding:.5rem;background:var(--paper);font-family:var(--sans);font-size:.85rem}
+.count{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin:0 0 .7rem}
+.grp-h{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-2);
+  margin:1.1rem 0 .4rem;padding-bottom:.3rem;border-bottom:1px solid var(--hair)}
+.row{display:flex;align-items:center;gap:.6rem;padding:.55rem .6rem;border-radius:8px;cursor:pointer;border:1px solid transparent}
+.row:hover{background:var(--paper)}
+.row.sel{background:var(--paper);border-color:var(--safranin)}
+.row .nm{flex:1;font-size:.9rem;line-height:1.25}
+.row .tags{display:flex;gap:.3rem;flex-shrink:0}
+.dot{font-family:var(--mono);font-size:.6rem;padding:.12rem .4rem;border-radius:4px;white-space:nowrap}
+.dot.m{background:#f8eeeb;color:var(--safranin);border:1px solid #e3c4bd}
+.dot.tri{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-bd)}
+.dot.not{background:var(--slate-bg);color:var(--slate);border:1px solid var(--slate-bd)}
+.dot.sm{background:#eef0ef;color:var(--muted);border:1px solid var(--hair)}
+
+/* editor */
+.edit h2{font-size:1.3rem;margin-bottom:.2rem}
+.edit .sub{font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-bottom:1.2rem;letter-spacing:.04em}
+.empty-edit{color:var(--muted);font-size:.95rem;text-align:center;margin-top:20vh;line-height:1.6}
+.field{margin-bottom:.95rem}
+.field label{display:block;font-family:var(--mono);font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);margin-bottom:.35rem}
+.field input[type=text],.field textarea,.field select{width:100%;border:1px solid var(--hair);border-radius:8px;
+  padding:.6rem .7rem;font-family:var(--sans);font-size:.9rem;background:var(--paper);color:var(--ink)}
+.field textarea{resize:vertical;min-height:70px;line-height:1.5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+.checks{display:flex;gap:1.2rem;flex-wrap:wrap;margin:.3rem 0 .2rem}
+.chk{display:flex;align-items:center;gap:.45rem;font-size:.88rem}
+.chk input{width:16px;height:16px;accent-color:var(--safranin)}
+.chk small{display:block;font-size:.72rem;color:var(--muted)}
+.section-t{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--safranin);
+  margin:1.5rem 0 .7rem;padding-top:1rem;border-top:1px solid var(--hair)}
+.refrow{display:grid;grid-template-columns:1fr 1fr auto;gap:.5rem;margin-bottom:.5rem;align-items:center}
+.refrow input{font-size:.82rem;padding:.45rem .55rem}
+.icon-btn{border:1px solid var(--hair);background:var(--paper);border-radius:7px;width:32px;height:32px;
+  display:grid;place-items:center;color:var(--muted)}
+.icon-btn:hover{color:var(--safranin);border-color:var(--safranin)}
+.add-ref{font-family:var(--mono);font-size:.76rem;color:var(--safranin);background:none;border:none;padding:.2rem 0;display:inline-flex;gap:.35rem;align-items:center}
+.edit-actions{display:flex;gap:.6rem;margin-top:1.6rem;padding-top:1.2rem;border-top:1px solid var(--hair);flex-wrap:wrap}
+.btn2{padding:.6rem 1rem;border-radius:9px;font-size:.9rem;font-weight:500;border:1px solid var(--hair-dark);background:var(--ink);color:var(--slide)}
+.btn2:hover{background:var(--ink-soft)}
+.btn2.del{background:transparent;color:#a23a2b;border-color:#e0b3ab;margin-left:auto}
+.btn2.del:hover{background:#a23a2b;color:#fff;border-color:#a23a2b}
+.btn2.ghost{background:transparent;color:var(--ink)}
+.hint{font-size:.78rem;color:var(--muted);margin-top:.3rem;line-height:1.45}
+.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);color:var(--amber);border-radius:8px;
+  padding:.6rem .8rem;font-size:.8rem;margin:.5rem 0 1rem;line-height:1.5}
+.toast{position:fixed;bottom:1.2rem;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:var(--ink);color:var(--slide);padding:.7rem 1.2rem;border-radius:10px;font-size:.85rem;
+  transition:.25s;pointer-events:none;z-index:50;box-shadow:0 10px 30px -10px rgba(0,0,0,.5)}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (max-width:880px){.wrap{grid-template-columns:1fr;height:auto}.pane{height:auto}.pane.list{border-right:none;border-bottom:1px solid var(--hair)}}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand">
+    <span class="badge"></span>
+    <div><b>Painel do catálogo</b><span>Dr. Leandro Mendes · Infectologia Especializada</span></div>
+  </div>
+  <span class="dirty" id="dirty"></span>
+  <button class="btn" id="importBtn">Importar JSON</button>
+  <input type="file" id="importFile" accept=".json,application/json" hidden>
+  <button class="btn" id="exportJson">Exportar JSON</button>
+  <button class="btn gd" id="exportData">Baixar exams-data.js</button>
+  <button class="btn pri" id="newBtn">+ Novo exame</button>
+</div>
+
+<div class="wrap">
+  <div class="pane list">
+    <div class="filters">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="q" type="search" placeholder="Buscar exame…">
+      </div>
+      <select id="fGroup"><option value="">Todos os grupos</option></select>
+      <select id="fFlag"><option value="">Todos</option><option value="tri">Somente triagem</option><option value="not">Notificação</option><option value="sm">Com Saiba mais</option><option value="nosm">Sem Saiba mais</option></select>
+    </div>
+    <p class="count" id="count"></p>
+    <div id="list"></div>
+  </div>
+
+  <div class="pane edit">
+    <div id="editor"><div class="empty-edit">Selecione um exame à esquerda para editar,<br>ou clique em <b>+ Novo exame</b>.</div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="exams-data.js"></script>
+<script>
+/* ---------- estado ---------- */
+let DATA = Array.isArray(window.EXAMS) ? JSON.parse(JSON.stringify(window.EXAMS)) : [];
+let selIndex = -1;   // índice em DATA do exame em edição (-1 = novo/nenhum)
+let dirty = false;
+const LS_KEY = "kadri_exams_draft";
+
+const GROUP_ORDER = ["Arboviroses e doenças febris","Zoonoses, vetores e negligenciadas","Infecções sexualmente transmissíveis","Hepatites virais","Infecções respiratórias","Congênitas e sistêmicas","Gastrointestinais","Micologia e microscopia","Resistência antimicrobiana","Marcadores clínicos"];
+const norm = s => (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+/* ---------- rascunho local (opcional, tolerante a falha) ---------- */
+function saveDraft(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(DATA)); }catch(e){} }
+function loadDraft(){ try{ const d=localStorage.getItem(LS_KEY); return d?JSON.parse(d):null; }catch(e){ return null; } }
+(function initDraft(){
+  const d = loadDraft();
+  if(d && Array.isArray(d) && d.length){
+    if(confirm("Há um rascunho local não exportado. Deseja restaurá-lo?\n\nOK = restaurar rascunho · Cancelar = usar o arquivo exams-data.js")){
+      DATA = d; setDirty(true);
+    }
+  }
+})();
+
+function setDirty(v){ dirty=v; document.getElementById("dirty").textContent = v ? "● alterações não exportadas" : ""; if(v) saveDraft(); }
+window.addEventListener("beforeunload", e=>{ if(dirty){ e.preventDefault(); e.returnValue=""; } });
+
+/* ---------- toast ---------- */
+let toastT;
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("on"),2200); }
+
+/* ---------- filtros de grupo ---------- */
+function refreshGroupFilter(){
+  const sel=document.getElementById("fGroup"); const cur=sel.value;
+  const groups=[...new Set(DATA.map(e=>e.grupo))].sort((a,b)=>GROUP_ORDER.indexOf(a)-GROUP_ORDER.indexOf(b));
+  sel.innerHTML='<option value="">Todos os grupos</option>'+groups.map(g=>`<option${g===cur?" selected":""}>${esc(g)}</option>`).join("");
+}
+
+/* ---------- render da lista ---------- */
+function renderList(){
+  const q=norm(document.getElementById("q").value);
+  const fg=document.getElementById("fGroup").value;
+  const ff=document.getElementById("fFlag").value;
+  let items = DATA.map((e,i)=>({e,i})).filter(({e})=>{
+    if(fg && e.grupo!==fg) return false;
+    if(ff==="tri" && !e.triagem) return false;
+    if(ff==="not" && !e.notifica) return false;
+    if(ff==="sm" && !e.sm) return false;
+    if(ff==="nosm" && e.sm) return false;
+    if(q && !(norm(e.nome).includes(q)||norm(e.grupo).includes(q)||norm(e.desc).includes(q))) return false;
+    return true;
+  });
+  document.getElementById("count").textContent = items.length+" de "+DATA.length+" exames";
+  const byG={};
+  items.forEach(o=>{(byG[o.e.grupo]=byG[o.e.grupo]||[]).push(o);});
+  const gkeys=Object.keys(byG).sort((a,b)=>GROUP_ORDER.indexOf(a)-GROUP_ORDER.indexOf(b));
+  const box=document.getElementById("list"); box.innerHTML="";
+  gkeys.forEach(g=>{
+    const h=document.createElement("div"); h.className="grp-h"; h.textContent=g; box.appendChild(h);
+    byG[g].sort((a,b)=>a.e.nome.localeCompare(b.e.nome,"pt")).forEach(({e,i})=>{
+      const r=document.createElement("div"); r.className="row"+(i===selIndex?" sel":"");
+      r.innerHTML=`<span class="nm">${esc(e.nome)}</span><span class="tags">
+        <span class="dot m">${esc(e.metodo)}</span>
+        ${e.triagem?'<span class="dot tri">triagem</span>':''}
+        ${e.notifica?'<span class="dot not">notif</span>':''}
+        ${e.sm?'<span class="dot sm">+</span>':''}
+      </span>`;
+      r.onclick=()=>openEditor(i);
+      box.appendChild(r);
+    });
+  });
+}
+
+/* ---------- editor ---------- */
+function blankExam(){ return {nome:"",grupo:"",metodo:"Sorologia",amostra:"Sangue",desc:"",triagem:false,notifica:false,sm:null}; }
+
+function openEditor(i){
+  selIndex=i;
+  const e = i>=0 ? DATA[i] : blankExam();
+  const groups=[...new Set(DATA.map(x=>x.grupo))].sort((a,b)=>GROUP_ORDER.indexOf(a)-GROUP_ORDER.indexOf(b));
+  const methods=[...new Set(DATA.map(x=>x.metodo))];
+  const sm=e.sm||{usar:"",interp:"",vant:"",rec:true,refs:[]};
+  const refsHtml=(sm.refs||[]).map((r,ri)=>refRow(r,ri)).join("");
+  document.getElementById("editor").innerHTML=`
+    <h2>${i>=0?"Editar exame":"Novo exame"}</h2>
+    <div class="sub">${i>=0?"Alterações ficam no rascunho até você exportar o arquivo.":"Preencha e salve — depois exporte o exams-data.js."}</div>
+
+    <div class="field"><label>Nome do exame *</label>
+      <input type="text" id="f_nome" value="${esc(e.nome)}" placeholder="Ex.: Dengue — antígeno NS1"></div>
+
+    <div class="two">
+      <div class="field"><label>Grupo *</label>
+        <input type="text" id="f_grupo" list="grupos" value="${esc(e.grupo)}" placeholder="Grupo clínico">
+        <datalist id="grupos">${groups.map(g=>`<option value="${esc(g)}">`).join("")}</datalist>
+      </div>
+      <div class="field"><label>Método</label>
+        <input type="text" id="f_metodo" list="metodos" value="${esc(e.metodo)}" placeholder="Sorologia, Antígeno…">
+        <datalist id="metodos">${methods.map(m=>`<option value="${esc(m)}">`).join("")}</datalist>
+      </div>
+    </div>
+
+    <div class="field"><label>Amostra</label>
+      <input type="text" id="f_amostra" value="${esc(e.amostra)}" placeholder="Sangue, Fezes, Swab…"></div>
+
+    <div class="field"><label>Descrição (nota clínica visível no card)</label>
+      <textarea id="f_desc" placeholder="O que o exame detecta e para que serve.">${esc(e.desc)}</textarea></div>
+
+    <div class="checks">
+      <label class="chk"><input type="checkbox" id="f_tri" ${e.triagem?"checked":""}> <span>Somente triagem<small>importado, ANVISA pendente</small></span></label>
+      <label class="chk"><input type="checkbox" id="f_not" ${e.notifica?"checked":""}> <span>Notificação compulsória<small>confirmar em referência</small></span></label>
+    </div>
+    <div class="hint">Se ambos marcados, o card mostra a ressalva de <b>triagem</b> (mais restritiva).</div>
+
+    <div class="section-t">Saiba mais (opcional)</div>
+    <div class="field"><label>Papel no diagnóstico</label><textarea id="f_usar">${esc(sm.usar)}</textarea></div>
+    <div class="field"><label>Como interpretar</label><textarea id="f_interp">${esc(sm.interp)}</textarea></div>
+    <div class="field"><label>Vantagem na prática (opcional)</label><textarea id="f_vant">${esc(sm.vant)}</textarea></div>
+    <label class="chk" style="margin:.2rem 0 .6rem"><input type="checkbox" id="f_rec" ${sm.rec!==false?"checked":""}> <span>Rotular referências como “Leitura recomendada”<small>desmarque para exibir “Referências”</small></span></label>
+    <div class="field"><label>Referências</label>
+      <div id="refs">${refsHtml}</div>
+      <button class="add-ref" id="addRef">+ adicionar referência</button>
+    </div>
+
+    <div class="edit-actions">
+      <button class="btn2" id="saveBtn">${i>=0?"Salvar alterações":"Adicionar ao catálogo"}</button>
+      <button class="btn2 ghost" id="cancelBtn">Cancelar</button>
+      ${i>=0?'<button class="btn2 del" id="delBtn">Excluir exame</button>':''}
+    </div>
+  `;
+  document.getElementById("addRef").onclick=()=>{ const box=document.getElementById("refs"); box.insertAdjacentHTML("beforeend", refRow({t:"",u:""}, box.children.length)); bindRefRemovers(); };
+  bindRefRemovers();
+  document.getElementById("saveBtn").onclick=saveEditor;
+  document.getElementById("cancelBtn").onclick=()=>{ selIndex=-1; clearEditor(); renderList(); };
+  const del=document.getElementById("delBtn"); if(del) del.onclick=deleteExam;
+  renderList();
+}
+function refRow(r,ri){
+  return `<div class="refrow" data-ri="${ri}">
+    <input type="text" class="r_t" value="${esc(r.t)}" placeholder="Citação (autor, título, ano)">
+    <input type="text" class="r_u" value="${esc(r.u)}" placeholder="URL (opcional)">
+    <button class="icon-btn r_x" title="Remover">✕</button>
+  </div>`;
+}
+function bindRefRemovers(){ document.querySelectorAll(".r_x").forEach(b=>b.onclick=e=>{ e.target.closest(".refrow").remove(); }); }
+
+function clearEditor(){ document.getElementById("editor").innerHTML='<div class="empty-edit">Selecione um exame à esquerda para editar,<br>ou clique em <b>+ Novo exame</b>.</div>'; }
+
+function collectEditor(){
+  const val=id=>document.getElementById(id).value.trim();
+  const nome=val("f_nome");
+  if(!nome){ toast("Informe o nome do exame."); return null; }
+  const refs=[...document.querySelectorAll("#refs .refrow")].map(row=>({
+    t:row.querySelector(".r_t").value.trim(), u:row.querySelector(".r_u").value.trim()
+  })).filter(r=>r.t);
+  const usar=val("f_usar"), interp=val("f_interp"), vant=val("f_vant");
+  const hasSM = usar||interp||vant||refs.length;
+  const sm = hasSM ? {usar,interp,vant,rec:document.getElementById("f_rec").checked,refs} : null;
+  return {
+    nome, grupo:val("f_grupo")||"Outros", metodo:val("f_metodo")||"Outro",
+    amostra:val("f_amostra"), desc:val("f_desc"),
+    triagem:document.getElementById("f_tri").checked,
+    notifica:document.getElementById("f_not").checked,
+    sm
+  };
+}
+function saveEditor(){
+  const ex=collectEditor(); if(!ex) return;
+  // nome duplicado?
+  const dupIdx=DATA.findIndex((x,ix)=>ix!==selIndex && x.nome===ex.nome);
+  if(dupIdx>=0){ toast("Já existe um exame com esse nome."); return; }
+  if(selIndex>=0){ DATA[selIndex]=ex; toast("Exame atualizado."); }
+  else { DATA.push(ex); selIndex=DATA.length-1; toast("Exame adicionado."); }
+  setDirty(true); refreshGroupFilter(); openEditor(selIndex);
+}
+function deleteExam(){
+  if(selIndex<0) return;
+  if(!confirm("Excluir “"+DATA[selIndex].nome+"” do catálogo?")) return;
+  DATA.splice(selIndex,1); selIndex=-1; setDirty(true);
+  refreshGroupFilter(); clearEditor(); renderList(); toast("Exame excluído.");
+}
+
+/* ---------- exportação ---------- */
+function download(filename, text){
+  const blob=new Blob([text],{type:"text/plain;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+}
+function buildDataFile(){
+  const banner=`/* ============================================================
+   BASE DE EXAMES — Consultório Dr. Leandro Mendes
+   Fonte única de dados do catálogo (site + admin).
+   NÃO edite à mão em produção: use admin.html e exporte este arquivo.
+   Campos: nome, grupo, metodo, amostra, desc, triagem, notifica, sm
+   sm = {usar, interp, vant, rec, refs:[{t,u}]} ou null
+   Gerado em ${new Date().toISOString()}
+   ============================================================ */\n`;
+  return banner+"window.EXAMS = "+JSON.stringify(DATA,null,2)+";\n";
+}
+document.getElementById("exportData").onclick=()=>{ download("exams-data.js", buildDataFile()); setDirty(false); toast("exams-data.js baixado. Faça o commit no repositório."); };
+document.getElementById("exportJson").onclick=()=>{ download("exams-backup.json", JSON.stringify(DATA,null,2)); toast("Backup JSON baixado."); };
+
+/* ---------- importação ---------- */
+document.getElementById("importBtn").onclick=()=>document.getElementById("importFile").click();
+document.getElementById("importFile").onchange=ev=>{
+  const f=ev.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      let parsed=JSON.parse(rd.result);
+      if(!Array.isArray(parsed)) throw new Error("formato");
+      if(!confirm("Importar "+parsed.length+" exames? Isso substitui o catálogo atual em edição.")) return;
+      DATA=parsed; selIndex=-1; setDirty(true); refreshGroupFilter(); clearEditor(); renderList(); toast("Catálogo importado.");
+    }catch(e){ toast("Arquivo inválido — use um JSON exportado por este painel."); }
+  };
+  rd.readAsText(f); ev.target.value="";
+};
+
+/* ---------- eventos gerais ---------- */
+document.getElementById("newBtn").onclick=()=>openEditor(-1);
+document.getElementById("q").addEventListener("input",renderList);
+document.getElementById("fGroup").addEventListener("change",renderList);
+document.getElementById("fFlag").addEventListener("change",renderList);
+
+/* ---------- init ---------- */
+refreshGroupFilter();
+renderList();
+if(!DATA.length){ document.getElementById("editor").innerHTML='<div class="empty-edit">Nenhum dado carregado.<br>Verifique se <b>exams-data.js</b> está na mesma pasta,<br>ou use <b>Importar JSON</b>.</div>'; }
+</script>
+</body>
+</html>

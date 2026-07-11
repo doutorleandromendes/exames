@@ -58,6 +58,30 @@ const SUB_CULT_MR  = `ARRAY(SELECT DISTINCT c.resistencia FROM atb_culturas c WH
 const SUB_CULT_ORG = `(SELECT string_agg(DISTINCT c.microorganismo, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.microorganismo IS NOT NULL)`;
 const SUB_CULT_MAT = `(SELECT string_agg(DISTINCT c.material, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material IS NOT NULL)`;
 const SUB_CULT_HEMO = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material ILIKE '%hemocultura%')`;
+
+// Só computa as subqueries (caras, correlacionadas por ficha) que a(s) regra(s)
+// realmente referenciam — evita rodar todas no /testar e no backfill (timeout).
+const SUB_MAP = [
+  ['fichas_72h_mesmo_setor', `${SUB_FICHAS_72H} AS _fichas72h`],
+  ['fichas_72h_mesmo_atb',   `${SUB_FICHAS_72H_ATB} AS _fichas72hatb`],
+  ['cultura_positiva',       `${SUB_CULT_POS} AS _cult_pos`],
+  ['cultura_mr',             `${SUB_CULT_MR} AS _cult_mr`],
+  ['cultura_organismos',     `${SUB_CULT_ORG} AS _cult_org`],
+  ['cultura_materiais',      `${SUB_CULT_MAT} AS _cult_mat`],
+  ['cultura_hemocultura',    `${SUB_CULT_HEMO} AS _cult_hemo`],
+];
+function camposDaRegra(cond, acc) {
+  acc = acc || new Set();
+  if (!cond) return acc;
+  if (cond.all) cond.all.forEach(c => camposDaRegra(c, acc));
+  if (cond.any) cond.any.forEach(c => camposDaRegra(c, acc));
+  if (cond.campo) acc.add(cond.campo);
+  return acc;
+}
+function subSqlDe(campos) {
+  const sel = SUB_MAP.filter(([k]) => campos.has(k)).map(([, frag]) => frag);
+  return sel.length ? ', ' + sel.join(', ') : '';
+}
 import { getFormSchema } from './atb-form-schema.js';
 
 const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
@@ -276,6 +300,12 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       <div class="card"><h2>Testar contra o histórico</h2>
         <p class="nota">Roda as condições nas fichas já existentes (sem alterar nada) e mostra quantas casariam.</p>
         <button class="ghost" type="button" onclick="testar()">Testar agora</button>
+        <select id="teste_janela" style="margin-left:8px;padding:4px 6px">
+          <option value="30">Últimos 30 dias</option>
+          <option value="180" selected>Últimos 6 meses</option>
+          <option value="365">Último ano</option>
+          <option value="0">Todo o histórico</option>
+        </select>
         <div id="teste" class="nota" style="margin-top:10px"></div>
       </div>
       <div class="card row">
@@ -371,7 +401,8 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         }
         function testar(){
           var el=document.getElementById('teste'); el.textContent='Rodando...';
-          fetch('/atb/admin/regras/testar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())})
+          var _body=Object.assign({}, payload(), {janela:+document.getElementById('teste_janela').value});
+          fetch('/atb/admin/regras/testar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(_body)})
             .then(function(r){return r.json();}).then(function(j){
               if(!j.ok){ el.textContent=j.error||'Falha'; return; }
               el.innerHTML='Casariam <strong>'+j.casam+'</strong> de '+j.total+' fichas. '
@@ -445,7 +476,13 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const COLS_BANCO = (await catalogoCampos(pool, inst)).map(c => c.key).filter(k => !CALC_KEYS.has(k));
       const cols = ['id','paciente_dn','data_referencia','jotform_created_at','created_at', ...COLS_BANCO]
         .filter((v,i,a)=>a.indexOf(v)===i).map(c=>'f.'+c).join(',');
-      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras, ${SUB_FICHAS_72H} AS _fichas72h, ${SUB_FICHAS_72H_ATB} AS _fichas72hatb, ${SUB_CULT_POS} AS _cult_pos, ${SUB_CULT_MR} AS _cult_mr, ${SUB_CULT_ORG} AS _cult_org, ${SUB_CULT_MAT} AS _cult_mat, ${SUB_CULT_HEMO} AS _cult_hemo FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}`, [inst]);
+      const subs = subSqlDe(camposDaRegra(cond));
+      const _jan = parseInt(req.body?.janela, 10);
+      const diasJan = [30, 180, 365].indexOf(_jan) >= 0 ? _jan : 0;   // 0 = todo o histórico
+      const filtroData = diasJan > 0
+        ? ` AND COALESCE(f.data_referencia,f.jotform_created_at,f.created_at) >= (now() - interval '${diasJan} days')`
+        : '';
+      const { rows } = await pool.query(`SELECT ${cols}, a.iras AS _iras${subs} FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${escopoFichaSql(1)}${filtroData}`, [inst]);
       let casam=0, ja=0, vaz=0, div=0;
       for(const f of rows){
         const ctx = contextoFicha(f);
@@ -482,8 +519,10 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
     const dataCanon = 'COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)';
     if(de){  params.push(de);  filtros.push(`${dataCanon} >= $${params.length}::date`); }
     if(ate){ params.push(ate); filtros.push(`${dataCanon} < ($${params.length}::date + interval '1 day')`); }
+    const _campos = new Set(); ativas.forEach(r => camposDaRegra(r.condicoes, _campos)); if (regra) camposDaRegra(regra.condicoes, _campos);
+    const subs = subSqlDe(_campos);
     const { rows } = await pool.query(
-      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid, ${SUB_FICHAS_72H} AS _fichas72h, ${SUB_FICHAS_72H_ATB} AS _fichas72hatb, ${SUB_CULT_POS} AS _cult_pos, ${SUB_CULT_MR} AS _cult_mr, ${SUB_CULT_ORG} AS _cult_org, ${SUB_CULT_MAT} AS _cult_mat, ${SUB_CULT_HEMO} AS _cult_hemo
+      `SELECT ${cols}, a.iras AS _iras, a.triagem_regra_id AS _trid${subs}
          FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
         WHERE ${filtros.join(' AND ')}`, params);
     const primeira = (ctx)=> ativas.find(r=>avaliaCond(r.condicoes, ctx));

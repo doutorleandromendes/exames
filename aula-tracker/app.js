@@ -12,6 +12,7 @@ import crypto from 'crypto';
 import { Pool } from 'pg';
 import { runLabMigrations } from './lab-db.js';       // ← ADICIONAR
 import { registerLabRoutes } from './lab-routes.js';  // ← ADICIONAR
+import { registerLfaRoutes } from './lab-lfa-routes.js';  // LFA Strip Analyzer
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
@@ -63,7 +64,8 @@ app.use(cookieParser());
 const STATIC_PUBLIC = new Set([
   '/med-seed.js',        // gerador-documentos.html (base ANVISA/CMED)
   '/poso-seed.js',       // gerador-documentos.html (formulário de posologias)
-  '/lab-admin-coleta.js' // tela de coleta do lab (lab-routes.js)
+  '/lab-admin-coleta.js', // tela de coleta do lab (lab-routes.js)
+  '/lab-lfa-analyzer.js'  // LFA Strip Analyzer (lab-lfa-routes.js)
 ]);
 app.use((req, res, next) => {
   if (req.method === 'GET' && STATIC_PUBLIC.has(req.path)) {
@@ -147,6 +149,9 @@ try { registerAulasAdminRelatoriosRoutes(app, pool, { authRequired, adminRequire
 catch (e) { console.error('ERRO registerAulasAdminRelatoriosRoutes', e); }
 try { registerLabRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabRoutes', e); }
+
+try { registerLfaRoutes(app, pool, adminRequired); }
+catch (e) { console.error('ERRO registerLfaRoutes', e); }
 try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerCveNumeradoresRoutes(app, pool); }

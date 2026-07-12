@@ -26,6 +26,7 @@ import { registerNomesRoutes } from './atb-nomes-routes.js';
 import { ensureCulturasSchema, registerCulturasRoutes } from './atb-culturas-routes.js';
 import { registerPacsNomeRoutes, ensurePacsNomeSchema, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 import { ensureHemoSchema, registerHemoRoutes } from './atb-hemocultura-routes.js';
+import { ensureMonitoramentoSchema, registerMonitoramentoRoutes } from './atb-monitoramento-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
 import { ensureTriagemRegrasSchema, aplicarRegras } from './atb-triagem-regras.js';
@@ -85,6 +86,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureCulturasSchema(pool).catch(e => console.error('[atb] ensureCulturasSchema:', e.message));
   ensurePacsNomeSchema(pool).catch(e => console.error('[atb] ensurePacsNomeSchema:', e.message));
   ensureHemoSchema(pool).catch(e => console.error('[atb] ensureHemoSchema:', e.message));
+  ensureMonitoramentoSchema(pool).catch(e => console.error('[atb] ensureMonitoramentoSchema:', e.message));
   
   
   registerParecerEditRoutes(app, pool, adminRequired);
@@ -110,6 +112,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerPacsScmiRoutes(app, pool, adminRequired);
   registerPacsNomeRoutes(app, pool, adminRequired);
   registerHemoRoutes(app, pool, adminRequired);
+  registerMonitoramentoRoutes(app, pool, adminRequired);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
   registerRegrasFormRoutes(app, pool, adminRequired);

@@ -202,22 +202,17 @@ function vereditoVazio(recomendacao_scih) {
 
 // Avalia as regras ativas (1ª que casa) e aplica as ações em campos VAZIOS.
 // Retorna { regra_id, nome } aplicada, ou null. Auto-tratada (nunca lança).
-export async function aplicarRegras(pool, fichaId) {
-  try {
+// Constrói o contexto de avaliação de uma ficha: campos base + gatilhos derivados
+// (fichas_72h_*, culturas/hemo). Fonte ÚNICA compartilhada pela triagem
+// (aplicarRegras) e pelo executor de monitoramento — sem duplicar gatilhos.
+export async function montarContexto(pool, fichaId) {
     const f = (await pool.query(
       `SELECT f.*, i.sigla AS _inst_sigla
          FROM atb_fichas f
          LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
         WHERE f.id = $1`, [fichaId])).rows[0];
     if (!f) return null;
-    // Instituição da ficha (sigla). Ficha legada sem instituição → HUSF (preserva o atual).
     const _sigla = f._inst_sigla || 'HUSF';
-
-    const regras = (await pool.query(
-      'SELECT id, nome, condicoes, acoes FROM atb_triagem_regras WHERE ativo=true AND instituicao=$1 ORDER BY prioridade ASC, id ASC',
-      [_sigla]
-    )).rows;
-    if (!regras.length) return null;
 
     const ctx = contextoFicha(f);
 
@@ -280,6 +275,21 @@ export async function aplicarRegras(pool, fichaId) {
       ctx.cultura_materiais  = [...new Set(cults.map((c) => c.material).filter(Boolean))].join(' | ');
       ctx.cultura_hemocultura = cults.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1);
     } catch (e) { console.error('[atb] culturas na triagem:', e.message); }
+
+    return { f, ctx, sigla: _sigla };
+}
+
+export async function aplicarRegras(pool, fichaId) {
+  try {
+    const _built = await montarContexto(pool, fichaId);
+    if (!_built) return null;
+    const { f, ctx, sigla: _sigla } = _built;
+
+    const regras = (await pool.query(
+      'SELECT id, nome, condicoes, acoes FROM atb_triagem_regras WHERE ativo=true AND instituicao=$1 ORDER BY prioridade ASC, id ASC',
+      [_sigla]
+    )).rows;
+    if (!regras.length) return null;
 
     const regra = regras.find((r) => avaliaCond(r.condicoes, ctx));
     if (!regra) return null;

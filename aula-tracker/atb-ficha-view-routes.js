@@ -23,6 +23,7 @@
 
 import { getFormSchema } from './atb-form-schema.js';
 import { buscarCulturasDaFicha, renderCulturasComplemento } from './atb-culturas-routes.js';
+import { COLUNA_DE } from './atb-field-registry.js';
 
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 const EXAMES = {
@@ -70,6 +71,41 @@ function bloco(titulo, itens, s) {
     }).join('');
   if (!linhas) return '';
   return `<div class="bloco"><h3>${s(titulo)}</h3>${linhas}</div>`;
+}
+
+// Colunas já exibidas em blocos temáticos (+ matrizes). Campos cujo destino NÃO
+// está aqui vão pro bloco "Informações adicionais" — seja EXTRA (só payload_raw)
+// ou PROMOVIDO a coluna. Assim, promover um campo não o faz sumir da ficha, e
+// qualquer campo novo do form editor aparece automaticamente quando preenchido.
+const KEYS_TEMATICOS = new Set([
+  'paciente_nome','paciente_nome_raw','pac_nome','paciente_dn','pac_dn','paciente_idade','prontuario','atendimento',
+  'setor','leito','equipe_responsavel','data_internacao','data_admissao_uti','gestante','lactante','tipo_terapia',
+  'foco_infeccao','historia_clinica','sepse','cirurgia','classificacao_fratura','sitio_pai','comorbidades',
+  'oxacilina_associacao','dispositivos_invasivos','acesso_vascular_neo','sitio_cvc','sitio_cdl','data_insercao_cateter',
+  'dialise','acesso_dialise','sinais_dialise','faz_quimio','acesso_quimio','cateter_quimio','insuficiencia_renal',
+  'clcr','peso','altura','peso_nascimento','atb_solicitado','tempo_previsto','sofa','crm','prescritor_nome',
+  'complemento_scih','parecer_evolutivo',
+  'atb_previos','culturas_colhidas','culturas_previas','posologia',
+]);
+
+function blocoExtrasFormulario(schema, payload, s) {
+  if (!payload || typeof payload !== 'object') return '';
+  const pares = [];
+  for (const sec of (schema && schema.secoes ? schema.secoes : []))
+    for (const c of (sec.campos || [])) {
+      if (!c.key || c.type === 'matrix') continue;
+      const col = COLUNA_DE[c.key] || c.key;
+      if (KEYS_TEMATICOS.has(col)) continue;             // já aparece num bloco temático
+      const v = payload[c.key];
+      if (v == null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && !v.length)) continue;
+      let val;
+      if (c.type === 'date') val = _dt(v);
+      else if (typeof v === 'boolean') val = v ? 'Sim' : 'Não';
+      else if (Array.isArray(v)) val = v.map(s).join(', ');
+      else val = s(v);
+      pares.push([c.label || c.key, val]);
+    }
+  return pares.length ? bloco('Informações adicionais do formulário', pares, s) : '';
 }
 
 // tabela de série evolutiva (exames × dias)
@@ -129,7 +165,7 @@ function tabelaMatriz(titulo, def, dados, s) {
   return `<div class="bloco"><h3>${s(titulo)}</h3><div class="serie-scroll"><table class="mtab"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;
 }
 
-function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '') {
+function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '', extrasHTML = '') {
   matrizes = matrizes || {};
   const nome = f.paciente_nome || f.paciente_nome_raw || '—';
   const ver = _arr(f.recomendacao_scih);
@@ -212,6 +248,7 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '') {
   ], s));
   secoes.push(tabelaMatriz('Posologia', matrizes.posologia, f.posologia, s));
 
+  secoes.push(extrasHTML || '');
   secoes.push(bloco('Prescritor', [
     ['Nome', s(f.prescritor_nome)],
     ['CRM', s(f.crm)],
@@ -382,11 +419,14 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
         `SELECT id, tipo, nome_original FROM atb_ficha_imagens WHERE ficha_id = $1 ORDER BY tipo, id`, [id]);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       const podeEditar = (req.user && req.user.super_admin) || req.cookies?.adm === '1';
-      let matrizes = {};
-      try { matrizes = extrairMatrizes(await getFormSchema(pool, f.instituicao || 'HUSF')); }
-      catch (e) { console.error('[atb] matrizes schema:', e.message); }
+      let matrizes = {}, _extrasHTML = '';
+      try {
+        const _schema = await getFormSchema(pool, f.instituicao || 'HUSF');
+        matrizes = extrairMatrizes(_schema);
+        _extrasHTML = blocoExtrasFormulario(_schema, f.payload_raw, _safe);
+      } catch (e) { console.error('[atb] matrizes/extras schema:', e.message); }
       const culturas = await buscarCulturasDaFicha(pool, f);
-      res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes, renderCulturasComplemento(culturas)));
+      res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes, renderCulturasComplemento(culturas), _extrasHTML));
     } catch (e) {
       console.error('[atb] ficha view error:', e.message);
       res.status(500).send('Erro: ' + _safe(e.message));

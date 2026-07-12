@@ -241,7 +241,7 @@ export function normalizarNome(str) { return _norm(str); }
 
 // Culturas que casam com uma ficha: mesma instituição, janela [ref-30d, ref+5d],
 // por ATENDIMENTO quando a ficha tem um; senão (rede de segurança) por NOME normalizado.
-export async function buscarCulturasDaFicha(pool, ficha) {
+export async function buscarCulturasDaFicha(pool, ficha, diasAntes = 30, diasDepois = 5) {
   if (!ficha) return [];
   const ref = ficha.data_referencia || ficha.jotform_created_at || ficha.created_at;
   if (!ref) return [];
@@ -255,15 +255,15 @@ export async function buscarCulturasDaFicha(pool, ficha) {
     SELECT data_coleta, material, microorganismo, resistencia, mic_poli, mic_vanco, classe, tempo_positividade
       FROM atb_culturas
      WHERE instituicao_id IS NOT DISTINCT FROM $1
-       AND data_coleta >= ($2::date - interval '30 days')
-       AND data_coleta <= ($2::date + interval '5 days')
+       AND data_coleta >= ($2::date - ($6 || ' days')::interval)
+       AND data_coleta <= ($2::date + ($7 || ' days')::interval)
        AND (CASE
               WHEN $5 <> '' THEN (prontuario = $5 OR ($3 <> '' AND atendimento = $3))
               WHEN $3 <> '' THEN atendimento = $3
               ELSE paciente_nome_norm = $4
             END)
      ORDER BY data_coleta DESC, id DESC`,
-    [ficha.instituicao_id, ref, atend, nomeNorm, pront]);
+    [ficha.instituicao_id, ref, atend, nomeNorm, pront, String(diasAntes), String(diasDepois)]);
   return rows;
 }
 

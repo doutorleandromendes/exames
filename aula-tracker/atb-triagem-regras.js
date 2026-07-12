@@ -266,7 +266,7 @@ export async function montarContexto(pool, fichaId) {
     // Campos derivados de MICROBIOLOGIA (culturas casadas na janela −30d/+5d).
     // mr = LISTA (dropdown de mecanismos, match exato); organismos/materiais = TEXTO
     // concatenado (usar text_contains_any, que ignora acento/cedilha/caixa).
-    ctx.cultura_positiva = false; ctx.cultura_mr = []; ctx.cultura_organismos = ''; ctx.cultura_materiais = ''; ctx.cultura_hemocultura = false;
+    ctx.cultura_positiva = false; ctx.cultura_mr = []; ctx.cultura_organismos = ''; ctx.cultura_materiais = ''; ctx.cultura_hemocultura = false; ctx.hemocultura_5d5d = false;
     try {
       const cults = await buscarCulturasDaFicha(pool, f);
       ctx.cultura_positiva   = cults.length > 0;
@@ -275,6 +275,13 @@ export async function montarContexto(pool, fichaId) {
       ctx.cultura_materiais  = [...new Set(cults.map((c) => c.material).filter(Boolean))].join(' | ');
       ctx.cultura_hemocultura = cults.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1);
     } catch (e) { console.error('[atb] culturas na triagem:', e.message); }
+
+    // Hemocultura positiva na janela APERTADA −5d/+5d (específica p/ monitoramento,
+    // distinta do cultura_hemocultura de −30d/+5d). Reusa o mesmo match/janela do SQL.
+    try {
+      const cults55 = await buscarCulturasDaFicha(pool, f, 5, 5);
+      ctx.hemocultura_5d5d = cults55.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1);
+    } catch (e) { console.error('[atb] hemo 5d5d:', e.message); }
 
     return { f, ctx, sigla: _sigla };
 }

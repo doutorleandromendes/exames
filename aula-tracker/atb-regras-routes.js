@@ -53,11 +53,18 @@ const _CULT_MATCH = `c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
           OR (COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento) )
      AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
      AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
+// Variante da janela p/ o trigger de monitoramento: hemocultura −5d/+5d.
+const _CULT_MATCH_55 = `c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+     AND ( (COALESCE(f.prontuario,'') <> '' AND c.prontuario = f.prontuario)
+          OR (COALESCE(f.atendimento,'') <> '' AND c.atendimento = f.atendimento) )
+     AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '5 days')
+     AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
 const SUB_CULT_POS = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH})`;
 const SUB_CULT_MR  = `ARRAY(SELECT DISTINCT c.resistencia FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.resistencia IS NOT NULL)`;
 const SUB_CULT_ORG = `(SELECT string_agg(DISTINCT c.microorganismo, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.microorganismo IS NOT NULL)`;
 const SUB_CULT_MAT = `(SELECT string_agg(DISTINCT c.material, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material IS NOT NULL)`;
 const SUB_CULT_HEMO = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material ILIKE '%hemocultura%')`;
+const SUB_CULT_HEMO_55 = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH_55} AND c.material ILIKE '%hemocultura%')`;
 
 // Só computa as subqueries (caras, correlacionadas por ficha) que a(s) regra(s)
 // realmente referenciam — evita rodar todas no /testar e no backfill (timeout).
@@ -69,6 +76,7 @@ const SUB_MAP = [
   ['cultura_organismos',     `${SUB_CULT_ORG} AS _cult_org`],
   ['cultura_materiais',      `${SUB_CULT_MAT} AS _cult_mat`],
   ['cultura_hemocultura',    `${SUB_CULT_HEMO} AS _cult_hemo`],
+  ['hemocultura_5d5d',       `${SUB_CULT_HEMO_55} AS _hemo55`],
 ];
 function camposDaRegra(cond, acc) {
   acc = acc || new Set();
@@ -121,6 +129,7 @@ const EXTRAS = [
   { key:'cultura_organismos', label:'Microrganismos em cultura (30d/5d)',       tipo:'texto', calc:true },
   { key:'cultura_materiais',  label:'Materiais de cultura (30d/5d)',            tipo:'texto', calc:true },
   { key:'cultura_hemocultura', label:'Hemocultura positiva (30d/5d)',            tipo:'bool',  calc:true },
+  { key:'hemocultura_5d5d',    label:'Hemocultura positiva (−5d/+5d, monitoramento)', tipo:'bool',  calc:true },
   { key:'dias_desde_submissao', label:'Dias desde a submissão', tipo:'numero', calc:true },
 ];
 // Chaves CALCULADAS em contextoFicha (sem coluna real em atb_fichas): aparecem no
@@ -493,6 +502,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         ctx.cultura_organismos = f._cult_org || '';
         ctx.cultura_materiais = f._cult_mat || '';
         ctx.cultura_hemocultura = !!f._cult_hemo;
+        ctx.hemocultura_5d5d = !!f._hemo55;
         if(avaliaCond(cond, ctx)){
           casam++;
           const temIras = f._iras!=null && String(f._iras).trim()!=='';
@@ -536,6 +546,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       ctx.cultura_organismos = f._cult_org || '';
       ctx.cultura_materiais = f._cult_mat || '';
       ctx.cultura_hemocultura = !!f._cult_hemo;
+        ctx.hemocultura_5d5d = !!f._hemo55;
       if(!avaliaCond(regra.condicoes, ctx)) continue;
       casamTotal++;
       if(f._trid != null){ jaTriada++; continue; }

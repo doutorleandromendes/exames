@@ -504,14 +504,14 @@ function clienteJS() {
       + '<button type="button" onclick="promoverCampo(\''+esc(c.key)+'\')" title="Cria coluna real em atb_fichas e migra os dados já salvos no payload. Habilita o campo em regras, grade e filtros." style="font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid #cdd3db;background:#fff;color:#0c447c;cursor:pointer;font-weight:600">\u2191 Promover a coluna</button>';
   }
 
-  function promoverCampo(key){
+  window.promoverCampo = function(key){
     if(!confirm('Promover "'+key+'" a coluna real?\n\nCria a coluna em atb_fichas e migra os dados já preenchidos (do payload). É uma mudança de schema — deliberada e recomendada quando o campo será usado em regras/filtros.')) return;
     fetch('/atb/admin/form/promover-campo?inst='+encodeURIComponent(B.inst), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:key})})
       .then(function(r){return r.json();}).then(function(j){
         if(j.ok){ alert(j.jaExistia ? ('Campo "'+key+'" já era coluna.') : ('Promovido: coluna '+j.col+' ('+j.tipo+'), '+j.migrados+' fichas migradas.')); location.reload(); }
         else { alert('Falha: '+(j.error||'?')); }
       }).catch(function(e){ alert('Erro: '+e); });
-  }
+  };
 
   function renderLinha(sec, si, c, ci){
     var row = document.createElement('div'); row.className='fe-row'+((ST[c.key]&&!ST[c.key].temColuna)||NOVOS[c.key]?' av':'');

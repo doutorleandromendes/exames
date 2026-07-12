@@ -8,13 +8,14 @@ export function safe(s){
     .replace(/'/g,'&#39;');
 }
 
-export function renderShell(title, body) {
+export function renderShell(title, body, favicon) {
   return `<!doctype html>
   <html lang="pt-br">
   <head>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1"/>
     <title>${title}</title>
+    ${favicon ? `<link rel="icon" href="${favicon}"/>` : ''}
     <style>
       :root{--bg:#f4f6f9;--card:#ffffff;--txt:#1b2330;--mut:#5b6472;--pri:#0c447c;--bd:#e0e2e6}
       *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Arial;background:var(--bg);color:var(--txt)}

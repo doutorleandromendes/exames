@@ -949,7 +949,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
                      AND ((COALESCE(f.prontuario,'')<>'' AND h.prontuario=f.prontuario) OR (COALESCE(f.atendimento,'')<>'' AND h.atendimento=f.atendimento))
                      AND COALESCE(h.data_positividade,h.recebido_em::date) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
                      AND COALESCE(h.data_positividade,h.recebido_em::date) <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')) AS _tem_hemo,
-               a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data,
+               a.iras, a.etiol_iras, a.micro, a.saps3, a.desfecho_iras, a.desfecho_data, a.monitor_regra_id,
                ${extraSelectSql(cols)}(SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='pdf')    AS n_pdf,
                (SELECT COUNT(*) FROM atb_ficha_imagens WHERE ficha_id=f.id AND tipo='imagem') AS n_img
         FROM atb_fichas f
@@ -975,7 +975,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
             <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}${_divPacs?'<span title="Nome diverge do PACS — abra o card para corrigir" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#a32d2d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">≠PACS</span>':''}
-            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f._tem_cult?(f._cult_mr?' <span title="Cultura multirresistente (janela 30d/5d)" style="display:inline-block;font-size:9px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:0 4px;vertical-align:middle">🦠 MR</span>':' <span title="Cultura positiva (janela 30d/5d)" style="vertical-align:middle">🦠</span>'):''}${f._tem_hemo?' <span title="Hemocultura parcial positiva (janela 30d/5d)" style="vertical-align:middle">🩸</span>':''}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
+            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f._tem_cult?(f._cult_mr?' <span title="Cultura multirresistente (janela 30d/5d)" style="display:inline-block;font-size:9px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:0 4px;vertical-align:middle">🦠 MR</span>':' <span title="Cultura positiva (janela 30d/5d)" style="vertical-align:middle">🦠</span>'):''}${f._tem_hemo?' <span title="Hemocultura parcial positiva (janela 30d/5d)" style="vertical-align:middle">🩸</span>':''}${f.monitor_regra_id?' <span title="Reclassificada por monitoramento (regra contínua)" style="vertical-align:middle">🔁</span>':''}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>
           <td>${f.setor?_pill(SETOR_CORES,f.setor):'—'}</td>

@@ -89,6 +89,13 @@ button{font-family:inherit;cursor:pointer}
 .hero-field{position:absolute;inset:0;pointer-events:none;opacity:.5;z-index:0}
 .hero-wm{position:absolute;top:50%;right:-4%;transform:translateY(-50%);width:min(46vw,560px);height:min(46vw,560px);
   background:var(--logo) center/contain no-repeat;opacity:.05;pointer-events:none;z-index:0}
+.hero-patho{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden;
+  display:flex;flex-wrap:wrap;align-content:space-between;justify-content:center;gap:0 1.25rem;padding:1.6rem 3%}
+.hero-patho span{line-height:2.7rem}
+.hero-patho span{white-space:nowrap;color:var(--safranin)}
+.hero-patho .hp-v{font-family:var(--serif);font-weight:500;line-height:1.12}
+.hero-patho .hp-vi{font-style:italic}
+.hero-patho .hp-f{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;line-height:1.5}
 .hero-in{position:relative;z-index:2;display:grid;grid-template-columns:1.35fr .95fr;gap:3rem;align-items:center}
 .hero h1{font-size:clamp(2.5rem,5.4vw,4.1rem);font-weight:420;margin:1.1rem 0 0}
 .hero h1 em{font-style:italic;color:var(--safranin);font-weight:420}
@@ -328,7 +335,7 @@ footer{background:#191415;color:#b4a9a3;padding:3rem 0 2rem;font-size:.88rem}
     <a class="brand" href="#top" aria-label="Início">
       <span class="badge" aria-hidden="true"></span>
       <span class="txt">
-        <span class="t1">Dr. Leandro Mendes</span>
+        <span class="t1">Consultório - Dr. Leandro Mendes</span>
         <span class="t2">Infectologia Especializada</span>
       </span>
     </a>
@@ -348,7 +355,100 @@ footer{background:#191415;color:#b4a9a3;padding:3rem 0 2rem;font-size:.88rem}
 
 <!-- ============ HERO ============ -->
 <header class="hero">
-  <div class="hero-wm" aria-hidden="true"></div>
+  <div class="hero-patho" aria-hidden="true">
+    <span class="hp-v" style="font-size:2.35rem;opacity:0.125">Dengue</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.07">Febre amarela</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.055">West Nile</span>
+    <span class="hp-v" style="font-size:1.95rem;opacity:0.105">Zika</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.064">Anaplasma</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.058">Babesia</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.056">Ehrlichia</span>
+    <span class="hp-v" style="font-size:2.15rem;opacity:0.12">Chikungunya</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.07">Leptospira</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.055">Hanseníase</span>
+    <span class="hp-v" style="font-size:1.9rem;opacity:0.1">HIV</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.064">Chlamydia trachomatis</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.058">Neisseria gonorrhoeae</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.056">Trichomonas</span>
+    <span class="hp-v" style="font-size:2.4rem;opacity:0.13">Hepatite C</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.07">Mpox</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.055">HSV-1</span>
+    <span class="hp-v hp-vi" style="font-size:2.05rem;opacity:0.11">Treponema pallidum</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.064">HSV-2</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.058">CMV</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.056">Epstein-Barr</span>
+    <span class="hp-v hp-vi" style="font-size:2.25rem;opacity:0.125">Toxoplasma gondii</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.07">Rubéola</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.055">Sarampo</span>
+    <span class="hp-v hp-vi" style="font-size:2rem;opacity:0.105">Trypanosoma cruzi</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.064">Hepatite A</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.058">Hepatite B</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.056">Hepatite E</span>
+    <span class="hp-v hp-vi" style="font-size:2.35rem;opacity:0.125">Leishmania</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.07">Influenza</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.055">SARS-CoV-2</span>
+    <span class="hp-v hp-vi" style="font-size:1.95rem;opacity:0.105">Mycobacterium tuberculosis</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.064">Legionella</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.058">Mycoplasma pneumoniae</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.056">Adenovírus</span>
+    <span class="hp-v hp-vi" style="font-size:2.15rem;opacity:0.12">Plasmodium</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.07">VSR</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.055">Streptococcus pneumoniae</span>
+    <span class="hp-v hp-vi" style="font-size:1.9rem;opacity:0.1">Cryptococcus</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.064">Streptococcus pyogenes</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.058">Clostridioides difficile</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.056">Helicobacter pylori</span>
+    <span class="hp-v hp-vi" style="font-size:2.4rem;opacity:0.13">Histoplasma</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.07">Giardia</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.055">Cryptosporidium</span>
+    <span class="hp-v hp-vi" style="font-size:2.05rem;opacity:0.11">Borrelia</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.064">Pneumocystis jirovecii</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.058">Candida</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.056">Aspergillus</span>
+    <span class="hp-v hp-vi" style="font-size:2.25rem;opacity:0.125">Paracoccidioides</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.07">Cystoisospora</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.055">Cyclospora</span>
+    <span class="hp-v hp-vi" style="font-size:2rem;opacity:0.105">Sporothrix</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.064">Trichophyton</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.058">HSV-1</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.056">Clostridioides difficile</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.07">Chlamydia trachomatis</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.055">Adenovírus</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.064">Babesia</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.058">Influenza</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.056">Trichophyton</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.07">Sarampo</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.055">Candida</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.064">HSV-2</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.058">Helicobacter pylori</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.056">Neisseria gonorrhoeae</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.07">VSR</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.055">Ehrlichia</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.064">SARS-CoV-2</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.058">Febre amarela</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.056">Hepatite A</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.07">Aspergillus</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.055">CMV</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.064">Giardia</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.058">Trichomonas</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.056">Streptococcus pneumoniae</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.07">Leptospira</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.055">Legionella</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.064">West Nile</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.058">Hepatite B</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.056">Cystoisospora</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.07">Epstein-Barr</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.055">Cryptosporidium</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.064">Mpox</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.058">Streptococcus pyogenes</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.056">Hanseníase</span>
+    <span class="hp-f" style="font-size:1.28rem;opacity:0.07">Mycoplasma pneumoniae</span>
+    <span class="hp-f" style="font-size:1.36rem;opacity:0.055">Anaplasma</span>
+    <span class="hp-f" style="font-size:1.4rem;opacity:0.064">Hepatite E</span>
+    <span class="hp-f" style="font-size:1.25rem;opacity:0.058">Cyclospora</span>
+    <span class="hp-f" style="font-size:1.32rem;opacity:0.056">Rubéola</span>
+    <span class="hp-f" style="font-size:1.45rem;opacity:0.07">Pneumocystis jirovecii</span>
+  </div>
   <div class="wrap hero-in">
     <div>
       <span class="eyebrow">Infectologia especializada</span>

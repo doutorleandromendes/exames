@@ -202,6 +202,42 @@ export function registerFormEditorRoutes(app, pool, adminRequired, renderShell) 
   });
 
   // gravação (valida + nova versão)
+  // Promove um campo "extra" (só payload_raw) a COLUNA REAL: ALTER TABLE + backfill
+  // do payload_raw. Como INSERT/edição/grade/regras são derivados de (schema ∩
+  // colunas reais), a promoção religa tudo automaticamente — sem wiring parcial.
+  app.post('/atb/admin/form/promover-campo', adminRequired, async (req, res) => {
+    const inst = (req.query.inst || req.body?.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
+    const key = String(req.body?.key || '').trim();
+    try {
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) return res.status(400).json({ ok: false, error: 'chave inválida' });
+      const schema = await getFormSchema(pool, inst);
+      let campo = null;
+      for (const sec of (schema?.secoes || [])) for (const c of (sec.campos || [])) if (c.key === key) campo = c;
+      if (!campo) return res.status(404).json({ ok: false, error: 'campo não encontrado no schema' });
+      if (!TIPOS_CRIAVEIS.includes(campo.type)) return res.status(400).json({ ok: false, error: `tipo "${campo.type}" não é promovível` });
+      const col = COLUNA_DE[key] || key;
+      if (!/^[a-z][a-z0-9_]{0,62}$/.test(col)) return res.status(400).json({ ok: false, error: `nome de coluna inválido: ${col}` });
+      const cols = await colunasReaisFichas(pool);
+      if (cols.has(col)) return res.json({ ok: true, col, tipo: '(já era coluna)', migrados: 0, jaExistia: true });
+
+      const tipo = campo.type === 'date' ? 'DATE' : campo.type === 'number' ? 'NUMERIC' : campo.type === 'checkbox' ? 'JSONB' : 'TEXT';
+      await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS ${col} ${tipo}`);
+
+      let expr;
+      if (tipo === 'DATE')        expr = `CASE WHEN payload_raw->>'${key}' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN (payload_raw->>'${key}')::date END`;
+      else if (tipo === 'NUMERIC') expr = `CASE WHEN payload_raw->>'${key}' ~ '^-?[0-9]+([.][0-9]+)?$' THEN (payload_raw->>'${key}')::numeric END`;
+      else if (tipo === 'JSONB')   expr = `payload_raw->'${key}'`;
+      else                         expr = `NULLIF(payload_raw->>'${key}', '')`;
+      const up = await pool.query(`UPDATE atb_fichas SET ${col} = ${expr} WHERE payload_raw ? '${key}' AND ${col} IS NULL`);
+
+      console.log(`[atb] promover-campo: ${key} -> coluna ${col} ${tipo}, ${up.rowCount} fichas migradas (inst=${inst})`);
+      res.json({ ok: true, col, tipo, migrados: up.rowCount });
+    } catch (e) {
+      console.error('[atb] promover-campo:', e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
   app.post('/atb/admin/form/estrutura/salvar', adminRequired, async (req, res) => {
     const inst = (req.query.inst || req.body?.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     try {
@@ -464,7 +500,17 @@ function clienteJS() {
       var chips = '🗄'+(s.naGrade?' ▦':'')+(s.nasRegras?' ⚙':'');
       return '<span class="fe-badge fe-ok">✓ Integrado</span> <span class="fe-key" title="Coluna'+(s.naGrade?' · Grade':'')+' · Regras">'+chips+'</span>';
     }
-    return '<span class="fe-badge fe-av">△ Extras</span>';
+    return '<span class="fe-badge fe-av">△ Extras</span> '
+      + '<button type="button" onclick="promoverCampo(\''+esc(c.key)+'\')" title="Cria coluna real em atb_fichas e migra os dados já salvos no payload. Habilita o campo em regras, grade e filtros." style="font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid #cdd3db;background:#fff;color:#0c447c;cursor:pointer;font-weight:600">\u2191 Promover a coluna</button>';
+  }
+
+  function promoverCampo(key){
+    if(!confirm('Promover "'+key+'" a coluna real?\n\nCria a coluna em atb_fichas e migra os dados já preenchidos (do payload). É uma mudança de schema — deliberada e recomendada quando o campo será usado em regras/filtros.')) return;
+    fetch('/atb/admin/form/promover-campo?inst='+encodeURIComponent(B.inst), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:key})})
+      .then(function(r){return r.json();}).then(function(j){
+        if(j.ok){ alert(j.jaExistia ? ('Campo "'+key+'" já era coluna.') : ('Promovido: coluna '+j.col+' ('+j.tipo+'), '+j.migrados+' fichas migradas.')); location.reload(); }
+        else { alert('Falha: '+(j.error||'?')); }
+      }).catch(function(e){ alert('Erro: '+e); });
   }
 
   function renderLinha(sec, si, c, ci){

@@ -84,7 +84,7 @@ function subSqlDe(campos) {
 }
 import { getFormSchema } from './atb-form-schema.js';
 
-const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
+export const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
   '(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC',
   'CDI','Onco_Bact','Sem dados','Descartado','Repetida'];
 
@@ -165,13 +165,13 @@ async function colunasReais(pool){
   return _colsCache;
 }
 // Catálogo final por-request: schema vivo ∩ colunas reais (+ idade_* calculados).
-async function catalogoCampos(pool, inst='HUSF'){
+export async function catalogoCampos(pool, inst='HUSF'){
   const schema = await getFormSchema(pool, inst);
   const cols = await colunasReais(pool);
   return construirCampos(schema).filter(c => cols.has(c.key) || CALC_KEYS.has(c.key));
 }
 
-const OPERADORES = {
+export const OPERADORES = {
   select: [['eq','é igual a'],['neq','é diferente de'],['in','é um de'],['filled','está preenchido'],['not_filled','está vazio']],
   multi:  [['contains','contém'],['contains_any','contém algum de'],['filled','está preenchido'],['not_filled','está vazio']],
   bool:   [['eq','é']],
@@ -179,9 +179,9 @@ const OPERADORES = {
   texto:  [['text_contains_any','contém (texto) algum de'],['eq','é igual a'],['neq','é diferente de'],['filled','preenchido'],['not_filled','vazio']],
 };
 
-function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+export function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-function page(titulo, corpo){
+export function page(titulo, corpo){
   return `<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(titulo)}</title>

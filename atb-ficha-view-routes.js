@@ -23,7 +23,7 @@
 
 import { getFormSchema } from './atb-form-schema.js';
 import { buscarCulturasDaFicha, renderCulturasComplemento } from './atb-culturas-routes.js';
-import { COLUNA_DE, colunasReaisFichas } from './atb-field-registry.js';
+import { COLUNA_DE } from './atb-field-registry.js';
 
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 const EXAMES = {
@@ -73,19 +73,29 @@ function bloco(titulo, itens, s) {
   return `<div class="bloco"><h3>${s(titulo)}</h3>${linhas}</div>`;
 }
 
-// Provisão GERAL: campos criados no form editor SEM coluna real em atb_fichas
-// ("extras") viajam em payload_raw. Renderizamos qualquer extra preenchido usando
-// o schema para o rótulo — sem duplicar os que têm coluna (já mostrados acima).
-async function blocoExtrasFormulario(pool, schema, payload, s) {
+// Colunas já exibidas em blocos temáticos (+ matrizes). Campos cujo destino NÃO
+// está aqui vão pro bloco "Informações adicionais" — seja EXTRA (só payload_raw)
+// ou PROMOVIDO a coluna. Assim, promover um campo não o faz sumir da ficha, e
+// qualquer campo novo do form editor aparece automaticamente quando preenchido.
+const KEYS_TEMATICOS = new Set([
+  'paciente_nome','paciente_nome_raw','pac_nome','paciente_dn','pac_dn','paciente_idade','prontuario','atendimento',
+  'setor','leito','equipe_responsavel','data_internacao','data_admissao_uti','gestante','lactante','tipo_terapia',
+  'foco_infeccao','historia_clinica','sepse','cirurgia','classificacao_fratura','sitio_pai','comorbidades',
+  'oxacilina_associacao','dispositivos_invasivos','acesso_vascular_neo','sitio_cvc','sitio_cdl','data_insercao_cateter',
+  'dialise','acesso_dialise','sinais_dialise','faz_quimio','acesso_quimio','cateter_quimio','insuficiencia_renal',
+  'clcr','peso','altura','peso_nascimento','atb_solicitado','tempo_previsto','sofa','crm','prescritor_nome',
+  'complemento_scih','parecer_evolutivo',
+  'atb_previos','culturas_colhidas','culturas_previas','posologia',
+]);
+
+function blocoExtrasFormulario(schema, payload, s) {
   if (!payload || typeof payload !== 'object') return '';
-  let cols;
-  try { cols = await colunasReaisFichas(pool); } catch { return ''; }
   const pares = [];
   for (const sec of (schema && schema.secoes ? schema.secoes : []))
     for (const c of (sec.campos || [])) {
       if (!c.key || c.type === 'matrix') continue;
       const col = COLUNA_DE[c.key] || c.key;
-      if (cols.has(col)) continue;                       // tem coluna real → já aparece nos blocos
+      if (KEYS_TEMATICOS.has(col)) continue;             // já aparece num bloco temático
       const v = payload[c.key];
       if (v == null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && !v.length)) continue;
       let val;
@@ -413,7 +423,7 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
       try {
         const _schema = await getFormSchema(pool, f.instituicao || 'HUSF');
         matrizes = extrairMatrizes(_schema);
-        _extrasHTML = await blocoExtrasFormulario(pool, _schema, f.payload_raw, _safe);
+        _extrasHTML = blocoExtrasFormulario(_schema, f.payload_raw, _safe);
       } catch (e) { console.error('[atb] matrizes/extras schema:', e.message); }
       const culturas = await buscarCulturasDaFicha(pool, f);
       res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes, renderCulturasComplemento(culturas), _extrasHTML));

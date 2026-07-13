@@ -952,8 +952,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
                    m.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
                    AND ( (COALESCE(f.prontuario,'') <> '' AND m.prontuario = f.prontuario)
                         OR (COALESCE(f.atendimento,'') <> '' AND m.atendimento = f.atendimento) )
-                   AND COALESCE(m.data_positividade, m.recebido_em::date) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
-                   AND COALESCE(m.data_positividade, m.recebido_em::date) <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')) AS _tem_mdr,
+                   AND ( (m.data_positividade >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days') AND m.data_positividade <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days'))
+                      OR (m.recebido_em::date >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days') AND m.recebido_em::date <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')) )) AS _tem_mdr,
                 EXISTS(SELECT 1 FROM atb_hemocultura_alertas h
                    WHERE h.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
                      AND ((COALESCE(f.prontuario,'')<>'' AND h.prontuario=f.prontuario) OR (COALESCE(f.atendimento,'')<>'' AND h.atendimento=f.atendimento))

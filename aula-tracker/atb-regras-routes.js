@@ -63,8 +63,8 @@ const _CULT_MATCH_55 = `c.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
 const _MDR_MATCH = `m.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
      AND ( (COALESCE(f.prontuario,'') <> '' AND m.prontuario = f.prontuario)
           OR (COALESCE(f.atendimento,'') <> '' AND m.atendimento = f.atendimento) )
-     AND COALESCE(m.data_positividade, m.recebido_em::date) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
-     AND COALESCE(m.data_positividade, m.recebido_em::date) <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
+     AND ( (m.data_positividade >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days') AND m.data_positividade <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days'))
+        OR (m.recebido_em::date >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days') AND m.recebido_em::date <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')) )`;
 const SUB_CULT_POS = `(EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH}) OR EXISTS(SELECT 1 FROM atb_mdr_alertas m WHERE ${_MDR_MATCH}))`;
 const SUB_CULT_MR  = `ARRAY(SELECT DISTINCT r FROM (SELECT c.resistencia AS r FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.resistencia IS NOT NULL UNION SELECT m.resistencia FROM atb_mdr_alertas m WHERE ${_MDR_MATCH} AND m.resistencia IS NOT NULL) u)`;
 const SUB_CULT_ORG = `(SELECT string_agg(DISTINCT c.microorganismo, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.microorganismo IS NOT NULL)`;

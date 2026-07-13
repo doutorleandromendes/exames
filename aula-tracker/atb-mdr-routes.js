@@ -78,8 +78,8 @@ export async function buscarMdrDaFicha(pool, ficha, diasAntes = 30, diasDepois =
     SELECT prontuario, atendimento, paciente_nome, setor, data_entrada, data_positividade, material, microrganismo, resistencia
       FROM atb_mdr_alertas
      WHERE instituicao_id IS NOT DISTINCT FROM $1
-       AND COALESCE(data_positividade, recebido_em::date) >= ($2::date - ($5 || ' days')::interval)
-       AND COALESCE(data_positividade, recebido_em::date) <= ($2::date + ($6 || ' days')::interval)
+       AND ( (data_positividade >= ($2::date - ($5 || ' days')::interval) AND data_positividade <= ($2::date + ($6 || ' days')::interval))
+          OR (recebido_em::date >= ($2::date - ($5 || ' days')::interval) AND recebido_em::date <= ($2::date + ($6 || ' days')::interval)) )
        AND ( ($3 <> '' AND prontuario = $3) OR ($4 <> '' AND atendimento = $4) )
      ORDER BY data_positividade DESC NULLS LAST, id DESC`,
     [ficha.instituicao_id, ref, pront, atend, String(diasAntes), String(diasDepois)]);

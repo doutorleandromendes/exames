@@ -12,7 +12,7 @@
 //   import { registerAgendaRoutes } from './agenda-routes.js';
 //   registerAgendaRoutes(app, pool, agendaRequired, renderShell);
 
-import { criarTeleconsulta, atualizarTeleconsulta, removerEvento, googleConfigurado } from './agenda-google.js';
+import { criarEventoCalendar, atualizarEventoCalendar, removerEvento, googleConfigurado, testarConexao } from './agenda-google.js';
 
 const safe = s => String(s ?? '')
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -496,14 +496,39 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
       [e.paciente_id, e.paciente_nome, e.paciente_telefone, e.paciente_email, e.data, e.hora_inicio, e.duracao_min,
        e.tipo, e.modalidade, e.local, e.link_video, e.obs, e.valor_consulta, e.pagamento_status, quem(req)]);
     const novoId = rows[0].id;
-    // Teleconsulta sem link manual → gera sala do Meet via Calendar (best-effort, não bloqueia)
-    if (e.modalidade === 'teleconsulta' && !e.link_video && googleConfigurado()) {
-      const g = await criarTeleconsulta({ id: novoId, ...e });
-      if (g) await pool.query(
-        `UPDATE agenda_eventos SET link_video=$1, google_event_id=$2 WHERE id=$3`,
-        [g.meetLink, g.eventId, novoId]);
+    // Cria o evento no Google Calendar para TODO agendamento (best-effort, não bloqueia).
+    // Teleconsulta sem link manual também gera uma sala do Meet.
+    if (googleConfigurado()) {
+      const comMeet = e.modalidade === 'teleconsulta' && !e.link_video;
+      const g = await criarEventoCalendar({ id: novoId, ...e }, { comMeet });
+      if (g) {
+        const link = comMeet ? (g.meetLink || e.link_video) : e.link_video;
+        await pool.query(
+          `UPDATE agenda_eventos SET google_event_id=$1, link_video=$2 WHERE id=$3`,
+          [g.eventId, link, novoId]);
+      }
     }
     res.redirect(`/agenda/evento/${novoId}`);
+  });
+
+  // ===== AUTOTESTE DA CONEXÃO COM O GOOGLE CALENDAR (médico) =====
+  app.get('/agenda/google/status', agendaRequired, async (req, res) => {
+    if (!isMedico(req)) return negar(res, 'Diagnóstico restrito ao médico.');
+    const r = await testarConexao();
+    const cor = r.ok ? '#1a7f4e' : '#b3261e';
+    const msg = !r.configurado
+      ? 'As variáveis GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN não estão no ambiente do Render.'
+      : r.ok
+        ? 'Conexão OK — o refresh token está válido e os agendamentos serão criados no Google Calendar.'
+        : `Falha ao renovar o token. Isso normalmente significa refresh token expirado (app OAuth em modo "Testing" expira em 7 dias — publique o app) ou credenciais trocadas.<br><br><code>${safe(r.erro || '')}</code>`;
+    const body = `${css}${topNav(req, hojeSP(), 'dia')}
+      <div class="card" style="max-width:680px;margin:0 auto">
+        <h1 style="margin-top:0;font-size:20px">Google Calendar — diagnóstico</h1>
+        <p style="font-size:16px"><b style="color:${cor}">${r.ok ? '✓ Conectado' : '✕ Não conectado'}</b></p>
+        <p class="mut">${msg}</p>
+        <p class="mt"><a href="/agenda">← Voltar à agenda</a></p>
+      </div>`;
+    res.send(renderShell('Google Calendar — status', body));
   });
 
   // ===== DETALHE DO EVENTO =====
@@ -586,6 +611,9 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
       ${lembretes.length ? `<p class="mut" style="margin:4px 0 0">Lembretes: ${lembretes.map(l =>
         `${l.canal === 'email' ? '✉' : '💬'} ${l.status === 'enviado' ? 'enviado ' + fmtTs(l.enviado_em) : l.status}${l.status === 'erro' && l.erro ? ' <span title="' + safe(l.erro) + '">(!)</span>' : ''}`).join(' · ')}</p>`
         : (ev.paciente_email && !['cancelado','finalizado','faltou'].includes(ev.status) ? `<p class="mut" style="margin:4px 0 0">✉ Lembrete por e-mail será enviado automaticamente na véspera.</p>` : '')}
+      ${isMedico(req) && ev.status !== 'cancelado' ? (ev.google_event_id
+        ? `<p class="mut" style="margin:4px 0 0">📅 No Google Calendar</p>`
+        : (googleConfigurado() ? `<p class="mut" style="margin:4px 0 0">📅 <span style="color:#b3261e">Não sincronizado</span> — <a href="/agenda/google/status">verificar conexão</a></p>` : '')) : ''}
       ${(() => { const wa = canEdit(req) && ev.status !== 'cancelado' ? waLink(ev) : null;
         return wa ? `<p class="mt"><a class="btn-mini btn-ghost" style="text-decoration:none;display:inline-block" href="${wa}" target="_blank" rel="noopener">💬 Enviar lembrete pelo WhatsApp</a></p>` : ''; })()}
       ${acoesStatus}
@@ -619,20 +647,21 @@ export function registerAgendaRoutes(app, pool, agendaRequired, renderShell) {
     let linkFinal = e.link_video;
 
     if (googleConfigurado()) {
-      const eraTele = prev.modalidade === 'teleconsulta' && prev.google_event_id;
-      const viraTele = e.modalidade === 'teleconsulta';
-      if (viraTele && !eraTele && !e.link_video) {
-        // presencial → tele (sem link manual): cria sala nova
-        const g = await criarTeleconsulta({ id: req.params.id, ...e });
-        if (g) { googleId = g.eventId; linkFinal = g.meetLink; }
-      } else if (viraTele && eraTele) {
-        // continua tele: atualiza horário/dados do evento existente (mantém o mesmo link)
-        await atualizarTeleconsulta(prev.google_event_id, { id: req.params.id, ...e });
-        if (!linkFinal) linkFinal = prev.link_video;   // preserva link se o form veio vazio
-      } else if (!viraTele && eraTele) {
-        // tele → presencial: remove o evento do Calendar
+      const querMeet = e.modalidade === 'teleconsulta' && !e.link_video;
+      const jaTemMeet = (prev.link_video || '').includes('meet.google.com');
+      if (!prev.google_event_id) {
+        // não havia evento no Calendar (agendamento antigo ou criação que falhou) → cria agora
+        const g = await criarEventoCalendar({ id: req.params.id, ...e }, { comMeet: querMeet });
+        if (g) { googleId = g.eventId; if (querMeet) linkFinal = g.meetLink || linkFinal; }
+      } else if (querMeet && !jaTemMeet) {
+        // passou a precisar de sala do Meet e ainda não tinha → recria (apaga o antigo, cria com Meet)
         await removerEvento(prev.google_event_id);
-        googleId = null;
+        const g = await criarEventoCalendar({ id: req.params.id, ...e }, { comMeet: true });
+        if (g) { googleId = g.eventId; linkFinal = g.meetLink || linkFinal; }
+      } else {
+        // evento já existe e não precisa gerar Meet novo → só atualiza data/hora/dados
+        await atualizarEventoCalendar(prev.google_event_id, { id: req.params.id, ...e });
+        if (e.modalidade === 'teleconsulta' && !linkFinal) linkFinal = prev.link_video;
       }
     }
 

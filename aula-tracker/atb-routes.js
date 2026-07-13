@@ -911,7 +911,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         return `<a class="th-sort${active?' on':''}" href="/atb/admin/grid?${u}" title="${tt}">${label}${arr?`<span class="arr"> ${arr}</span>`:''}</a>`;
       };
 
-      const { whereSql, params } = buildGridWhere(req.query);
+      const _colsGrid = await colunasReaisFichas(pool);
+      const { whereSql, params } = buildGridWhere(req.query, _colsGrid);
 
       const { rows:[{total}] } = await pool.query(`
         SELECT COUNT(*) AS total FROM atb_fichas f

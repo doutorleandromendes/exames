@@ -47,7 +47,7 @@ function _safe(s) {
 //  WHERE — adiciona as cláusulas dos filtros NOVOS (não duplica q/inst/setor/mes/iras,
 //  que a rota já trata). Combinação E. Muta `where` e `params`.
 // ════════════════════════════════════════════════════════════════════════════
-export function applyGridFilters(query, where, params) {
+export function applyGridFilters(query, where, params, colsReais) {
   const q = query || {};
   const push = (clause, val) => { params.push(val); where.push(clause.replace('$$', '$' + params.length)); };
 
@@ -71,6 +71,12 @@ export function applyGridFilters(query, where, params) {
 
   // Etiologia IrAS (texto livre)
   if (q.etiol && q.etiol.trim()) push('a.etiol_iras ILIKE $$', '%' + q.etiol.trim() + '%');
+
+  // Mês da cirurgia infectada (ISC) — requer o campo PROMOVIDO a coluna DATE.
+  // Guarda fail-safe: só aplica se colsReais foi passado E a coluna existe (senão ignora, não quebra).
+  if (q.mes_cirurgia && /^\d{4}-\d{2}$/.test(q.mes_cirurgia)
+      && colsReais && colsReais.has('data_da_cirurgia_infectada'))
+    push("to_char(f.data_da_cirurgia_infectada, 'YYYY-MM') = $$", q.mes_cirurgia);
 
   // Tipo de terapia (igual) — útil pra excluir profilaxia: selecione Empírica/Guiada
   if (q.tipo_terapia) push('f.tipo_terapia = $$', q.tipo_terapia);
@@ -217,7 +223,7 @@ export function gridControlsUI(query, pager, opts = {}) {
     .filter(Boolean);
 
   // contagem de filtros ativos (exceto q/inst que ficam visíveis na barra)
-  const filtroKeys = ['setor','data_de','data_ate','sub_de','sub_ate','iras_sn','iras_classe','etiol','tipo_terapia','veredito','acesso_dialise','sofa_min','sofa_max','sepse','cult_pos','cult_hemo','cult_mr'];
+  const filtroKeys = ['setor','data_de','data_ate','sub_de','sub_ate','iras_sn','iras_classe','etiol','tipo_terapia','veredito','acesso_dialise','sofa_min','sofa_max','sepse','cult_pos','cult_hemo','cult_mr','mes_cirurgia'];
   const nAtivos = filtroKeys.filter(k => q[k]).length;
 
   // hidden p/ preservar estado ao submeter cada form
@@ -260,6 +266,7 @@ export function gridControlsUI(query, pager, opts = {}) {
         ` : ''}
         <label>SOFA mín <input type="number" name="sofa_min" value="${val('sofa_min')}" class="gf-in" style="width:64px"></label>
         <label>máx <input type="number" name="sofa_max" value="${val('sofa_max')}" class="gf-in" style="width:64px"></label>
+        <label>Mês da cirurgia (ISC) <input type="month" name="mes_cirurgia" value="${val('mes_cirurgia')}" class="gf-in"></label>
       </div>
       <div class="gf-acoes">
         <button type="submit" class="gf-ok">Aplicar filtros</button>
@@ -351,7 +358,7 @@ export function gridControlsUI(query, pager, opts = {}) {
   </script>`;
 }
 // ── WHERE do recorte (fonte única — usado pela grade E pelas estatísticas) ───
-export function buildGridWhere(query) {
+export function buildGridWhere(query, colsReais) {
   const Q = query || {};
   const q = (Q.q || '').trim();
   const inst = Q.inst || '', mes = Q.mes || '', iras = Q.iras || '';
@@ -378,7 +385,7 @@ export function buildGridWhere(query) {
   if (Q.cult_hemo === '1') where.push(`EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_cultMatch} AND c.material ILIKE '%hemocultura%')`);
   const _mr = (Array.isArray(Q.cult_mr) ? Q.cult_mr : String(Q.cult_mr || '').split(',')).map(x => x.trim()).filter(Boolean);
   if (_mr.length) { params.push(_mr); where.push(`EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_cultMatch} AND c.resistencia = ANY($${params.length}))`); }
-  applyGridFilters(Q, where, params);
+  applyGridFilters(Q, where, params, colsReais);
   return { whereSql: where.join(' AND '), params };
 }
 

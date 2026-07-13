@@ -301,6 +301,7 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 .f label{display:flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
 .f label .ab{font-size:.54rem;color:var(--safranin);border:1px solid var(--hair);border-radius:4px;padding:0 .28rem}
 .f .val{padding:.55rem .7rem;border:1px solid var(--hair);border-radius:9px;background:var(--slide);font-size:.9rem;min-height:38px;color:var(--ink-soft)}.f .val.empty{color:var(--muted-2);font-style:italic}
+.fin{width:100%;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:9px;background:#fff;font-size:.9rem;min-height:38px;color:var(--ink)}.fin::placeholder{color:var(--muted-2);font-style:italic}
 .reslabel{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:1rem 0 .3rem}
 .seg{display:inline-flex;border:1px solid var(--hair);border-radius:9px;overflow:hidden;background:#fff}
 .seg button{border:none;background:transparent;padding:.5rem .8rem;font-size:.85rem;color:var(--muted);border-right:1px solid var(--hair)}.seg button:last-child{border-right:none}.seg button.on{background:var(--ink);color:var(--slide)}.seg button.on.reag{background:var(--safranin)}
@@ -378,9 +379,9 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
         <div class="searchwrap" id="searchBox"><input class="search" id="search" placeholder="Buscar exame…" autocomplete="off"><div class="drop" id="drop"></div></div>
         <input class="manualExam" id="manualExam" placeholder="Nome do exame (livre)" style="display:none">
         <div class="auto">
-          <div class="f"><label>Método <span class="ab">auto</span></label><div class="val empty" id="fMet">selecione</div></div>
-          <div class="f"><label>Amostra <span class="ab">auto</span></label><div class="val empty" id="fAmo">—</div></div>
-          <div class="f"><label>Valor de referência <span class="ab">auto</span></label><div class="val empty" id="fVr">—</div></div>
+          <div class="f"><label>Método <span class="ab">auto</span></label><input class="fin" id="fMet" placeholder="selecione um exame"></div>
+          <div class="f"><label>Amostra <span class="ab">auto</span></label><input class="fin" id="fAmo" placeholder="—"></div>
+          <div class="f"><label>Valor de referência <span class="ab">auto</span></label><input class="fin" id="fVr" placeholder="—"></div>
         </div>
         <div class="reslabel">Resultado</div>
         <div id="resField"><div class="val empty">selecione um exame</div></div>
@@ -391,6 +392,11 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
           <div class="prev" id="tcPrev">VR: Não Reagente – relação T/C &lt; 1,0</div>
         </div>
         <div class="optrow" id="manualToggle"><div class="chk"></div><span>Inserir resultado manual (texto livre)</span></div>
+        <div class="reslabel">Observação <span style="text-transform:none;letter-spacing:0;color:var(--muted-2)">(opcional)</span></div>
+        <div id="obsWrap">
+          <div class="tbar"><button type="button" class="tbtn b" data-w="*">B</button><button type="button" class="tbtn i" data-w="_">I</button><span class="thint">*negrito* _itálico_ · texto livre</span></div>
+          <textarea class="ta" id="fObs" placeholder="observação do exame (opcional)"></textarea>
+        </div>
         <div class="actionbar"><button class="addbtn" id="addBtn" disabled>Adicionar à coleta</button><span class="count" id="addhint" style="color:var(--muted-2)">preencha o resultado</span></div>
       </div>
       <div class="card"><h2>Exames na coleta <span class="count" id="count">· ${nExames}</span></h2><div id="list">${rowsHtml}</div></div>
@@ -442,7 +448,7 @@ $("#toggleManualExam").onclick=()=>{const on=$("#manualExam").style.display==="n
 $("#manualExam").addEventListener("input",e=>{const nm=e.target.value.trim();if(nm){sel={nome:nm,metodo:"",amostra:"",vr:"",kind:"texto"};set("#fMet","—");set("#fAmo","—");set("#fVr","—");if(!manualMode)buildField(sel);}});
 
 function pick(e){if(!e)return;sel=e;resultVal=null;search.value=e.nome;drop.classList.remove("open");set("#fMet",e.metodo);set("#fAmo",e.amostra);set("#fVr",e.vr);if(!manualMode)buildField(e);syncAdd();}
-function set(id,v){const el=$(id);el.textContent=v||"—";el.classList.toggle("empty",!v||v==="—"||v==="selecione");}
+function set(id,v){const el=$(id);if(!el)return;const blank=!v||v==="—"||v==="selecione";if(el.tagName==="INPUT"){el.value=blank?"":v;}else{el.textContent=v||"—";el.classList.toggle("empty",blank);}}
 
 function buildField(e){const host=$("#resField");const kind=e.kind||"texto";
   if(kind==="reagente"||kind==="detectado"){const pos=kind==="detectado"?"Detectado":"Reagente",neg=kind==="detectado"?"Não detectado":"Não reagente";
@@ -467,7 +473,7 @@ $("#tcVal").addEventListener("input",e=>{const v=e.target.value.trim();if(v){res
 function syncAdd(){const ok=!!(sel&&resultVal);$("#addBtn").disabled=!ok;$("#addhint").textContent=ok?"pronto":"preencha o resultado";}
 
 $("#addBtn").onclick=async()=>{if(!sel||!resultVal)return;$("#addBtn").disabled=true;
-  const body=new URLSearchParams();body.set("exam_name",sel.nome);body.set("sample_type",sel.amostra||"Soro");body.set("method",sel.metodo||"—");body.set("result_value",resultVal.value);body.set("reference_value",$("#fVr").textContent==="—"?"":$("#fVr").textContent);
+  const body=new URLSearchParams();body.set("exam_name",sel.nome);body.set("sample_type",($("#fAmo").value||"").trim()||"—");body.set("method",($("#fMet").value||"").trim()||"—");body.set("result_value",resultVal.value);body.set("reference_value",($("#fVr").value||"").trim());body.set("observation",($("#fObs").value||"").trim());
   try{const r=await fetch("/lab/admin/coletas/"+COLLECTION_ID+"/resultados",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","X-Requested-With":"XMLHttpRequest"},body});
     if(!r.ok)throw new Error("falha");location.reload();}catch(err){alert("Erro ao adicionar exame.");$("#addBtn").disabled=false;}};
 
@@ -493,12 +499,15 @@ async function setCaption(id,cap){try{await fetch("/lab/admin/images/"+id+"/upda
 async function moveImg(id,dir,rid){if(rid)sessionStorage.setItem("openTray",rid);await fetch("/lab/admin/images/"+id+"/move",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dir})});location.reload();}
 /* reabre a bandeja após reload (reordenar/remover imagem) */
 (function(){const ot=sessionStorage.getItem("openTray");if(ot){sessionStorage.removeItem("openTray");const t=document.getElementById("tray"+ot);if(t)t.classList.add("open");}})();
+/* toolbar da observação */
+wireTB($("#obsWrap"),$("#fObs"));
 
 async function postForm(action){await fetch(action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:""});}
 
 function prefillDup(d){manualMode=false;$("#manualToggle").classList.remove("on");
   sel={nome:d.exam_name,metodo:d.method,amostra:d.sample_type,vr:d.reference_value||"",kind:(d.method==="Marcador"?"dosagem":(d.method==="Sorologia"?"reagente":(d.method==="Antígeno"?"detectado":"texto")))};
   search.value=d.exam_name;set("#fMet",d.method);set("#fAmo",d.sample_type);set("#fVr",d.reference_value||"—");
+  $("#fObs").value=d.observation||"";
   buildField(sel);resultVal={value:d.result_value};syncAdd();}
 
 function uploadImg(resultId){const inp=document.createElement("input");inp.type="file";inp.accept="image/*";

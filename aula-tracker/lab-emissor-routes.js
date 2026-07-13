@@ -439,13 +439,13 @@ const search=$("#search"),drop=$("#drop");
 function renderDrop(q){const t=(q||"").toLowerCase();const hits=CAT.filter(e=>e.nome.toLowerCase().includes(t)).slice(0,8);
   drop.innerHTML=hits.map(e=>'<div class="opt" data-n="'+encodeURIComponent(e.nome)+'"><div class="on">'+e.nome+'</div><div class="og">'+e.grupo+' · '+e.metodo+'</div></div>').join('')||'<div class="opt"><div class="on" style="color:var(--muted-2)">nenhum — use \\'digitar manualmente\\'</div></div>';
   drop.classList.add("open");}
-search.addEventListener("input",()=>renderDrop(search.value));
+search.addEventListener("input",()=>{renderDrop(search.value);syncAdd();});
 search.addEventListener("focus",()=>renderDrop(search.value));
 document.addEventListener("click",e=>{if(!e.target.closest("#searchBox"))drop.classList.remove("open");});
 drop.addEventListener("click",e=>{const o=e.target.closest(".opt[data-n]");if(o){const nm=decodeURIComponent(o.dataset.n);pick(CAT.find(x=>x.nome===nm));}});
 
 $("#toggleManualExam").onclick=()=>{const on=$("#manualExam").style.display==="none";$("#manualExam").style.display=on?"block":"none";$("#searchBox").style.display=on?"none":"block";$("#toggleManualExam").textContent=on?"escolher do catálogo":"digitar exame manualmente";if(on)$("#manualExam").focus();};
-$("#manualExam").addEventListener("input",e=>{const nm=e.target.value.trim();if(nm){sel={nome:nm,metodo:"",amostra:"",vr:"",kind:"texto"};set("#fMet","—");set("#fAmo","—");set("#fVr","—");if(!manualMode)buildField(sel);}});
+$("#manualExam").addEventListener("input",e=>{const nm=e.target.value.trim();if(nm){sel={nome:nm,metodo:"",amostra:"",vr:"",kind:"texto"};if(!manualMode&&!$("#txt"))buildField(sel);}syncAdd();});
 
 function pick(e){if(!e)return;sel=e;resultVal=null;search.value=e.nome;drop.classList.remove("open");set("#fMet",e.metodo);set("#fAmo",e.amostra);set("#fVr",e.vr);if(!manualMode)buildField(e);syncAdd();}
 function set(id,v){const el=$(id);if(!el)return;const blank=!v||v==="—"||v==="selecione";if(el.tagName==="INPUT"){el.value=blank?"":v;}else{el.textContent=v||"—";el.classList.toggle("empty",blank);}}
@@ -470,10 +470,11 @@ function updTC(){const t=$("#tcThr").value||"1,0";set("#fVr","Não Reagente – 
 $("#tcThr").addEventListener("input",updTC);
 $("#tcVal").addEventListener("input",e=>{const v=e.target.value.trim();if(v){resultVal={value:"Não Reagente||TC||relação T/C = "+v};syncAdd();}});
 
-function syncAdd(){const ok=!!(sel&&resultVal);$("#addBtn").disabled=!ok;$("#addhint").textContent=ok?"pronto":"preencha o resultado";}
+function examName(){const mv=$("#manualExam");const vis=mv&&mv.style.display!=="none";return ((vis?mv.value:search.value)||"").trim();}
+function syncAdd(){const nm=examName();const ok=!!(nm&&resultVal);$("#addBtn").disabled=!ok;$("#addhint").textContent=ok?"pronto":(!nm?"informe o exame":"preencha o resultado");}
 
-$("#addBtn").onclick=async()=>{if(!sel||!resultVal)return;$("#addBtn").disabled=true;
-  const body=new URLSearchParams();body.set("exam_name",sel.nome);body.set("sample_type",($("#fAmo").value||"").trim()||"—");body.set("method",($("#fMet").value||"").trim()||"—");body.set("result_value",resultVal.value);body.set("reference_value",($("#fVr").value||"").trim());body.set("observation",($("#fObs").value||"").trim());
+$("#addBtn").onclick=async()=>{if(!resultVal||!examName())return;$("#addBtn").disabled=true;
+  const body=new URLSearchParams();body.set("exam_name",examName());body.set("sample_type",($("#fAmo").value||"").trim()||"—");body.set("method",($("#fMet").value||"").trim()||"—");body.set("result_value",resultVal.value);body.set("reference_value",($("#fVr").value||"").trim());body.set("observation",($("#fObs").value||"").trim());
   try{const r=await fetch("/lab/admin/coletas/"+COLLECTION_ID+"/resultados",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","X-Requested-With":"XMLHttpRequest"},body});
     if(!r.ok)throw new Error("falha");location.reload();}catch(err){alert("Erro ao adicionar exame.");$("#addBtn").disabled=false;}};
 

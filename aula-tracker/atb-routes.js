@@ -26,6 +26,7 @@ import { registerNomesRoutes } from './atb-nomes-routes.js';
 import { ensureCulturasSchema, registerCulturasRoutes } from './atb-culturas-routes.js';
 import { registerPacsNomeRoutes, ensurePacsNomeSchema, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 import { ensureHemoSchema, registerHemoRoutes } from './atb-hemocultura-routes.js';
+import { ensureMdrSchema, registerMdrRoutes } from './atb-mdr-routes.js';
 import { ensureMonitoramentoSchema, registerMonitoramentoRoutes } from './atb-monitoramento-routes.js';
 import { registerScihAcessoRoutes, ensureScihAcessoSchema } from './atb-scih-acesso-routes.js';
 import { ensureMirrorSchema, espelharNovaFicha } from './atb-jotform-mirror.js';
@@ -86,6 +87,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureCulturasSchema(pool).catch(e => console.error('[atb] ensureCulturasSchema:', e.message));
   ensurePacsNomeSchema(pool).catch(e => console.error('[atb] ensurePacsNomeSchema:', e.message));
   ensureHemoSchema(pool).catch(e => console.error('[atb] ensureHemoSchema:', e.message));
+  ensureMdrSchema(pool).catch(e => console.error('[atb] ensureMdrSchema:', e.message));
   ensureMonitoramentoSchema(pool).catch(e => console.error('[atb] ensureMonitoramentoSchema:', e.message));
   
   
@@ -112,6 +114,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerPacsScmiRoutes(app, pool, adminRequired);
   registerPacsNomeRoutes(app, pool, adminRequired);
   registerHemoRoutes(app, pool, adminRequired);
+  registerMdrRoutes(app, pool, adminRequired);
   registerMonitoramentoRoutes(app, pool, adminRequired);
   registerScihAcessoRoutes(app, pool, adminRequired);
   registerRegrasRoutes(app, pool, adminRequired);
@@ -944,6 +947,12 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
                    AND c.data_coleta >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
                    AND c.data_coleta <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')
                    AND c.resistencia IS NOT NULL AND c.resistencia <> '') AS _cult_mr,
+                EXISTS(SELECT 1 FROM atb_mdr_alertas m WHERE
+                   m.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+                   AND ( (COALESCE(f.prontuario,'') <> '' AND m.prontuario = f.prontuario)
+                        OR (COALESCE(f.atendimento,'') <> '' AND m.atendimento = f.atendimento) )
+                   AND COALESCE(m.data_positividade, m.recebido_em::date) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
+                   AND COALESCE(m.data_positividade, m.recebido_em::date) <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')) AS _tem_mdr,
                 EXISTS(SELECT 1 FROM atb_hemocultura_alertas h
                    WHERE h.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
                      AND ((COALESCE(f.prontuario,'')<>'' AND h.prontuario=f.prontuario) OR (COALESCE(f.atendimento,'')<>'' AND h.atendimento=f.atendimento))
@@ -975,7 +984,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
             <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}${_divPacs?'<span title="Nome diverge do PACS — abra o card para corrigir" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#a32d2d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">≠PACS</span>':''}
-            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${f._tem_cult?(f._cult_mr?' <span title="Cultura multirresistente (janela 30d/5d)" style="display:inline-block;font-size:9px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:0 4px;vertical-align:middle">🦠 MR</span>':' <span title="Cultura positiva (janela 30d/5d)" style="vertical-align:middle">🦠</span>'):''}${f._tem_hemo?' <span title="Hemocultura parcial positiva (janela 30d/5d)" style="vertical-align:middle">🩸</span>':''}${f.monitor_regra_id?' <span title="Reclassificada por monitoramento (regra contínua)" style="vertical-align:middle">🔁</span>':''}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
+            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${(f._tem_cult||f._tem_mdr)?((f._cult_mr||f._tem_mdr)?' <span title="Multirresistente — planilha de culturas ou alerta de MDR (30d/5d)" style="display:inline-block;font-size:9px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:0 4px;vertical-align:middle">🦠 MR</span>':' <span title="Cultura positiva — planilha ou alerta de MDR (30d/5d)" style="vertical-align:middle">🦠</span>'):''}${f._tem_hemo?' <span title="Hemocultura parcial positiva (janela 30d/5d)" style="vertical-align:middle">🩸</span>':''}${f.monitor_regra_id?' <span title="Reclassificada por monitoramento (regra contínua)" style="vertical-align:middle">🔁</span>':''}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>
           <td>${f.setor?_pill(SETOR_CORES,f.setor):'—'}</td>

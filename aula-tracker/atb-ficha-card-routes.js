@@ -28,6 +28,7 @@
 
 import { buscarCulturasDaFicha, culturasTemMR, renderCulturasCard } from './atb-culturas-routes.js';
 import { buscarHemoDaFicha, renderHemoCard } from './atb-hemocultura-routes.js';
+import { buscarMdrDaFicha, mdrTemAlerta } from './atb-mdr-routes.js';
 import { buscarNomePacs, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 
 function _safe(s) {
@@ -465,6 +466,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
 
       const culturas = await buscarCulturasDaFicha(pool, f);
       const hemo = await buscarHemoDaFicha(pool, f);
+      const mdr = await buscarMdrDaFicha(pool, f);
       const _np = await buscarNomePacs(pool, f.instituicao_id, f.prontuario);
       const _divergePacs = _np && nomeDivergePacs(f.paciente_nome_raw || f.paciente_nome, _np.nome_pacs_norm);
       res.json({
@@ -473,7 +475,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         meta: _safe(metaParts.join(' · ')),
         prontuario: f.prontuario || '',
         html: renderHemoCard(hemo) + renderCulturasCard(culturas) + renderCardBody(f, evol, _safe),
-        mr: culturasTemMR(culturas) ? '⚠ Multirresistente' : null,
+        mr: (culturasTemMR(culturas) || mdrTemAlerta(mdr)) ? '⚠ Multirresistente' : null,
         nomePacs: _divergePacs ? _safe(_np.nome_pacs) : null,
       });
     } catch (e) {

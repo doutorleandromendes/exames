@@ -17,6 +17,7 @@
 // ── Schema + seed ──────────────────────────────────────────────────────────
 import { buscarCulturasDaFicha } from './atb-culturas-routes.js';
 import { buscarHemoDaFicha, hemoTemAlerta } from './atb-hemocultura-routes.js';
+import { buscarMdrDaFicha, mdrTemAlerta, mdrResistencias } from './atb-mdr-routes.js';
 
 export async function ensureTriagemRegrasSchema(pool) {
   await pool.query(`
@@ -270,8 +271,9 @@ export async function montarContexto(pool, fichaId) {
     ctx.cultura_positiva = false; ctx.cultura_mr = []; ctx.cultura_organismos = ''; ctx.cultura_materiais = ''; ctx.cultura_hemocultura = false; ctx.hemocultura_5d5d = false;
     try {
       const cults = await buscarCulturasDaFicha(pool, f);
-      ctx.cultura_positiva   = cults.length > 0;
-      ctx.cultura_mr         = [...new Set(cults.map((c) => c.resistencia).filter(Boolean))];
+      const mdr = await buscarMdrDaFicha(pool, f);   // 2ª fonte de positiva/MR: alerta de MDR por e-mail
+      ctx.cultura_positiva   = cults.length > 0 || mdrTemAlerta(mdr);
+      ctx.cultura_mr         = [...new Set([...cults.map((c) => c.resistencia).filter(Boolean), ...mdrResistencias(mdr)])];
       ctx.cultura_organismos = [...new Set(cults.map((c) => c.microorganismo).filter(Boolean))].join(' | ');
       ctx.cultura_materiais  = [...new Set(cults.map((c) => c.material).filter(Boolean))].join(' | ');
       ctx.cultura_hemocultura = cults.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1)

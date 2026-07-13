@@ -60,7 +60,7 @@ export async function ensureHemoSchema(pool) {
 
 // Alertas de hemocultura que casam com uma ficha: mesma instituição, janela
 // [ref-30d, ref+5d] pela data de positividade, por prontuário OU atendimento.
-export async function buscarHemoDaFicha(pool, ficha) {
+export async function buscarHemoDaFicha(pool, ficha, diasAntes = 30, diasDepois = 5) {
   if (!ficha) return [];
   const ref = ficha.data_referencia || ficha.jotform_created_at || ficha.created_at;
   if (!ref) return [];
@@ -71,11 +71,11 @@ export async function buscarHemoDaFicha(pool, ficha) {
     SELECT prontuario, atendimento, paciente_nome, setor, data_entrada, data_positividade, gram, amostras
       FROM atb_hemocultura_alertas
      WHERE instituicao_id IS NOT DISTINCT FROM $1
-       AND COALESCE(data_positividade, recebido_em::date) >= ($2::date - interval '30 days')
-       AND COALESCE(data_positividade, recebido_em::date) <= ($2::date + interval '5 days')
+       AND COALESCE(data_positividade, recebido_em::date) >= ($2::date - ($5 || ' days')::interval)
+       AND COALESCE(data_positividade, recebido_em::date) <= ($2::date + ($6 || ' days')::interval)
        AND ( ($3 <> '' AND prontuario = $3) OR ($4 <> '' AND atendimento = $4) )
      ORDER BY data_positividade DESC NULLS LAST, id DESC`,
-    [ficha.instituicao_id, ref, pront, atend]);
+    [ficha.instituicao_id, ref, pront, atend, String(diasAntes), String(diasDepois)]);
   return rows;
 }
 

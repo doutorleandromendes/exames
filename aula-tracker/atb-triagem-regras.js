@@ -16,6 +16,7 @@
 
 // ── Schema + seed ──────────────────────────────────────────────────────────
 import { buscarCulturasDaFicha } from './atb-culturas-routes.js';
+import { buscarHemoDaFicha, hemoTemAlerta } from './atb-hemocultura-routes.js';
 
 export async function ensureTriagemRegrasSchema(pool) {
   await pool.query(`
@@ -273,14 +274,16 @@ export async function montarContexto(pool, fichaId) {
       ctx.cultura_mr         = [...new Set(cults.map((c) => c.resistencia).filter(Boolean))];
       ctx.cultura_organismos = [...new Set(cults.map((c) => c.microorganismo).filter(Boolean))].join(' | ');
       ctx.cultura_materiais  = [...new Set(cults.map((c) => c.material).filter(Boolean))].join(' | ');
-      ctx.cultura_hemocultura = cults.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1);
+      ctx.cultura_hemocultura = cults.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1)
+        || hemoTemAlerta(await buscarHemoDaFicha(pool, f));   // 2ª fonte: alerta de e-mail (−30d/+5d)
     } catch (e) { console.error('[atb] culturas na triagem:', e.message); }
 
     // Hemocultura positiva na janela APERTADA −5d/+5d (específica p/ monitoramento,
     // distinta do cultura_hemocultura de −30d/+5d). Reusa o mesmo match/janela do SQL.
     try {
       const cults55 = await buscarCulturasDaFicha(pool, f, 5, 5);
-      ctx.hemocultura_5d5d = cults55.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1);
+      ctx.hemocultura_5d5d = cults55.some((c) => _normTxt(c.material).indexOf('hemocultura') !== -1)
+        || hemoTemAlerta(await buscarHemoDaFicha(pool, f, 5, 5));   // 2ª fonte: alerta de e-mail (−5d/+5d)
     } catch (e) { console.error('[atb] hemo 5d5d:', e.message); }
 
     return { f, ctx, sigla: _sigla };

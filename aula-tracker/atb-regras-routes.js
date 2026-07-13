@@ -63,8 +63,19 @@ const SUB_CULT_POS = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH})`
 const SUB_CULT_MR  = `ARRAY(SELECT DISTINCT c.resistencia FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.resistencia IS NOT NULL)`;
 const SUB_CULT_ORG = `(SELECT string_agg(DISTINCT c.microorganismo, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.microorganismo IS NOT NULL)`;
 const SUB_CULT_MAT = `(SELECT string_agg(DISTINCT c.material, ' | ') FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material IS NOT NULL)`;
-const SUB_CULT_HEMO = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material ILIKE '%hemocultura%')`;
-const SUB_CULT_HEMO_55 = `EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH_55} AND c.material ILIKE '%hemocultura%')`;
+const SUB_CULT_HEMO = `(EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH} AND c.material ILIKE '%hemocultura%') OR EXISTS(SELECT 1 FROM atb_hemocultura_alertas h WHERE ${_HEMO_AL_MATCH}))`;
+const SUB_CULT_HEMO_55 = `(EXISTS(SELECT 1 FROM atb_culturas c WHERE ${_CULT_MATCH_55} AND c.material ILIKE '%hemocultura%') OR EXISTS(SELECT 1 FROM atb_hemocultura_alertas h WHERE ${_HEMO_AL_MATCH_55}))`;
+// 2ª fonte de hemocultura positiva: alerta de e-mail (atb_hemocultura_alertas).
+const _HEMO_AL_MATCH = `h.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+     AND ( (COALESCE(f.prontuario,'') <> '' AND h.prontuario = f.prontuario)
+          OR (COALESCE(f.atendimento,'') <> '' AND h.atendimento = f.atendimento) )
+     AND COALESCE(h.data_positividade, h.recebido_em::date) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '30 days')
+     AND COALESCE(h.data_positividade, h.recebido_em::date) <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
+const _HEMO_AL_MATCH_55 = `h.instituicao_id IS NOT DISTINCT FROM f.instituicao_id
+     AND ( (COALESCE(f.prontuario,'') <> '' AND h.prontuario = f.prontuario)
+          OR (COALESCE(f.atendimento,'') <> '' AND h.atendimento = f.atendimento) )
+     AND COALESCE(h.data_positividade, h.recebido_em::date) >= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date - interval '5 days')
+     AND COALESCE(h.data_positividade, h.recebido_em::date) <= (COALESCE(f.data_referencia,f.jotform_created_at,f.created_at)::date + interval '5 days')`;
 
 // Só computa as subqueries (caras, correlacionadas por ficha) que a(s) regra(s)
 // realmente referenciam — evita rodar todas no /testar e no backfill (timeout).

@@ -61,14 +61,19 @@ export async function executarMonitoramento(pool, inst) {
   if (!regras.length) return { ok: true, regras: 0, fichas: 0, aplicadas: 0 };
 
   const maxJanela = Math.max(...regras.map(r => r.janela_dias || 14));
+  // Se NENHUMA regra sobrescreve, só precisamos avaliar fichas com IrAS vazio —
+  // as já classificadas não mudariam (fill-if-empty). Reduz muito o trabalho.
+  const algumSobrescreve = regras.some(r => r.sobrescrever);
   const fichas = (await pool.query(
     `SELECT f.id
        FROM atb_fichas f
        LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
+       LEFT JOIN atb_avaliacoes a ON a.ficha_id = f.id
       WHERE f.deletado_em IS NULL
         AND COALESCE(i.sigla,'HUSF') = $1
-        AND COALESCE(f.data_referencia,f.jotform_created_at,f.created_at) >= (now() - ($2 || ' days')::interval)`,
-    [inst, String(maxJanela)]
+        AND COALESCE(f.data_referencia,f.jotform_created_at,f.created_at) >= (now() - ($2 || ' days')::interval)
+        AND ($3 OR a.iras IS NULL OR a.iras = '')`,
+    [inst, String(maxJanela), algumSobrescreve]
   )).rows;
 
   const agora = Date.now();
@@ -264,14 +269,28 @@ export function registerMonitoramentoRoutes(app, pool, adminRequired) {
   const jsonMw = express.json({ limit: '256kb' });
 
   // ── Cron 2×/dia (token). Isolado por tenant; roda os tenants que tiverem regras. ──
+  // Guarda contra execuções sobrepostas (o cron 2x/dia não sobrepõe, mas protege
+  // contra disparos manuais concorrentes).
+  let _monitorRodando = false;
   app.post('/atb/admin/monitoramento/executar', async (req, res) => {
     const tok = process.env.MONITOR_CRON_TOKEN;
     if (!tok || req.get('X-Cron-Token') !== tok) return res.status(401).json({ ok: false, error: 'token' });
-    try {
-      const out = {};
-      for (const inst of ['HUSF', 'SCMI']) out[inst] = await executarMonitoramento(pool, inst);
-      res.json({ ok: true, resultado: out });
-    } catch (e) { console.error('[monitor] executar:', e.message); res.status(500).json({ ok: false, error: e.message }); }
+    if (_monitorRodando) return res.status(202).json({ ok: true, status: 'ja_em_execucao' });
+    // Responde JÁ e processa em BACKGROUND — evita o timeout do cron (o loop por
+    // ficha pode passar de 30s). O resultado fica no log e em /monitoramento/log.
+    res.status(202).json({ ok: true, status: 'iniciado' });
+    _monitorRodando = true;
+    (async () => {
+      const t0 = Date.now();
+      try {
+        for (const inst of ['HUSF', 'SCMI']) {
+          const r = await executarMonitoramento(pool, inst);
+          console.log(`[monitor] ${inst}:`, JSON.stringify(r));
+        }
+        console.log(`[monitor] execução completa em ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+      } catch (e) { console.error('[monitor] execução em background:', e.message); }
+      finally { _monitorRodando = false; }
+    })();
   });
 
   // ── Lista ──

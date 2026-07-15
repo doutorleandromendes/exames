@@ -723,11 +723,16 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     try {
       await pool.query(`
         INSERT INTO atb_avaliacoes
-          (ficha_id,iras,etiol_iras,micro,desfecho_iras,desfecho_data,saps3,avaliado_por,updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
+          (ficha_id,iras,etiol_iras,micro,desfecho_iras,desfecho_data,saps3,avaliado_por,updated_at,micro_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(), CASE WHEN $4 IS NULL THEN NULL ELSE now() END)
         ON CONFLICT (ficha_id) DO UPDATE SET
           iras=$2,etiol_iras=$3,micro=$4,desfecho_iras=$5,
-          desfecho_data=$6,saps3=$7,avaliado_por=$8,updated_at=now()
+          desfecho_data=$6,saps3=$7,avaliado_por=$8,updated_at=now(),
+          -- só recarimba a data se o texto do micro realmente mudou
+          micro_at = CASE
+            WHEN $4 IS DISTINCT FROM atb_avaliacoes.micro
+              THEN (CASE WHEN $4 IS NULL THEN NULL ELSE now() END)
+            ELSE atb_avaliacoes.micro_at END
       `, [id,iras||null,etiol_iras||null,micro||null,desfecho_iras||null,
           desfecho_data||null,saps3||null,req.user?.id]);
       await pool.query('UPDATE atb_fichas SET status=$1,updated_at=now() WHERE id=$2',
@@ -1272,10 +1277,14 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     try {
       let v = value === '' ? null : value;
       if ((field==='saps3'||field==='tempo_saps') && v!=null) v = parseFloat(v);
+      // campo `micro` carimba a própria data de inserção (limpa junto se o valor for apagado)
+      const carimbo = field === 'micro' ? (v == null ? ', micro_at=NULL' : ', micro_at=now()') : '';
+      const carimboIns = field === 'micro' && v != null ? ', micro_at' : '';
+      const carimboVal = field === 'micro' && v != null ? ', now()' : '';
       await pool.query(`
-        INSERT INTO atb_avaliacoes (ficha_id, ${field}, avaliado_por, updated_at)
-        VALUES ($1,$2,$3,now())
-        ON CONFLICT (ficha_id) DO UPDATE SET ${field}=EXCLUDED.${field}, avaliado_por=$3, updated_at=now()
+        INSERT INTO atb_avaliacoes (ficha_id, ${field}, avaliado_por, updated_at${carimboIns})
+        VALUES ($1,$2,$3,now()${carimboVal})
+        ON CONFLICT (ficha_id) DO UPDATE SET ${field}=EXCLUDED.${field}, avaliado_por=$3, updated_at=now()${carimbo}
       `, [id, v, req.user?.id]);
       res.json({ ok:true });
     } catch (e) {

@@ -175,6 +175,16 @@ export async function runAtbMigrations(pool) {
     )
   `);
 
+  // Data de inserção do campo `micro` (a micro preenche no grid). Coluna própria porque
+  // updated_at é da linha inteira — muda quando qualquer outro campo é editado.
+  await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS micro_at TIMESTAMPTZ`);
+  // Backfill único p/ registros anteriores à coluna: usa updated_at como melhor aproximação.
+  await pool.query(`
+    UPDATE atb_avaliacoes
+       SET micro_at = updated_at
+     WHERE micro IS NOT NULL AND micro <> '' AND micro_at IS NULL
+  `);
+
   // ── Dados evolutivos (preenchidos pelas colaboradoras) ───────────────────
   await pool.query(`
     CREATE TABLE IF NOT EXISTS atb_evolutivos (

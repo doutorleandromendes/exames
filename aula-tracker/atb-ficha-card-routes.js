@@ -81,6 +81,21 @@ function _posologia(p, s) {
 }
 
 // ── corpo do card ────────────────────────────────────────────────────────────
+// Banner do campo `micro` (preenchido pela equipe de microbiologia no grid).
+// Tom subdued (cinza-azulado) — é informativo, não é alerta de gravidade como
+// hemocultura (vermelho) ou culturas positivas (âmbar). Vem depois desses.
+function renderMicroCard(texto, quando) {
+  const t = String(texto ?? '').trim();
+  if (!t) return '';
+  const data = quando
+    ? `<span style="font-weight:400;color:#8a8a8a;font-size:12px"> · inserido em ${_dt(quando)}</span>`
+    : '';
+  return `<div style="background:#f4f6f8;border:1px solid #dde2e8;border-left:3px solid #94a3b8;border-radius:8px;padding:10px 12px;margin-bottom:10px">
+    <div style="font-size:13px;font-weight:600;color:#475569">🧫 Microbiologia${data}</div>
+    <div style="font-size:13px;color:#334155;margin-top:4px;white-space:pre-wrap">${_safe(t)}</div>
+  </div>`;
+}
+
 function renderCardBody(f, evol, s) {
   const setor = f.setor || '';
   const blocos = [];
@@ -432,10 +447,12 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
       const { rows: [f] } = await pool.query(`
         SELECT f.*, i.sigla AS instituicao,
                e.labs, e.hemodinamica, e.ventilatorio, e.acesso_vascular_neo_evol,
-               e.preenchido_por_nome, e.updated_at AS evol_updated
+               e.preenchido_por_nome, e.updated_at AS evol_updated,
+               av.micro AS av_micro, av.micro_at AS av_micro_at
         FROM atb_fichas f
         LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
         LEFT JOIN atb_evolutivos   e ON e.ficha_id = f.id
+        LEFT JOIN atb_avaliacoes  av ON av.ficha_id = f.id
         WHERE f.id = $1
       `, [id]);
       if (!f) return res.status(404).json({ ok: false, error: 'Ficha não encontrada' });
@@ -474,7 +491,9 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
         nome: _safe(nome),
         meta: _safe(metaParts.join(' · ')),
         prontuario: f.prontuario || '',
-        html: renderHemoCard(hemo) + renderCulturasCard(culturas) + renderCardBody(f, evol, _safe),
+        html: renderHemoCard(hemo) + renderCulturasCard(culturas)
+            + renderMicroCard(f.av_micro, f.av_micro_at)
+            + renderCardBody(f, evol, _safe),
         mr: (culturasTemMR(culturas) || mdrTemAlerta(mdr)) ? '⚠ Multirresistente' : null,
         nomePacs: _divergePacs ? _safe(_np.nome_pacs) : null,
       });

@@ -47,6 +47,19 @@ async function claimPendente() {
 }
 
 async function processa(doc) {
+  // classe 'imagem' = você decidiu que este documento fica só como anexo visual.
+  // Nada a extrair: nem baixa do R2, nem acorda o Ollama. Vai direto pra conferência.
+  if (doc.tipo !== "audio" && doc.classe_pedida === "imagem") {
+    await pool.query(
+      `UPDATE pront_documentos
+          SET status='extraido', classe='imagem', classe_conf=1, provedor=NULL,
+              extraido_json=$2::jsonb, processado_em=now(), erro=NULL
+        WHERE id=$1`,
+      [doc.id, JSON.stringify({ classe: "imagem", motivos: ["mantido como imagem por sua escolha"] })]);
+    console.log(`[worker] doc#${doc.id} IMAGEM — sem extração (escolha do usuário)`);
+    return;
+  }
+
   const resp = await fetchR2Stream(doc.r2_key);
   const buffer = Buffer.from(await resp.arrayBuffer());
   const mime = doc.mime || resp.headers.get("content-type") || "";
@@ -64,15 +77,24 @@ async function processa(doc) {
     return;
   }
 
-  const r = await extrairDocumento({ buffer, mime, nomeArquivo: doc.nome_arquivo });
+  // classe_pedida (escolha humana) tem precedência; NULL = o classificador decide
+  const r = await extrairDocumento({ buffer, mime, nomeArquivo: doc.nome_arquivo, classe: doc.classe_pedida || null });
+
+  // data sugerida: analitos -> data da coleta; narrativo -> data do exame
+  const dataSug = (r.classe === "narrativo" ? r.data : r.data_coleta) || "";
   await pool.query(
     `UPDATE pront_documentos
         SET status='extraido', provedor=$2, extraido_json=$3,
-            data_coleta_sugerida = NULLIF($4,'')::date,
+            classe=$4, classe_conf=$5,
+            data_coleta_sugerida = NULLIF($6,'')::date,
             processado_em=now(), erro=NULL
       WHERE id=$1`,
-    [doc.id, r.provedor || null, JSON.stringify(r), r.data_coleta || ""]);
-  console.log(`[worker] doc#${doc.id} OK — ${r.fonte}/${r.provedor} — ${r.analitos?.length || 0} analitos`);
+    [doc.id, r.provedor || null, JSON.stringify(r), r.classe || null, r.confianca ?? null, dataSug]);
+
+  const detalhe = r.classe === "narrativo"
+    ? `${(r.texto || "").length} chars — "${(r.titulo || "sem título").slice(0, 40)}"`
+    : `${r.analitos?.length || 0} analitos`;
+  console.log(`[worker] doc#${doc.id} OK — ${r.classe} (conf ${Number(r.confianca ?? 0).toFixed(2)}) — ${r.fonte}/${r.provedor} — ${detalhe}`);
 }
 
 async function falha(doc, e) {

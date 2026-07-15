@@ -54,6 +54,14 @@ function renderConsulta(txt) {
   return out;
 }
 
+// classes de conteúdo de documento (ver pront-classificador.js). Não confundir com
+// `tipo` (formato do arquivo) nem com `modo` (que pertence ao áudio).
+const CLASSES_VALIDAS = ["analitos", "narrativo", "imagem"];
+const CLASSE_ROTULO = { analitos: "Análises clínicas", narrativo: "Laudo / relatório", imagem: "Somente imagem" };
+const CORTE_CONF = 0.6;   // abaixo disso a fila marca "dúvida"
+const CATEGORIAS_ANEXO = ["imagem", "histopatologia", "relatorio", "outro"];
+const CATEGORIA_ROTULO = { imagem: "Exame de imagem", histopatologia: "Histopatologia", relatorio: "Relatório", outro: "Outro" };
+
 export function registerProntRoutes(app, pool, authRequired, adminRequired, renderShell, medicoRequired) {
   // gate do gerador de documentos = médico (super_admin). Se não vier (compat), recai no de prontuário.
   medicoRequired = medicoRequired || authRequired;
@@ -190,6 +198,12 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const docsEmitidos = (await pool.query(
       `SELECT id, tipo, paper, assinado, secret_code, verif_token, descricao, to_char(criado_em,'YYYY-MM-DD') data
          FROM pront_docs_emitidos WHERE paciente_id=$1 ORDER BY criado_em DESC`, [id])).rows;
+
+    // anexos: laudos narrativos transcritos + anexos mantidos só como imagem
+    const anexos = (await pool.query(
+      `SELECT id, documento_id, to_char(data,'YYYY-MM-DD') data, titulo, categoria, texto, criado_por
+         FROM pront_anexos WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
+
     const TIPO_DOC = { receituario: "Receituário", pedido: "Pedido de exames", relatorio: "Relatório", atestado: "Atestado", laudo: "Laudo" };
     const pubBase = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/+$/, "");
     const waNumber = (tel) => { const dg = String(tel || "").replace(/\D/g, ""); return dg ? (dg.length <= 11 ? "55" + dg : dg) : ""; };
@@ -290,6 +304,37 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
             function ok(){var o=a.textContent;a.textContent='copiado ✓';a.style.color='#0e7a4b';setTimeout(function(){a.textContent=o;a.style.color='';},1500);}
             if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(link).then(ok).catch(function(){window.prompt('Copie o link:',link);});}
             else{window.prompt('Copie o link:',link);}
+          });
+        });
+      })();</script>` : ""}
+      ${anexos.length ? `
+      <h2 class="mt2" style="margin-bottom:0">Anexos e laudos <span class="mut" style="font-weight:400">(${anexos.length})</span></h2>
+      ${anexos.map(a => `
+      <div class="card mt" style="padding:16px">
+        <div class="right" style="justify-content:space-between">
+          <div style="font-weight:700">${toBR(a.data)} · ${safe(a.titulo || "Anexo")}
+            <span class="mut" style="font-weight:400;font-size:.85em">· ${safe(CATEGORIA_ROTULO[a.categoria] || a.categoria || "")}</span>
+          </div>
+          <div class="mut" style="font-size:.85em">
+            ${a.documento_id ? `<a href="/pront/documento/${a.documento_id}/arquivo" target="_blank">ver original</a>` : ""}
+            ${req.user?.super_admin ? ` · <a href="#" class="anx-del" data-del="${a.id}" data-desc="${safe((a.titulo || "anexo") + " de " + toBR(a.data))}" style="color:#b91c1c">excluir</a>` : ""}
+          </div>
+        </div>
+        ${a.texto
+          ? `<details class="mt" open><summary class="mut" style="cursor:pointer;font-size:.85em">Laudo</summary><div class="mt" style="line-height:1.5">${renderConsulta(a.texto)}</div></details>`
+          : `<div class="mut mt" style="font-size:.9em">Mantido como imagem — sem transcrição.${a.documento_id ? ` <a href="/pront/documento/${a.documento_id}/arquivo" target="_blank">Abrir arquivo →</a>` : ""}</div>`}
+      </div>`).join("")}
+      <script>(function(){
+        document.querySelectorAll('a.anx-del').forEach(function(a){
+          a.addEventListener('click',function(ev){
+            ev.preventDefault();
+            var aid=a.getAttribute('data-del'), desc=a.getAttribute('data-desc')||'este anexo';
+            if(!confirm('Excluir '+desc+' ?\\n\\nRemove o anexo da ficha. O arquivo original continua guardado.'))return;
+            a.textContent='excluindo…';a.style.pointerEvents='none';
+            fetch('/pront/anexo/'+aid,{method:'DELETE'}).then(function(r){
+              if(r.ok){var c=a.closest('.card');if(c)c.parentNode.removeChild(c);}
+              else{a.textContent='falhou';a.style.color='#b91c1c';a.style.pointerEvents='';}
+            }).catch(function(){a.textContent='erro';a.style.pointerEvents='';});
           });
         });
       })();</script>` : ""}
@@ -417,8 +462,16 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       <div class="admin-back-top"><a href="/pront/paciente/${p.id}">← ${safe(p.nome)}</a></div>
       <div class="card">
         <h1 style="margin-top:0">Enviar exame</h1>
-        <p class="mut">Foto ou PDF do laudo. Vai para a fila de leitura; você confere os valores antes de salvar.</p>
+        <p class="mut">Foto ou PDF. Vai para a fila de leitura; você confere antes de salvar.</p>
         <input type="file" id="arq" accept="image/*,application/pdf" capture="environment"/>
+        <label class="mt">O que é este documento?</label>
+        <select id="classe">
+          <option value="">Detectar automaticamente</option>
+          <option value="analitos">Laudo de análises clínicas — extrair os valores</option>
+          <option value="narrativo">Laudo de imagem / histopatologia / relatório — transcrever</option>
+          <option value="imagem">Manter só como imagem — não ler</option>
+        </select>
+        <div class="mut" style="font-size:.82em;margin-top:4px">Na dúvida, deixe em automático. Você pode corrigir depois na conferência.</div>
         <div class="mt"><button type="button" id="env">Enviar para a fila</button></div>
         <div id="msg" class="mt mut"></div>
       </div>
@@ -429,7 +482,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           if(f.size>24*1024*1024){msg.textContent='Arquivo grande demais (máx 24MB).';return;}
           bt.disabled=true; msg.textContent='Enviando…';
           const b64=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=er;r.readAsDataURL(f);});
-          const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:b64,contentType:f.type,nome:f.name})});
+          const classe=document.getElementById('classe').value;
+          const r=await fetch(location.pathname,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:b64,contentType:f.type,nome:f.name,classe})});
           const j=await r.json().catch(()=>({}));
           if(r.ok&&j.ok){msg.innerHTML='Enviado! Entrou na fila. <a href="/pront/conferencia">Ver fila →</a>';}
           else{bt.disabled=false;msg.textContent='Falha no envio: '+(j.erro||r.status);}
@@ -439,18 +493,19 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
 
   app.post("/pront/paciente/:id/upload", authRequired, jsonGrande, async (req, res) => {
     try {
-      const { data, contentType, nome } = req.body || {};
+      const { data, contentType, nome, classe } = req.body || {};
       if (!data) return res.status(400).json({ erro: "sem dados" });
       const buffer = Buffer.from(data, "base64");
       if (buffer.length > 25e6) return res.status(413).json({ erro: "arquivo grande demais" });
       const tipo = /pdf/i.test(contentType || "") ? "pdf" : "foto";
+      const classePedida = CLASSES_VALIDAS.includes(classe) ? classe : null;   // "" / inválido -> automático
       const ext = (nome || "").match(/\.[a-z0-9]+$/i)?.[0] || (tipo === "pdf" ? ".pdf" : ".jpg");
       const r2key = `pront/uploads/${req.params.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
       await uploadToR2(r2key, buffer, contentType || "application/octet-stream");
       const doc = (await pool.query(
-        `INSERT INTO pront_documentos(paciente_id,tipo,nome_arquivo,mime,r2_key,tamanho,status,criado_por)
-         VALUES($1,$2,$3,$4,$5,$6,'pendente',$7) RETURNING id`,
-        [req.params.id, tipo, nome || null, contentType || null, r2key, buffer.length, quem(req)])).rows[0];
+        `INSERT INTO pront_documentos(paciente_id,tipo,nome_arquivo,mime,r2_key,tamanho,status,classe_pedida,criado_por)
+         VALUES($1,$2,$3,$4,$5,$6,'pendente',$7,$8) RETURNING id`,
+        [req.params.id, tipo, nome || null, contentType || null, r2key, buffer.length, classePedida, quem(req)])).rows[0];
       res.json({ ok: true, docId: doc.id });
     } catch (e) { res.status(500).json({ erro: String(e.message || e) }); }
   });
@@ -606,8 +661,10 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   app.get("/pront/conferencia", authRequired, async (req, res) => {
     const docs = (await pool.query(
       `SELECT d.id, d.tipo, d.nome_arquivo, d.status, d.tentativas, d.erro, d.criado_em,
+              d.classe, d.classe_pedida, d.classe_conf,
               to_char(d.data_coleta_sugerida,'YYYY-MM-DD') data_sug,
               jsonb_array_length(COALESCE(d.extraido_json->'analitos','[]'::jsonb)) nanalitos,
+              length(COALESCE(d.extraido_json->>'texto','')) ntexto,
               p.id pid, p.nome
          FROM pront_documentos d LEFT JOIN pront_pacientes p ON p.id=d.paciente_id
         WHERE d.status IN ('extraido','pendente','processando','erro')
@@ -615,21 +672,41 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const badge = s => ({ extraido: '<span style="background:#fef3c7;color:#92400e;padding:1px 8px;border-radius:999px">conferir</span>',
       pendente: '<span class="mut">na fila…</span>', processando: '<span class="mut">lendo…</span>',
       erro: '<span style="background:#fee2e2;color:#991b1b;padding:1px 8px;border-radius:999px">erro</span>' }[s] || s);
+
+    // coluna Classe: o que a máquina entendeu que o documento é.
+    // "dúvida" = classificou com pouca confiança e caiu em narrativo por segurança — vale um olhar.
+    const cls = d => {
+      if (d.tipo === "audio") return '<span class="mut">áudio</span>';
+      if (!d.classe) return '<span class="mut">—</span>';
+      const fixada = d.classe_pedida ? ' <span class="mut" title="definido por você" style="font-size:.8em">✓</span>' : "";
+      const duvida = (!d.classe_pedida && d.classe_conf != null && d.classe_conf < CORTE_CONF)
+        ? ' <span style="background:#fef3c7;color:#92400e;padding:0 6px;border-radius:999px;font-size:.78em" title="classificado com baixa confiança — confira a classe">dúvida</span>' : "";
+      return `<span class="mut">${safe(CLASSE_ROTULO[d.classe] || d.classe)}</span>${fixada}${duvida}`;
+    };
+    // coluna Resultado: a métrica muda conforme a classe
+    const resumo = d => {
+      if (d.status !== "extraido") return "—";
+      if (d.classe === "narrativo") return `${d.ntexto || 0} caracteres`;
+      if (d.classe === "imagem") return '<span class="mut">—</span>';
+      if (d.tipo === "audio") return `${d.ntexto || 0} caracteres`;
+      return `${d.nanalitos} analito(s)`;
+    };
     const linhas = docs.map(d => `
       <tr>
         <td>${d.status === "extraido" ? `<a href="/pront/conferencia/${d.id}">${safe(d.nome_arquivo || d.tipo)}</a>` : safe(d.nome_arquivo || d.tipo)}</td>
         <td>${d.nome ? `<a href="/pront/paciente/${d.pid}">${safe(d.nome)}</a>` : '<span class="mut">—</span>'}</td>
+        <td>${cls(d)}</td>
         <td>${badge(d.status)}${d.status === "erro" && d.erro ? `<div class="mut" style="font-size:.8em">${safe(d.erro)}</div>` : ""}</td>
-        <td>${d.status === "extraido" ? d.nanalitos : "—"}</td>
+        <td>${resumo(d)}</td>
       </tr>`).join("");
     res.send(renderShell("Conferência", `
       <div class="admin-back-top"><a href="/pront">← Prontuário</a></div>
       <div class="card">
         <h1 style="margin-top:0">Fila de conferência</h1>
-        <p class="mut">Documentos lidos pela máquina. Nada vira coleta sem você confirmar.</p>
+        <p class="mut">Documentos lidos pela máquina. Nada entra na ficha sem você confirmar.</p>
         <table class="mt">
-          <thead><tr><th>Arquivo</th><th>Paciente</th><th>Situação</th><th>Analitos</th></tr></thead>
-          <tbody>${linhas || `<tr><td colspan="4" class="mut">Fila vazia.</td></tr>`}</tbody>
+          <thead><tr><th>Arquivo</th><th>Paciente</th><th>Classe</th><th>Situação</th><th>Resultado</th></tr></thead>
+          <tbody>${linhas || `<tr><td colspan="5" class="mut">Fila vazia.</td></tr>`}</tbody>
         </table>
       </div>`));
   });
@@ -696,6 +773,99 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         </script>`));
     }
 
+    // ---- preview do arquivo original (comum às telas de documento) ----
+    const previewDoc = d.tipo === "pdf"
+      ? `<iframe src="/pront/documento/${d.id}/arquivo" style="width:100%;height:560px;border:1px solid var(--bd);border-radius:10px"></iframe>`
+      : `<img src="/pront/documento/${d.id}/arquivo" style="max-width:100%;border:1px solid var(--bd);border-radius:10px"/>`;
+
+    // ---- controle de reclassificação (comum às três telas de documento) ----
+    // Reclassificar devolve o documento para a fila com a classe FIXADA. Sua escolha
+    // vira classe_pedida e o classificador não opina mais sobre este documento.
+    const reclassificar = atual => {
+      const opts = CLASSES_VALIDAS.filter(c => c !== atual).map(c =>
+        `<button type="submit" name="classe" value="${c}" style="background:#64748b">${safe({ analitos: "Ler como análises clínicas", narrativo: "Transcrever como laudo", imagem: "Manter só como imagem" }[c])}</button>`).join(" ");
+      const conf = d.classe_conf != null ? ` <span class="mut">(confiança ${Math.round(d.classe_conf * 100)}%)</span>` : "";
+      const motivos = (ex.motivos || []).length ? `<div class="mut" style="font-size:.8em;margin-top:2px">Por quê: ${safe((ex.motivos || []).join("; "))}</div>` : "";
+      return `<div class="card mt" style="background:#fbfcfd">
+        <div class="mut" style="font-size:.85em">Lido como <b>${safe(CLASSE_ROTULO[atual] || atual)}</b>${d.classe_pedida ? " (sua escolha)" : conf}.${motivos}</div>
+        <form method="post" action="/pront/conferencia/${d.id}/reclassificar" class="right mt" style="gap:6px;flex-wrap:wrap">${opts}</form>
+        <div class="mut" style="font-size:.78em;margin-top:6px">Reclassificar devolve o documento para a fila e relê com a classe escolhida.</div>
+      </div>`;
+    };
+
+    // ================= CONFERÊNCIA DE LAUDO NARRATIVO / ANEXO SÓ-IMAGEM =================
+    if (d.classe === "narrativo" || d.classe === "imagem") {
+      const soImagem = d.classe === "imagem";
+      const pacs = (await pool.query(`SELECT id, nome FROM pront_pacientes ORDER BY lower(nome)`)).rows;
+      const optP = pacs.map(p => `<option value="${p.id}" ${String(p.id) === String(d.paciente_id) ? "selected" : ""}>${safe(p.nome)}</option>`).join("");
+      const dataSug = (ex.data || d.data_coleta_sugerida || new Date().toISOString().slice(0, 10)).toString().slice(0, 10);
+      const tituloSug = ex.titulo || (d.nome_arquivo || "").replace(/\.[a-z0-9]+$/i, "");
+      const optCat = CATEGORIAS_ANEXO.map(c =>
+        `<option value="${c}" ${(soImagem && c === "imagem") ? "selected" : ""}>${safe(CATEGORIA_ROTULO[c])}</option>`).join("");
+
+      const aviso = soImagem
+        ? `<b>Anexo mantido como imagem.</b> <span class="mut">Nada foi lido deste documento. Ele fica na ficha como arquivo para consulta visual.</span>`
+        : `<b>Transcrição — confira antes de salvar.</b> <span class="mut">O texto foi copiado do documento${d.provedor === "transcricao_texto" ? " (texto do próprio PDF, sem leitura por máquina)" : " por leitura de máquina e pode conter erros"}. Corrija o que precisar.</span>`;
+
+      return res.send(renderShell(soImagem ? "Anexo" : "Conferência do laudo", `
+        <div class="admin-back-top"><a href="/pront/conferencia">← Fila</a></div>
+        <div class="card" style="border-left:4px solid ${soImagem ? "#64748b" : "#d97706"}">${aviso}</div>
+        <div class="row mt" style="grid-template-columns:1fr 1fr;align-items:start">
+          <div class="card">${previewDoc}${reclassificar(d.classe)}</div>
+          <div class="card">
+            <label>Paciente</label>
+            <select id="pac">${optP || '<option value="">—</option>'}</select>
+            <div class="row mt" style="grid-template-columns:1fr 1fr">
+              <div><label>Data do exame</label><input id="data" type="date" value="${safe(dataSug)}"/></div>
+              <div><label>Categoria</label><select id="cat">${optCat}</select></div>
+            </div>
+            <label class="mt">Título</label>
+            <input id="titulo" value="${safe(tituloSug)}" placeholder="ex.: Tomografia de tórax"/>
+            ${soImagem ? "" : `
+            <label class="mt">Laudo (transcrição)</label>
+            <div class="mut" style="font-size:.82em;margin-bottom:4px">Edite à vontade. <code>##</code> título, <code>#</code> tópico, <code>-</code> itens.</div>
+            <div class="row" style="grid-template-columns:1fr 1fr;align-items:start">
+              <textarea id="txt" rows="18">${safe(ex.texto || "")}</textarea>
+              <div class="card" style="background:#fbfcfd"><div class="mut" style="font-size:.8em;margin-bottom:6px">pré-visualização</div><div id="prev" style="line-height:1.5"></div></div>
+            </div>`}
+            <div class="right mt2" style="justify-content:space-between">
+              <form class="inline" method="post" action="/pront/conferencia/${d.id}/descartar"><button type="submit" style="background:#9aa3af">Descartar</button></form>
+              <button type="button" id="salvar">${soImagem ? "Salvar anexo" : "Confirmar e salvar"}</button>
+            </div>
+            <div id="msg" class="mut mt"></div>
+          </div>
+        </div>
+        <script>
+          const soImagem=${soImagem ? "true" : "false"};
+          const msg=document.getElementById('msg');
+          const txt=document.getElementById('txt'), prev=document.getElementById('prev');
+          const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          function render(t){let o='',li=false;const fl=()=>{if(li){o+='</ul>';li=false;}};
+            for(const raw of (t||'').split(/\\n/)){const l=raw.trim();
+              if(!l){fl();o+='<div style="height:6px"></div>';continue;}
+              if(/^##\\s*/.test(l)){fl();o+='<div style="font-weight:700;font-size:1.05em;margin:8px 0 2px">'+esc(l.replace(/^##\\s*/,''))+'</div>';}
+              else if(/^#\\s*/.test(l)){fl();o+='<div style="font-weight:600;color:#0c447c;margin:6px 0 2px">'+esc(l.replace(/^#\\s*/,''))+'</div>';}
+              else if(/^[-•]\\s*/.test(l)){if(!li){o+='<ul style="margin:2px 0 2px 18px">';li=true;}o+='<li>'+esc(l.replace(/^[-•]\\s*/,''))+'</li>';}
+              else{fl();o+='<div>'+esc(l)+'</div>';}}
+            fl();return o;}
+          if(txt){const upd=()=>prev.innerHTML=render(txt.value);txt.addEventListener('input',upd);upd();}
+          document.getElementById('salvar').onclick=async()=>{
+            const pac=document.getElementById('pac').value;
+            const data=document.getElementById('data').value;
+            const titulo=document.getElementById('titulo').value.trim();
+            const categoria=document.getElementById('cat').value;
+            const texto=soImagem?null:(txt.value.trim());
+            if(!pac){msg.textContent='Selecione o paciente.';return;}
+            if(!soImagem&&!texto){msg.textContent='A transcrição está vazia. Se o documento não deve ser lido, use "Manter só como imagem".';return;}
+            msg.textContent='Salvando…';
+            const r=await fetch('/pront/conferencia/${d.id}/confirmar-anexo',{method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({paciente_id:+pac,data,titulo,categoria,texto})});
+            const j=await r.json().catch(()=>({}));
+            if(r.ok&&j.ok){location.href='/pront/paciente/'+pac;}else{msg.textContent='Falha: '+(j.erro||r.status);}
+          };
+        </script>`));
+    }
+
     const analitos = Array.isArray(ex.analitos) ? ex.analitos : [];
     const pacientes = (await pool.query(`SELECT id, nome FROM pront_pacientes ORDER BY lower(nome)`)).rows;
     const optPac = pacientes.map(p => `<option value="${p.id}" ${String(p.id) === String(d.paciente_id) ? "selected" : ""}>${safe(p.nome)}</option>`).join("");
@@ -712,17 +882,13 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         <td>${a.status ? `<span class="mut">${safe(a.status)}</span>` : ""}</td>
       </tr>`).join("");
 
-    const preview = d.tipo === "pdf"
-      ? `<iframe src="/pront/documento/${d.id}/arquivo" style="width:100%;height:560px;border:1px solid var(--bd);border-radius:10px"></iframe>`
-      : `<img src="/pront/documento/${d.id}/arquivo" style="max-width:100%;border:1px solid var(--bd);border-radius:10px"/>`;
-
     res.send(renderShell("Conferência do documento", `
       <div class="admin-back-top"><a href="/pront/conferencia">← Fila</a></div>
       <div class="card" style="border-left:4px solid #d97706">
         <b>Confira antes de salvar.</b> <span class="mut">Os valores foram lidos por máquina — corrija o que precisar. Só viram registro quando você confirmar.</span>
       </div>
       <div class="row mt" style="grid-template-columns:1fr 1fr;align-items:start">
-        <div class="card">${preview}</div>
+        <div class="card">${previewDoc}${reclassificar(d.classe || "analitos")}</div>
         <div class="card">
           <label>Paciente</label>
           <select id="pac">${optPac || '<option value="">—</option>'}</select>
@@ -791,6 +957,42 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
 
   app.post("/pront/conferencia/:docId/descartar", authRequired, async (req, res) => {
     await pool.query(`UPDATE pront_documentos SET status='descartado', processado_em=now() WHERE id=$1`, [req.params.docId]);
+    res.redirect("/pront/conferencia");
+  });
+
+  // confirmar laudo narrativo OU anexo só-imagem -> pront_anexos
+  // texto = null  -> anexo mantido como imagem (nada foi lido)
+  app.post("/pront/conferencia/:docId/confirmar-anexo", authRequired, jsonGrande, async (req, res) => {
+    try {
+      const { paciente_id, data, titulo, categoria, texto } = req.body || {};
+      if (!paciente_id) return res.status(400).json({ erro: "paciente é obrigatório" });
+      const d = (await pool.query(`SELECT id, classe FROM pront_documentos WHERE id=$1`, [req.params.docId])).rows[0];
+      if (!d) return res.status(404).json({ erro: "documento não encontrado" });
+      // guarda: só-imagem grava texto NULL; narrativo exige texto (senão o anexo não diz nada)
+      const corpo = (texto == null || !String(texto).trim()) ? null : String(texto).trim();
+      if (d.classe === "narrativo" && !corpo) return res.status(400).json({ erro: "transcrição vazia" });
+      const cat = CATEGORIAS_ANEXO.includes(categoria) ? categoria : "outro";
+      const a = (await pool.query(
+        `INSERT INTO pront_anexos(paciente_id,documento_id,data,titulo,categoria,texto,criado_por)
+         VALUES($1,$2,COALESCE(NULLIF($3,'')::date,current_date),$4,$5,$6,$7) RETURNING id`,
+        [paciente_id, req.params.docId, data || "", (titulo || "").trim() || null, cat, corpo, quem(req)])).rows[0];
+      await pool.query(`UPDATE pront_documentos SET status='confirmado', paciente_id=$2, processado_em=now() WHERE id=$1`,
+        [req.params.docId, paciente_id]);
+      res.json({ ok: true, anexoId: a.id });
+    } catch (e) { res.status(500).json({ erro: String(e.message || e) }); }
+  });
+
+  // reclassificar: fixa a classe (escolha humana) e devolve o documento à fila.
+  // Zera tentativas para que um documento que já falhou possa ser relido na outra rota.
+  app.post("/pront/conferencia/:docId/reclassificar", authRequired, async (req, res) => {
+    const classe = String(req.body?.classe || "");
+    if (!CLASSES_VALIDAS.includes(classe)) return res.status(400).send("classe inválida");
+    await pool.query(
+      `UPDATE pront_documentos
+          SET classe_pedida=$2, status='pendente', tentativas=0,
+              extraido_json=NULL, classe=NULL, classe_conf=NULL, erro=NULL, processado_em=NULL
+        WHERE id=$1 AND status IN ('extraido','erro','pendente','processando')`,
+      [req.params.docId, classe]);
     res.redirect("/pront/conferencia");
   });
 
@@ -1309,6 +1511,21 @@ window.__READY=1;`;
       res.status(500).json({ ok: false, erro: e.message });
     }
   });
+
+  // remove o anexo da ficha. NÃO apaga o arquivo original do R2 nem o pront_documentos:
+  // o documento de origem continua rastreável, e o anexo pode ser refeito pela conferência.
+  app.delete("/pront/anexo/:id", medicoRequired, async (req, res) => {
+    try {
+      const a = (await pool.query(`SELECT id FROM pront_anexos WHERE id=$1`, [req.params.id])).rows[0];
+      if (!a) return res.status(404).json({ ok: false, erro: "não encontrado" });
+      await pool.query(`DELETE FROM pront_anexos WHERE id=$1`, [req.params.id]);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("DEL ANEXO ERROR", e);
+      res.status(500).json({ ok: false, erro: e.message });
+    }
+  });
+
   // ===== ASSINATURA DIGITAL ICP-BRASIL (Bird ID) =====
   const _sessoesBird = new Map();                       // userKey -> { access_token, expira_em, alias, pem }
   const userKey = req => String(req.user?.id || req.user?.email || "medico");

@@ -2,8 +2,15 @@
 // Roteia cada entrada para o melhor caminho e devolve SEMPRE no formato canônico,
 // pronto para conferência humana (nada é salvo aqui).
 //
-//   PDF com camada de texto  -> parser determinístico (pdftotext + parser-texto)
-//   Foto / scan / PDF s/texto -> provedor de visão (Ollama agora, Claude depois)
+//   PDF com camada de texto  -> pdftotext, e daí SEM MODELO:
+//                                 analitos  -> parser determinístico (parser-texto)
+//                                 narrativo -> organizador determinístico (classificador)
+//   Foto / scan / PDF s/texto -> visão: classifica (chamada curta) e então
+//                                 analitos  -> extrairImagens   narrativo -> transcrever
+//
+// A classe sai de pront-classificador.js. Na dúvida ele devolve 'narrativo':
+// transcrever no máximo quebra mal o texto; extrair analitos errado inventa
+// número no prontuário.
 //
 // O modelo só TRANSCREVE; a tipagem e o mapeamento canônico são determinísticos
 // (pront-normalizador.js). Trocar o provedor não muda a camada determinística.
@@ -16,6 +23,10 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseLaudoTexto } from "./pront-parser-texto.js";
 import { normalizeAnalito, CANONICOS } from "./pront-normalizador.js";
+import {
+  classificarTexto, organizarTexto,
+  PROMPT_CLASSE, SCHEMA_CLASSE, PROMPT_NARRATIVO, SCHEMA_NARRATIVO
+} from "./pront-classificador.js";
 
 const exec = promisify(execFile);
 
@@ -56,6 +67,31 @@ export function ollamaProvider(opts = {}) {
         out.push(...(parseJSON(data.message?.content || "").analitos || []));
       }
       return out;
+    },
+    // classificação: 1 chamada curta (num_predict baixo) só para decidir a rota
+    async classificar(b64) {
+      const body = { model, stream: false, format: SCHEMA_CLASSE, options: { temperature: 0, num_ctx: 4096, num_predict: 64 },
+        messages: [{ role: "user", content: PROMPT_CLASSE, images: [b64] }] };
+      const r = await fetch(base + "/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error("Ollama HTTP " + r.status);
+      const j = parseJSON((await r.json()).message?.content || "");
+      return { classe: j.classe === "analitos" ? "analitos" : "narrativo", confianca: Number(j.confianca) || 0.5 };
+    },
+    // transcrição fiel de laudo narrativo (página a página, concatenado)
+    async transcrever(imagensB64) {
+      const partes = [];
+      let titulo = "", data = "";
+      for (const b64 of imagensB64) {
+        const body = { model, stream: false, format: SCHEMA_NARRATIVO, options: { temperature: 0, num_ctx: 8192, num_predict: 4096 },
+          messages: [{ role: "user", content: PROMPT_NARRATIVO, images: [b64] }] };
+        const r = await fetch(base + "/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error("Ollama HTTP " + r.status);
+        const j = parseJSON((await r.json()).message?.content || "");
+        if (j.texto) partes.push(String(j.texto).trim());
+        if (!titulo && j.titulo) titulo = String(j.titulo).trim();
+        if (!data && j.data) data = String(j.data).trim();
+      }
+      return { titulo, data, texto: partes.join("\n\n") };
     }
   };
 }
@@ -81,8 +117,39 @@ export function claudeProvider(opts = {}) {
         out.push(...(parseJSON(txt).analitos || []));
       }
       return out;
+    },
+    async classificar(b64, mime = "image/jpeg") {
+      const txt = await chamar(model, b64, mime, PROMPT_CLASSE, 128);
+      const j = parseJSON(txt);
+      return { classe: j.classe === "analitos" ? "analitos" : "narrativo", confianca: Number(j.confianca) || 0.5 };
+    },
+    async transcrever(imagensB64, mime = "image/jpeg") {
+      const partes = [];
+      let titulo = "", data = "";
+      for (const b64 of imagensB64) {
+        const j = parseJSON(await chamar(model, b64, mime, PROMPT_NARRATIVO, 4096));
+        if (j.texto) partes.push(String(j.texto).trim());
+        if (!titulo && j.titulo) titulo = String(j.titulo).trim();
+        if (!data && j.data) data = String(j.data).trim();
+      }
+      return { titulo, data, texto: partes.join("\n\n") };
     }
   };
+}
+
+// chamada única de visão à API (usada por classificar/transcrever do provedor Claude)
+async function chamar(model, b64, mime, prompt, maxTokens) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: mime, data: b64 } },
+      { type: "text", text: prompt }
+    ] }] })
+  });
+  if (!r.ok) throw new Error("Claude HTTP " + r.status);
+  const data = await r.json();
+  return (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
 }
 
 function escolheProvedor() {
@@ -150,9 +217,41 @@ async function autoOrientarB64(buffer) {
   }
 }
 
+// ---------- rota de visão (foto / PDF escaneado) ----------
+// Classifica primeiro (chamada curta), depois extrai pela rota escolhida.
+// `forcado` vem da escolha humana e pula a classificação.
+async function viaVisao(imgs, provider, forcado, fonte) {
+  let classe = forcado, confianca = 1, motivos = ["classe definida por você"];
+
+  if (!classe) {
+    try {
+      const c = await provider.classificar(imgs[0]);
+      classe = c.classe; confianca = c.confianca;
+      motivos = [`classificado por visão (${provider.nome})`];
+    } catch (e) {
+      // classificação falhou -> narrativo (rota segura), nunca analitos
+      classe = "narrativo"; confianca = 0.3;
+      motivos = ["classificação falhou (" + (e?.message || e) + ") — mantido em narrativo por segurança"];
+    }
+  }
+
+  if (classe === "narrativo") {
+    const r = await provider.transcrever(imgs);
+    return { ...r, analitos: [], classe: "narrativo", confianca, motivos, fonte, provedor: provider.nome };
+  }
+  const brutos = await provider.extrairImagens(imgs);
+  return { analitos: normalizarBrutos(brutos), classe: "analitos", confianca, motivos, fonte, provedor: provider.nome };
+}
+
 // ---------- API principal ----------
-// entrada: { buffer, mime, nomeArquivo }  ->  { paciente, data_coleta, laboratorio, analitos[], fonte, provedor }
-export async function extrairDocumento({ buffer, mime, nomeArquivo }, provider = escolheProvedor()) {
+// entrada: { buffer, mime, nomeArquivo, classe? }
+//   classe: 'analitos' | 'narrativo' -> pula o classificador (escolha humana tem precedência)
+//           ausente/null             -> classifica automaticamente
+// saída:  { classe, confianca, motivos[], fonte, provedor, ... }
+//   classe='analitos'  -> { paciente, data_coleta, laboratorio, analitos[] }
+//   classe='narrativo' -> { titulo, data, texto, analitos: [] }
+export async function extrairDocumento({ buffer, mime, nomeArquivo, classe }, provider = escolheProvedor()) {
+  const forcado = (classe === "analitos" || classe === "narrativo") ? classe : null;
   const ehPdf = /pdf/i.test(mime) || /\.pdf$/i.test(nomeArquivo || "");
   const ehImg = /image\//i.test(mime) || /\.(png|jpe?g|webp|gif|tiff?)$/i.test(nomeArquivo || "");
 
@@ -162,21 +261,30 @@ export async function extrairDocumento({ buffer, mime, nomeArquivo }, provider =
     try {
       const texto = await pdfParaTexto(tmp);
       if (texto.replace(/\s/g, "").length > 80) {
+        // PDF COM camada de texto: o texto literal já está na mão.
+        // Nenhum modelo entra aqui — nem para classificar, nem para transcrever.
+        const c = forcado
+          ? { classe: forcado, confianca: 1, motivos: ["classe definida por você"] }
+          : classificarTexto(texto);
+        if (c.classe === "narrativo") {
+          const r = organizarTexto(texto);
+          return { ...r, analitos: [], classe: "narrativo", confianca: c.confianca, motivos: c.motivos,
+                   fonte: "pdf_texto", provedor: "transcricao_texto" };
+        }
         const r = parseLaudoTexto(texto);
-        return { ...r, fonte: "pdf_texto", provedor: "parser_texto" };
+        return { ...r, classe: "analitos", confianca: c.confianca, motivos: c.motivos,
+                 fonte: "pdf_texto", provedor: "parser_texto" };
       }
       // PDF sem texto -> rasteriza e manda pra visão
       const prefix = join(tmpdir(), "p_" + randomUUID());
       const imgs = await pdfParaImagens(tmp, prefix);
-      const brutos = await provider.extrairImagens(imgs);
-      return { analitos: normalizarBrutos(brutos), fonte: "pdf_imagem", provedor: provider.nome };
+      return await viaVisao(imgs, provider, forcado, "pdf_imagem");
     } finally { await unlink(tmp).catch(() => {}); }
   }
 
   if (ehImg) {
     const b64 = await autoOrientarB64(buffer);
-    const brutos = await provider.extrairImagens([b64]);
-    return { analitos: normalizarBrutos(brutos), fonte: "foto", provedor: provider.nome };
+    return await viaVisao([b64], provider, forcado, "foto");
   }
 
   throw new Error("Tipo não suportado para extração: " + (mime || nomeArquivo));

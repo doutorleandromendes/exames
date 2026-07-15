@@ -80,6 +80,36 @@ export async function runProntMigrations(pool) {
   ALTER TABLE pront_documentos ADD COLUMN IF NOT EXISTS diarizar    BOOLEAN DEFAULT false;
   ALTER TABLE pront_documentos ADD COLUMN IF NOT EXISTS transcricao TEXT;            -- transcript bruto do Whisper
 
+  -- classificação do documento (natureza do conteúdo). NÃO confundir com:
+  --   tipo  = formato do arquivo (foto|pdf|xlsx|audio)
+  --   modo  = já ocupado pelo áudio (resumo|consulta)
+  -- classe_pedida = escolha humana; tem PRECEDÊNCIA e pula o classificador. NULL = automático.
+  -- classe        = classe efetiva (resolvida pelo worker, ou copiada de classe_pedida).
+  ALTER TABLE pront_documentos ADD COLUMN IF NOT EXISTS classe_pedida TEXT;          -- analitos | narrativo | imagem | NULL(auto)
+  ALTER TABLE pront_documentos ADD COLUMN IF NOT EXISTS classe        TEXT;          -- analitos | narrativo | imagem
+  ALTER TABLE pront_documentos ADD COLUMN IF NOT EXISTS classe_conf   REAL;          -- 0..1; < 0.6 a fila mostra "dúvida"
+  -- documentos anteriores a esta migração já foram extraídos como analitos: rotula o passado
+  -- para a fila/ficha não tratarem histórico como não-classificado.
+  UPDATE pront_documentos SET classe='analitos'
+   WHERE classe IS NULL AND tipo <> 'audio' AND status IN ('extraido','confirmado');
+
+  -- anexos da ficha: laudos narrativos (imagem/histopato/relatório) e anexos só-imagem.
+  -- texto IS NULL  -> anexo mantido como imagem (sem transcrição)
+  -- texto NOT NULL -> laudo transcrito e conferido
+  CREATE TABLE IF NOT EXISTS pront_anexos (
+    id           BIGSERIAL PRIMARY KEY,
+    paciente_id  BIGINT NOT NULL REFERENCES pront_pacientes(id) ON DELETE CASCADE,
+    documento_id BIGINT REFERENCES pront_documentos(id) ON DELETE SET NULL,  -- origem: preview sai daqui
+    data         DATE NOT NULL DEFAULT current_date,
+    titulo       TEXT,
+    categoria    TEXT,          -- imagem | histopatologia | relatorio | outro
+    texto        TEXT,          -- NULL = anexo só-imagem
+    criado_por   TEXT,
+    criado_em    TIMESTAMPTZ DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_pront_anexos_pac ON pront_anexos (paciente_id, data DESC);
+  CREATE INDEX IF NOT EXISTS idx_pront_anexos_doc ON pront_anexos (documento_id);
+
   -- consultas / evoluções em texto (base para próximas etapas)
   CREATE TABLE IF NOT EXISTS pront_consultas (
     id          BIGSERIAL PRIMARY KEY,

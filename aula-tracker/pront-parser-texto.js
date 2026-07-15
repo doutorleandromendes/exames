@@ -151,34 +151,54 @@ export function parseLaudoTexto(texto) {
     }
   }
 
+  // extrai o valor de UMA ocorrência do rótulo na linha `i`. null = esta ocorrência não tem valor.
+  function valorNaOcorrencia(i, lab) {
+    const linha = linhas[i].trim();
+    const resto = linha.replace(lab.re, "").trim();
+    if (lab.hemo) return valorHemo(resto, lab.hemo);
+    // 1) mesma linha (UNILAB: "GLICOSE 84 mg/dL")
+    let v = valorLinha(linha, lab.sero);
+    if (v) return v;
+    // 2) abaixo (NA: valor em linha própria), pulando ruído/referências
+    for (let j = i + 1; j < Math.min(i + 12, linhas.length); j++) {
+      const lj = linhas[j];
+      if (!lj.trim()) continue;
+      if (ehNoise(lj)) continue;
+      if (LABELS.some(o => o.c !== lab.c && o.re.test(lj.trim()))) break;
+      if (/resultados anteriores/i.test(lj)) break;
+      v = valorLinha(lj, lab.sero);
+      if (v) break;
+    }
+    return v;
+  }
+
+  // A ocorrência está dentro de uma seção de resultados ANTERIORES? Vários laudos
+  // imprimem um comparativo histórico. Um valor de lá não pode virar valor atual —
+  // seria pior que perder o analito: entra na ficha parecendo plausível.
+  const HIST = /resultados?\s+anteriores|hist[óo]rico\s+de\s+resultados|evolu[çc][ãa]o\s+dos\s+resultados|compara(tivo|[çc][ãa]o)\s+com|exames?\s+anteriores/i;
+  const emHistorico = i => {
+    for (let j = i; j >= Math.max(0, i - 10); j--) if (HIST.test(linhas[j])) return true;
+    return false;
+  };
+
   const achados = [];
   const usados = new Set();
   for (const lab of LABELS) {
     if (usados.has(lab.c)) continue;
-    const i = linhas.findIndex(l => lab.re.test(l.trim()));
-    if (i < 0) continue;
-    const linha = linhas[i].trim();
-    const resto = linha.replace(lab.re, "").trim();
-    let v = null;
-
-    if (lab.hemo) v = valorHemo(resto, lab.hemo);
-    else {
-      // 1) mesma linha (UNILAB: "GLICOSE 84 mg/dL")
-      v = valorLinha(linha, lab.sero);
-      // 2) abaixo (NA: valor em linha própria), pulando ruído/referências
-      if (!v) {
-        for (let j = i + 1; j < Math.min(i + 12, linhas.length); j++) {
-          const lj = linhas[j];
-          if (!lj.trim()) continue;
-          if (ehNoise(lj)) continue;
-          if (LABELS.some(o => o.c !== lab.c && o.re.test(lj.trim()))) break;
-          if (/resultados anteriores/i.test(lj)) break;
-          v = valorLinha(lj, lab.sero);
-          if (v) break;
-        }
-      }
+    // TODAS as ocorrências do rótulo, não só a primeira. Em laudo de várias páginas a 1ª
+    // costuma ser a lista de exames solicitados / índice da capa, que não tem valor; o
+    // resultado está adiante. Parar na 1ª ocorrência descartava o analito inteiro.
+    let historico = null;   // só usado se NÃO houver nenhuma ocorrência fora do histórico
+    for (let i = 0; i < linhas.length; i++) {
+      if (!lab.re.test(linhas[i].trim())) continue;
+      const v = valorNaOcorrencia(i, lab);
+      if (!v || v.valor == null || String(v.valor).trim() === "") continue;
+      const achado = { nome: linhas[i].trim().slice(0, 40), canon: lab.c, ...v };
+      if (emHistorico(i)) { historico ||= achado; continue; }
+      achados.push(achado); usados.add(lab.c);
+      break;                      // 1ª ocorrência com valor, fora do histórico, vence
     }
-    if (v && v.valor != null && String(v.valor).trim() !== "") { achados.push({ nome: linha.slice(0, 40), canon: lab.c, ...v }); usados.add(lab.c); }
+    if (!usados.has(lab.c) && historico) { achados.push(historico); usados.add(lab.c); }
   }
 
   const analitos = achados.map(a => {

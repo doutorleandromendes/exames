@@ -146,7 +146,7 @@ export async function migrarJotform(pool, subs, { reset = false, log = console.l
       if (col.ano_inferido) avisos.push(`${p.nome}: coleta ${col.data} — ano inferido (confirmar)`);
       const c = (await pool.query(
         `INSERT INTO pront_coletas(paciente_id,data_coleta,laboratorio,fonte,criado_por) VALUES($1,$2::date,$3,'xlsx','migracao')
-         ON CONFLICT (paciente_id,data_coleta,laboratorio) DO UPDATE SET fonte=EXCLUDED.fonte RETURNING id`,
+         ON CONFLICT (paciente_id,data_coleta) DO UPDATE SET fonte=EXCLUDED.fonte RETURNING id`,
         [pac.id, col.data, lab])).rows[0];
       nCol++;
       for (const r of col.resultados) {

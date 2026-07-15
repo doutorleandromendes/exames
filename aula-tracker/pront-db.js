@@ -27,13 +27,12 @@ export async function runProntMigrations(pool) {
     id           BIGSERIAL PRIMARY KEY,
     paciente_id  BIGINT NOT NULL REFERENCES pront_pacientes(id) ON DELETE CASCADE,
     data_coleta  DATE NOT NULL,
-    laboratorio  TEXT,
+    laboratorio  TEXT,            -- pode conter vários labs ("A + B") quando a data agrupa mais de uma origem
     fonte        TEXT,            -- foto | pdf_texto | xlsx | manual
     documento_id BIGINT,          -- origem (pront_documentos), se houver
     tarv         TEXT,            -- esquema antirretroviral, quando aplicável
     criado_por   TEXT,
-    criado_em    TIMESTAMPTZ DEFAULT now(),
-    UNIQUE (paciente_id, data_coleta, laboratorio)
+    criado_em    TIMESTAMPTZ DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS idx_pront_col_pac ON pront_coletas (paciente_id, data_coleta);
 
@@ -52,6 +51,72 @@ export async function runProntMigrations(pool) {
   );
   CREATE INDEX IF NOT EXISTS idx_pront_res_col   ON pront_resultados (coleta_id);
   CREATE INDEX IF NOT EXISTS idx_pront_res_canon ON pront_resultados (canonico);
+
+  -- ===== UMA COLUNA POR DATA =====
+  -- A coleta passa a ser identificada por (paciente_id, data_coleta) apenas: analitos
+  -- colhidos na mesma data caem na MESMA coluna do grid, venham de quantos laudos vierem.
+  --
+  -- Agrupar por data funde origens diferentes numa coleta só, e o laboratório/documento
+  -- deixam de ser únicos no nível da coleta. Por isso a procedência desce para o
+  -- resultado — senão a fusão apagaria de onde cada valor veio.
+  ALTER TABLE pront_resultados ADD COLUMN IF NOT EXISTS laboratorio  TEXT;    -- lab de origem DESTE valor
+  ALTER TABLE pront_resultados ADD COLUMN IF NOT EXISTS documento_id BIGINT;  -- laudo de origem DESTE valor
+  CREATE INDEX IF NOT EXISTS idx_pront_res_doc ON pront_resultados (documento_id);
+
+  -- backfill da procedência: ANTES de fundir, enquanto coleta.laboratorio ainda é de uma origem só
+  UPDATE pront_resultados r SET laboratorio = c.laboratorio
+    FROM pront_coletas c
+   WHERE r.coleta_id = c.id AND r.laboratorio IS NULL AND c.laboratorio IS NOT NULL;
+  UPDATE pront_resultados r SET documento_id = c.documento_id
+    FROM pront_coletas c
+   WHERE r.coleta_id = c.id AND r.documento_id IS NULL AND c.documento_id IS NOT NULL;
+
+  -- 1) move os resultados das coletas duplicadas (mesma data, labs diferentes) para a sobrevivente
+  UPDATE pront_resultados r SET coleta_id = s.keep_id
+    FROM pront_coletas c
+    JOIN (SELECT paciente_id, data_coleta, min(id) AS keep_id
+            FROM pront_coletas GROUP BY paciente_id, data_coleta) s
+      ON s.paciente_id = c.paciente_id AND s.data_coleta = c.data_coleta
+   WHERE r.coleta_id = c.id AND c.id <> s.keep_id;
+
+  -- 2) consolida os metadados na sobrevivente (nomes de lab concatenados, tarv/documento preservados)
+  UPDATE pront_coletas c
+     SET laboratorio  = a.labs,
+         tarv         = COALESCE(c.tarv, a.tarv),
+         documento_id = COALESCE(c.documento_id, a.doc)
+    FROM (SELECT paciente_id, data_coleta, min(id) AS keep_id,
+                 string_agg(DISTINCT laboratorio, ' + ') AS labs,
+                 min(tarv) AS tarv, min(documento_id) AS doc
+            FROM pront_coletas GROUP BY paciente_id, data_coleta) a
+   WHERE c.id = a.keep_id;
+
+  -- 3) remove as coletas duplicadas, agora vazias
+  DELETE FROM pront_coletas c
+   USING (SELECT paciente_id, data_coleta, min(id) AS keep_id
+            FROM pront_coletas GROUP BY paciente_id, data_coleta) s
+   WHERE c.paciente_id = s.paciente_id AND c.data_coleta = s.data_coleta AND c.id <> s.keep_id;
+
+  -- 4) na coluna fundida, o mesmo analito pode ter vindo de dois laudos: fica o mais recente
+  DELETE FROM pront_resultados r
+   USING (SELECT coleta_id, canonico, max(id) AS keep_id
+            FROM pront_resultados WHERE canonico IS NOT NULL
+           GROUP BY coleta_id, canonico) d
+   WHERE r.coleta_id = d.coleta_id AND r.canonico = d.canonico AND r.id <> d.keep_id;
+
+  -- 5) troca a chave: (paciente_id, data_coleta, laboratorio) -> (paciente_id, data_coleta).
+  --    Descoberta pelo catálogo (não pelo nome gerado) para não depender do autonome do Postgres.
+  DO $$
+  DECLARE cname TEXT;
+  BEGIN
+    SELECT conname INTO cname
+      FROM pg_constraint
+     WHERE conrelid = 'pront_coletas'::regclass AND contype = 'u' AND array_length(conkey, 1) = 3;
+    IF cname IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE pront_coletas DROP CONSTRAINT %I', cname);
+    END IF;
+  END $$;
+  -- índice único: também é o alvo do ON CONFLICT (paciente_id, data_coleta)
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pront_coletas_pac_data ON pront_coletas (paciente_id, data_coleta);
 
   -- fila de documentos para extração (foto/pdf/xlsx). O worker consome 'pendente'.
   CREATE TABLE IF NOT EXISTS pront_documentos (

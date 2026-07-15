@@ -72,7 +72,7 @@ export async function gravarLimpos(pool, pacienteId, limpos, criadoPor) {
     const { rows: [col] } = await pool.query(
       `INSERT INTO pront_coletas (paciente_id, data_coleta, laboratorio, fonte, tarv, criado_por)
        VALUES ($1,$2,$3,'xlsx',$4,$5)
-       ON CONFLICT (paciente_id, data_coleta, laboratorio)
+       ON CONFLICT (paciente_id, data_coleta)
        DO UPDATE SET tarv = COALESCE(EXCLUDED.tarv, pront_coletas.tarv)
        RETURNING id`,
       [pacienteId, data, LAB_EXTERNO, grupo.tarv, criadoPor]);
@@ -84,9 +84,9 @@ export async function gravarLimpos(pool, pacienteId, limpos, criadoPor) {
       }
       await pool.query(
         `INSERT INTO pront_resultados
-          (coleta_id, canonico, rotulo, nome_original, tipo_valor, valor_num, operador, unidade, resultado_txt, status_flag)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [col.id, it.canonico, it.rotulo, it.nome_original, it.tipo_valor, it.valor_num, it.operador, it.unidade, it.resultado_txt, it.status_flag]);
+          (coleta_id, canonico, rotulo, nome_original, tipo_valor, valor_num, operador, unidade, resultado_txt, status_flag, laboratorio)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [col.id, it.canonico, it.rotulo, it.nome_original, it.tipo_valor, it.valor_num, it.operador, it.unidade, it.resultado_txt, it.status_flag, LAB_EXTERNO]);
       resultadosGravados++;
     }
   }

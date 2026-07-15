@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 import { gerarDocumentoPDF } from "./pront-doc-pdf.js";
 import { generateLabPdf } from "./lab-pdf.js";
 import { preverImportacao, gravarTudo } from "./pront-importador-db.js";
-import { parseValue } from "./pront-normalizador.js";
+import { parseValue, normalizeName, CANONICOS } from "./pront-normalizador.js";
 import { randomUUID } from "node:crypto";
 import { abrirSessao, descobrirCertificado } from "./birdid.js";
 import { makeBirdIdRawSigner, assinarPdfCades } from "./birdid-cades.js";
@@ -503,9 +503,17 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       const r2key = `pront/uploads/${req.params.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`;
       await uploadToR2(r2key, buffer, contentType || "application/octet-stream");
       const doc = (await pool.query(
-        `INSERT INTO pront_documentos(paciente_id,tipo,nome_arquivo,mime,r2_key,tamanho,status,classe_pedida,criado_por)
-         VALUES($1,$2,$3,$4,$5,$6,'pendente',$7,$8) RETURNING id`,
-        [req.params.id, tipo, nome || null, contentType || null, r2key, buffer.length, classePedida, quem(req)])).rows[0];
+        `INSERT INTO pront_documentos(paciente_id,tipo,nome_arquivo,mime,r2_key,tamanho,status,classe_pedida,classe,classe_conf,extraido_json,processado_em,criado_por)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13) RETURNING id`,
+        [req.params.id, tipo, nome || null, contentType || null, r2key, buffer.length,
+         // "só imagem" não tem nada a extrair: já entra pronto pra conferência, sem passar pela fila
+         classePedida === "imagem" ? "extraido" : "pendente",
+         classePedida,
+         classePedida === "imagem" ? "imagem" : null,
+         classePedida === "imagem" ? 1 : null,
+         classePedida === "imagem" ? JSON.stringify({ classe: "imagem", motivos: ["mantido como imagem por sua escolha"] }) : null,
+         classePedida === "imagem" ? new Date() : null,
+         quem(req)])).rows[0];
       res.json({ ok: true, docId: doc.id });
     } catch (e) { res.status(500).json({ erro: String(e.message || e) }); }
   });
@@ -874,13 +882,21 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       : a.tipo_valor === "censurado" ? `${a.operador || ""} ${a.valor ?? ""}`.trim()
       : (a.valor ?? "");
     const rows = analitos.map((a, i) => `
-      <tr data-i="${i}">
+      <tr data-i="${i}" data-canon="${safe(a.canonico || "")}">
         <td style="text-align:center"><input type="checkbox" class="inc" checked style="width:auto"/></td>
-        <td>${safe(a.rotulo || a.nome_original || a.canonico || "—")}${a.canonico ? "" : ' <span class="mut" title="não mapeado — guardado sem tendência">(outros)</span>'}</td>
+        <td style="min-width:200px">
+          <input class="lab" list="dlcanon" value="${safe(a.rotulo || a.nome_original || a.canonico || "")}" style="padding:6px;width:100%"/>
+          <div class="ind mut" style="font-size:.75em;margin-top:2px"></div>
+          ${(a.nome_original && a.nome_original !== a.rotulo) ? `<div class="mut" style="font-size:.72em">lido no laudo: ${safe(a.nome_original)}</div>` : ""}
+        </td>
         <td><input class="val" value="${safe(String(valFmt(a)))}" style="padding:6px"/></td>
         <td class="mut">${safe(a.unidade || "")}</td>
         <td>${a.status ? `<span class="mut">${safe(a.status)}</span>` : ""}</td>
       </tr>`).join("");
+
+    // autocomplete com os exames do catálogo canônico (os que têm rótulo padronizado e tendência)
+    const dlCanon = `<datalist id="dlcanon">${Object.values(CANONICOS)
+      .map(c => `<option value="${safe(c.rotulo)}"></option>`).join("")}</datalist>`;
 
     res.send(renderShell("Conferência do documento", `
       <div class="admin-back-top"><a href="/pront/conferencia">← Fila</a></div>
@@ -897,6 +913,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
             <div><label>Laboratório</label><input id="lab" value="${safe(ex.laboratorio || "")}"/></div>
           </div>
           ${ex.paciente ? `<div class="mut mt" style="font-size:.85em">Nome lido no laudo: ${safe(ex.paciente)}</div>` : ""}
+          <div id="aviso" class="mt" style="display:none;border-left:4px solid #0369a1;background:#f0f9ff;padding:8px 10px;border-radius:8px;font-size:.86em"></div>
           <table class="mt">
             <thead><tr><th></th><th>Analito</th><th>Valor</th><th>Un.</th><th>Status</th></tr></thead>
             <tbody id="tb">${rows || `<tr><td colspan="5" class="mut">Nenhum analito extraído.</td></tr>`}</tbody>
@@ -909,8 +926,74 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         </div>
       </div>
       <script id="exraw" type="application/json">${JSON.stringify(analitos).replace(/</g, "\\u003c")}</script>
+      ${dlCanon}
       <script>
         const raw=JSON.parse(document.getElementById('exraw').textContent);
+        const aviso=document.getElementById('aviso');
+        // avisa que esta data já tem coluna, e quais analitos serão substituídos
+        async function checarColuna(){
+          const pac=document.getElementById('pac').value, data=document.getElementById('data').value;
+          if(!pac||!data){aviso.style.display='none';return;}
+          try{
+            const r=await fetch('/pront/api/coleta-existente?paciente_id='+encodeURIComponent(pac)+'&data='+encodeURIComponent(data));
+            const j=await r.json();
+            if(!j.existe){aviso.style.display='none';return;}
+            // canônicos ATUAIS das linhas (podem ter mudado se você editou um rótulo)
+            const meus=new Set([...document.querySelectorAll('#tb tr[data-i]')]
+              .filter(tr=>tr.querySelector('.inc')?.checked)
+              .map(tr=>tr.dataset.canon).filter(Boolean));
+            const colide=(j.canonicos||[]).filter(c=>meus.has(c));
+            const lab=j.laboratorio?(' ('+j.laboratorio+')'):'';
+            aviso.innerHTML='<b>Já existe uma coluna nesta data</b>'+lab+' com '+j.n+' resultado(s). '
+              +'Este laudo vai ser somado à mesma coluna.'
+              +(colide.length?(' <b>'+colide.length+' analito(s) repetido(s)</b> serão substituídos pelos valores deste laudo: '
+                 +colide.slice(0,8).join(', ')+(colide.length>8?'…':'')+'.'):' Nenhum analito se repete.');
+            aviso.style.display='';
+          }catch{aviso.style.display='none';}
+        }
+        document.getElementById('pac').addEventListener('change',checarColuna);
+        document.getElementById('data').addEventListener('change',checarColuna);
+        checarColuna();
+
+        // ---- rótulo editável: pergunta ao servidor a que canônico o nome digitado mapeia ----
+        // canônico  -> linha padronizada do grid, com faixa de referência e tendência
+        // sem match -> "outros": agrupa pelo rótulo EXATO. Rótulos iguais entre datas
+        //              viram a mesma linha e o gráfico funciona; por isso corrigir importa.
+        const cacheN=new Map();
+        async function normalizar(nome){
+          const k=nome.trim().toLowerCase();
+          if(!k) return {canonico:null,rotulo:''};
+          if(cacheN.has(k)) return cacheN.get(k);
+          try{
+            const r=await fetch('/pront/api/normalizar?nome='+encodeURIComponent(nome));
+            const j=await r.json(); cacheN.set(k,j); return j;
+          }catch{ return {canonico:null,rotulo:nome}; }
+        }
+        async function atualizaLinha(tr,{corrigir}={}){
+          const inp=tr.querySelector('.lab'), ind=tr.querySelector('.ind');
+          const nome=inp.value.trim();
+          if(!nome){tr.dataset.canon='';ind.textContent='';ind.style.color='';return;}
+          const j=await normalizar(nome);
+          tr.dataset.canon=j.canonico||'';
+          if(j.canonico){
+            if(corrigir&&inp.value.trim()!==j.rotulo) inp.value=j.rotulo;  // "hb" -> "Hemoglobina"
+            ind.textContent='✓ '+j.rotulo+' — exame do catálogo (com tendência)';
+            ind.style.color='#0e7a4b';
+          }else{
+            ind.textContent='outros — agrupa pelo rótulo exato; use o mesmo texto nas outras datas';
+            ind.style.color='';
+          }
+        }
+        const trsAll=[...document.querySelectorAll('#tb tr[data-i]')];
+        trsAll.forEach(tr=>{
+          const inp=tr.querySelector('.lab');
+          if(!inp) return;
+          let t; inp.addEventListener('input',()=>{clearTimeout(t);t=setTimeout(()=>atualizaLinha(tr),250);});
+          inp.addEventListener('change',()=>atualizaLinha(tr,{corrigir:true}).then(checarColuna));
+          tr.querySelector('.inc')?.addEventListener('change',checarColuna);
+          atualizaLinha(tr);
+        });
+
         document.getElementById('salvar').onclick=async()=>{
           const data=document.getElementById('data').value, pac=document.getElementById('pac').value, lab=document.getElementById('lab').value;
           if(!pac){msg.textContent='Selecione o paciente.';return;}
@@ -918,9 +1001,18 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           const trs=[...document.querySelectorAll('#tb tr[data-i]')];
           const analitos=trs.map(tr=>{const i=+tr.dataset.i;const a={...raw[i]};
             a.incluir=tr.querySelector('.inc').checked; const v=tr.querySelector('.val').value.trim();
+            // rótulo editado: nome_original (o que o laudo/OCR disse) é preservado como registro;
+            // o que muda é o rótulo exibido e o canônico ao qual ele mapeia.
+            const lab=tr.querySelector('.lab');
+            if(lab){const t=lab.value.trim(); if(t){a.rotulo=t; a.canonico=tr.dataset.canon||null;} }
             if(a.tipo_valor==='qualitativo'||a.tipo_valor==='texto'){a.resultado=v;}
             else{const mm=v.match(/-?[\\d.,]+/);let s=mm?mm[0]:'';const hc=s.includes(','),hd=s.includes('.');if(hc&&hd)s=s.replace(/\\./g,'').replace(',','.');else if(hc)s=s.replace(',','.');else if(hd){const af=s.split('.').pop();if(af.length===3)s=s.replace(/\\./g,'');}const n=parseFloat(s);a.valor=Number.isFinite(n)?n:a.valor;}
             return a;}).filter(a=>a.incluir);
+          // dois analitos mapeados no MESMO canônico: um sobrescreveria o outro em silêncio
+          const vistos={};
+          for(const a of analitos){ if(!a.canonico) continue;
+            if(vistos[a.canonico]){msg.textContent='Dois analitos estão apontando para "'+a.rotulo+'". Corrija um dos rótulos antes de salvar.';return;}
+            vistos[a.canonico]=true; }
           msg.textContent='Salvando…';
           const r=await fetch('/pront/conferencia/${d.id}/confirmar',{method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({paciente_id:+pac,data_coleta:data,laboratorio:lab,analitos})});
@@ -930,25 +1022,69 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       </script>`));
   });
 
+  // mapeia um nome de exame digitado -> canônico. Usa o MESMO normalizeName do
+  // motor de extração: a tela de conferência não reimplementa a regra, pergunta pra ela.
+  app.get("/pront/api/normalizar", authRequired, (req, res) => {
+    const nome = String(req.query?.nome || "").trim();
+    if (!nome) return res.json({ canonico: null, rotulo: "" });
+    const canonico = normalizeName(nome);
+    res.json({ canonico, rotulo: canonico ? CANONICOS[canonico].rotulo : nome });
+  });
+
+  // coluna já existente para (paciente, data): a conferência avisa ANTES de fundir,
+  // porque analitos repetidos são substituídos pelo laudo que você está confirmando.
+  app.get("/pront/api/coleta-existente", authRequired, async (req, res) => {
+    try {
+      const { paciente_id, data } = req.query || {};
+      if (!paciente_id || !data) return res.json({ existe: false });
+      const c = (await pool.query(
+        `SELECT c.id, c.laboratorio, count(r.id)::int n,
+                COALESCE(array_agg(r.canonico) FILTER (WHERE r.canonico IS NOT NULL), '{}') canonicos
+           FROM pront_coletas c LEFT JOIN pront_resultados r ON r.coleta_id = c.id
+          WHERE c.paciente_id = $1 AND c.data_coleta = $2::date
+          GROUP BY c.id`, [paciente_id, data])).rows[0];
+      if (!c) return res.json({ existe: false });
+      res.json({ existe: true, n: c.n, laboratorio: c.laboratorio || "", canonicos: c.canonicos || [] });
+    } catch { res.json({ existe: false }); }
+  });
+
   app.post("/pront/conferencia/:docId/confirmar", authRequired, jsonGrande, async (req, res) => {
     try {
       const { paciente_id, data_coleta, laboratorio, analitos } = req.body || {};
       if (!paciente_id || !data_coleta) return res.status(400).json({ erro: "paciente e data são obrigatórios" });
       const d = (await pool.query(`SELECT id FROM pront_documentos WHERE id=$1`, [req.params.docId])).rows[0];
       if (!d) return res.status(404).json({ erro: "documento não encontrado" });
+      // UMA COLUNA POR DATA: a coleta é (paciente_id, data_coleta). Laudos diferentes na
+      // mesma data caem aqui. O nome do lab acumula; a procedência real fica no resultado.
       const c = (await pool.query(
         `INSERT INTO pront_coletas(paciente_id,data_coleta,laboratorio,fonte,documento_id,criado_por)
          VALUES($1,$2::date,$3,$4,$5,$6)
-         ON CONFLICT (paciente_id,data_coleta,laboratorio) DO UPDATE SET documento_id=EXCLUDED.documento_id RETURNING id`,
+         ON CONFLICT (paciente_id,data_coleta) DO UPDATE
+           SET documento_id = COALESCE(pront_coletas.documento_id, EXCLUDED.documento_id),
+               laboratorio  = CASE
+                 WHEN EXCLUDED.laboratorio IS NULL OR btrim(EXCLUDED.laboratorio) = '' THEN pront_coletas.laboratorio
+                 WHEN pront_coletas.laboratorio IS NULL OR btrim(pront_coletas.laboratorio) = '' THEN EXCLUDED.laboratorio
+                 WHEN position(EXCLUDED.laboratorio IN pront_coletas.laboratorio) > 0 THEN pront_coletas.laboratorio
+                 ELSE pront_coletas.laboratorio || ' + ' || EXCLUDED.laboratorio
+               END
+         RETURNING id`,
         [paciente_id, data_coleta, laboratorio || null, "ocr", req.params.docId, quem(req)])).rows[0];
+
+      // re-conferência do MESMO laudo: limpa o que ele já tinha gravado nesta coleta
+      await pool.query(`DELETE FROM pront_resultados WHERE coleta_id=$1 AND documento_id=$2`, [c.id, req.params.docId]);
+
       for (const a of (analitos || [])) {
         const qual = a.tipo_valor === "qualitativo" || a.tipo_valor === "texto";
+        // mesmo analito já presente nesta data (de outro laudo/lab): o que você está
+        // confirmando agora substitui o anterior — a tela avisa antes de salvar.
+        if (a.canonico) await pool.query(`DELETE FROM pront_resultados WHERE coleta_id=$1 AND canonico=$2`, [c.id, a.canonico]);
         await pool.query(
-          `INSERT INTO pront_resultados(coleta_id,canonico,rotulo,nome_original,tipo_valor,valor_num,operador,unidade,resultado_txt,status_flag)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          `INSERT INTO pront_resultados(coleta_id,canonico,rotulo,nome_original,tipo_valor,valor_num,operador,unidade,resultado_txt,status_flag,laboratorio,documento_id)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [c.id, a.canonico || null, a.rotulo || null, a.nome_original || null, a.tipo_valor || null,
            qual ? null : (a.valor ?? null), a.operador || null, a.unidade || null,
-           qual ? (a.resultado || a.texto || null) : null, a.status || null]);
+           qual ? (a.resultado || a.texto || null) : null, a.status || null,
+           laboratorio || null, req.params.docId]);
       }
       await pool.query(`UPDATE pront_documentos SET status='confirmado', paciente_id=$2, processado_em=now() WHERE id=$1`, [req.params.docId, paciente_id]);
       res.json({ ok: true, coletaId: c.id });
@@ -987,6 +1123,16 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   app.post("/pront/conferencia/:docId/reclassificar", authRequired, async (req, res) => {
     const classe = String(req.body?.classe || "");
     if (!CLASSES_VALIDAS.includes(classe)) return res.status(400).send("classe inválida");
+    if (classe === "imagem") {
+      // nada a extrair: resolve aqui mesmo. Não depende do worker local estar ligado.
+      await pool.query(
+        `UPDATE pront_documentos
+            SET classe_pedida='imagem', classe='imagem', classe_conf=1, provedor=NULL,
+                status='extraido', extraido_json=$2::jsonb, tentativas=0, erro=NULL, processado_em=now()
+          WHERE id=$1`,
+        [req.params.docId, JSON.stringify({ classe: "imagem", motivos: ["mantido como imagem por sua escolha"] })]);
+      return res.redirect("/pront/conferencia/" + req.params.docId);
+    }
     await pool.query(
       `UPDATE pront_documentos
           SET classe_pedida=$2, status='pendente', tentativas=0,

@@ -366,6 +366,7 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '', ext
     </div>
    <div style="display:flex;gap:14px">
       <a href="/atb/admin/complementar/${f.id}">+ Complementar</a>
+      <a href="/atb/admin/ficha/${f.id}/explicar" title="Mostra qual regra definiu o IrAS e reavalia cada condição no contexto atual">🔍 Por que esta classificação?</a>
       ${podeEditar ? `<a href="/atb/admin/ficha/${f.id}/editar">✏️ Editar dados</a>` : ''}
       ${podeEditar ? (f.deletado_em
         ? `<a href="#" onclick="restaurarFicha(${f.id});return false" style="color:#1a8a5a">↩️ Restaurar</a>`

@@ -122,6 +122,20 @@ function _num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Introspecção do motor: monta a MESMA árvore de condições, anotando o resultado
+// e o valor real de cada nó. Delega a decisão ao avaliaCond acima — nunca
+// reimplementa operador, então o explicador não pode divergir do motor.
+export function explicaCond(cond, valores) {
+  if (!cond) return { tipo: 'vazio', ok: true };
+  if (cond.all) return { tipo: 'all', ok: avaliaCond(cond, valores), filhos: (cond.all || []).map((c) => explicaCond(c, valores)) };
+  if (cond.any) return { tipo: 'any', ok: avaliaCond(cond, valores), filhos: (cond.any || []).map((c) => explicaCond(c, valores)) };
+  return {
+    tipo: 'cond', campo: cond.campo, op: cond.op, valor: cond.valor,
+    atual: valores ? valores[cond.campo] : undefined,
+    ok: avaliaCond(cond, valores),
+  };
+}
+
 export function avaliaCond(cond, valores) {
   if (!cond) return true;
   if (cond.all) return Array.isArray(cond.all) && cond.all.every((c) => avaliaCond(c, valores));

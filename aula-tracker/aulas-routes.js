@@ -133,30 +133,90 @@ app.post('/admin', (req,res)=>{
 });
 app.get('/admin/logout', (req,res)=>{ res.clearCookie('adm'); res.redirect('/'); });
 
-// ====== Início — hub por papel (SCIH vê atalhos do ATB; aluno vai pro Aulas) ======
+// ====== Início — hub genérico: lista os módulos que o usuário realmente acessa ======
 app.get('/inicio', async (req,res)=>{
   const adm = isAdmin(req);
   const uid = req.cookies?.uid;
   let user = null;
-  if(uid){ try{ const { rows } = await pool.query('SELECT id,full_name,scih,super_admin,micro FROM users WHERE id=$1',[uid]); user = rows[0]||null; }catch{} }
+  if(uid){
+    try{
+      const { rows } = await pool.query(
+        'SELECT id,full_name,scih,super_admin,micro,pront,agenda,recepcao FROM users WHERE id=$1',[uid]);
+      user = rows[0]||null;
+    }catch{}
+  }
   if(!user && !adm) return res.redirect('/');
-  const ehScih = adm || (user && (user.scih || user.super_admin));
-  if (user && user.micro && !ehScih) return res.redirect('/atb/admin/grid');
-  if(!ehScih) return res.redirect('/aulas');
+
+  const f = k => !!(user && user[k]);
+  const sa = adm || f('super_admin');            // super admin / break-glass: vê tudo
+  const ehAtb = sa || f('scih') || f('micro');
+
+  // micro "puro" (sem outros papéis) mantém o atalho histórico direto ao grid
+  if (user && f('micro') && !sa && !f('scih') && !f('agenda') && !f('recepcao') && !f('pront'))
+    return res.redirect('/atb/admin/grid');
+
+  // o usuário tem alguma matrícula ativa em aulas?
+  let temAulas = sa;
+  if (user && !temAulas){
+    try{
+      const { rows } = await pool.query(
+        `SELECT 1 FROM course_members cm
+           JOIN courses c ON c.id = cm.course_id
+          WHERE cm.user_id=$1 AND c.archived=false
+            AND (c.expires_at IS NULL OR c.expires_at > now())
+            AND (cm.expires_at IS NULL OR cm.expires_at > now())
+          LIMIT 1`, [user.id]);
+      temAulas = rows.length > 0;
+    }catch{}
+  }
+
+  // catálogo de módulos: { visível?, destino, card }
+  const mods = [];
+  const add = (cond, href, ic, titulo, desc) => { if (cond) mods.push({ href, ic, titulo, desc }); };
+  add(ehAtb, '/atb/admin/grid', '📋', 'Controle ATB', 'Grid de pareceres e monitoramento');
+  add(sa || f('agenda') || f('recepcao'), '/agenda', '🗓️', 'Agenda', 'Consultas do consultório');
+  add(sa || f('pront'), '/pront', '🩺', 'Prontuário', 'Pacientes, consultas e documentos');
+  add(sa || f('agenda'), '/secretaria', '🧾', 'Secretaria', 'Orçamentos e documentos');
+  add(sa || f('agenda'), '/estoque', '📦', 'Estoque', 'Testes rápidos');
+  add(temAulas, '/aulas', '🎓', 'Aulas', 'InfectoAulas');
+
+  // atalhos secundários (mesmos do hub antigo, preservados para SCIH/admin)
+  const extras = [];
+  if (ehAtb) {
+    extras.push(`<a class="hubcard" href="/atb/admin/adesao">📈 Adesão aos pareceres</a>`);
+    extras.push(`<a class="hubcard" href="/atb/admin/ficha-retrospectiva">➕ Ficha retrospectiva</a>`);
+    extras.push(`<a class="hubcard" href="/consulta">🔎 Consulta (Farmácia)</a>`);
+    extras.push(`<a class="hubcard" href="/atb/admin/config">⚙️ Configurar ATB</a>`);
+  }
+  if (sa) extras.push(`<a class="hubcard" href="/atb/admin/scih">👥 Acessos</a>`);
+
+  // sem nenhum módulo → aulas (aluno recém-cadastrado vê a mensagem de lá)
+  if (!mods.length) return res.redirect('/aulas');
+  // um único destino e nada mais → vai direto, sem hub de um card só
+  if (mods.length === 1 && !extras.length) return res.redirect(mods[0].href);
+
   const nome = user?.full_name || 'Admin (break-glass)';
   const html = `<div class="card"><h1>Início</h1><p class="mut">Olá, ${nome}.</p>
     <div class="hub">
-      <a class="hubcard" href="/atb/admin/grid">📋 Controle ATB (grid)</a>
-      <a class="hubcard" href="/atb/admin/adesao">📈 Adesão aos pareceres</a>
-      <a class="hubcard" href="/atb/admin/ficha-retrospectiva">➕ Ficha retrospectiva</a>
-      <a class="hubcard" href="/consulta">🔎 Consulta (Farmácia)</a>
-      <a class="hubcard" href="/atb/admin/config">⚙️ Configurar ATB</a>
-      ${(user && user.super_admin) ? `<a class="hubcard" href="/atb/admin/scih">👥 Acessos do SCIH</a>` : ''}
-      <a class="hubcard" href="/aulas">🎓 Aulas</a>
-    </div></div>
-  <style>.hub{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:14px}
-  .hubcard{display:block;padding:16px;border:1px solid #e0e2e6;border-radius:10px;text-decoration:none;color:#0c447c;font-weight:600;background:#fff}
-  .hubcard:hover{background:#f4f6f9}</style>`;
+      ${mods.map(m => `<a class="hubcard" href="${m.href}">
+        <span class="hc-ic">${m.ic}</span>
+        <span class="hc-t">${m.titulo}</span>
+        <span class="hc-d">${m.desc}</span></a>`).join('')}
+    </div>
+    ${extras.length ? `<h2 style="font-size:15px;margin:20px 0 8px;color:#5b6472">Mais</h2>
+      <div class="hub hub-sm">${extras.join('')}</div>` : ''}
+  </div>
+  <style>
+  .hub{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:14px}
+  .hubcard{display:block;padding:16px;border:1px solid #e0e2e6;border-radius:12px;text-decoration:none;color:#0c447c;font-weight:600;background:#fff}
+  .hubcard:hover{background:#f4f6f9}
+  .hc-ic{display:block;font-size:26px;line-height:1.2}
+  .hc-t{display:block;font-size:16px;margin-top:6px}
+  .hc-d{display:block;font-size:12px;font-weight:400;color:#5b6472;margin-top:2px}
+  .hub-sm{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+  .hub-sm .hubcard{padding:12px 14px;font-size:14px}
+  @media (max-width:720px){ .hub{grid-template-columns:1fr 1fr;gap:10px} .hub-sm{grid-template-columns:1fr} }
+  </style>`;
   res.send(renderShell('Início', html));
 });
 

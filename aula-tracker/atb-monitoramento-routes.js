@@ -8,10 +8,19 @@
 // Reusa o NÚCLEO da triagem (montarContexto + avaliaCond) e o catálogo/HTML
 // (catalogoCampos/page/esc). Isolado por tenant: regra de um nunca vaza pro outro.
 //
-// Política de escrita por-regra (sobrescrever):
-//   false → grava IrAS só se estiver VAZIO (idempotente).
-//   true  → grava se vazio OU se o IrAS atual foi posto por uma REGRA
-//           (triagem/monitoramento); NUNCA sobrescreve entrada MANUAL do revisor.
+// Política de escrita por-regra, em duas dimensões independentes:
+//
+//   ORIGEM do IrAS atual (sobrescrever + sobrescrever_manual):
+//     'nao'   → grava só se estiver VAZIO (idempotente).
+//     'regra' → grava se vazio OU se o valor atual foi posto por uma REGRA;
+//               protege entrada MANUAL do revisor.
+//     'tudo'  → grava também por cima de entrada manual.
+//
+//   VALOR atual (sobrescrever_se): lista opcional de IrAS que a regra pode
+//     substituir. Vazia = qualquer um (conforme a origem acima). Serve para o
+//     caso real: "Sem dados" é marcador de pendência (aguardando hemocultura),
+//     não classificação — a regra pode resolvê-lo sem poder tocar num IrAS
+//     que o revisor de fato decidiu.
 
 import express from 'express';
 import { montarContexto, avaliaCond } from './atb-triagem-regras.js';
@@ -34,6 +43,8 @@ export async function ensureMonitoramentoSchema(pool) {
       created_at    TIMESTAMPTZ DEFAULT now(),
       updated_at    TIMESTAMPTZ DEFAULT now()
     )`);
+  await pool.query(`ALTER TABLE atb_monitoramento_regras ADD COLUMN IF NOT EXISTS sobrescrever_manual BOOLEAN DEFAULT false`);
+  await pool.query(`ALTER TABLE atb_monitoramento_regras ADD COLUMN IF NOT EXISTS sobrescrever_se JSONB`);
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS monitor_regra_id INTEGER`);
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS monitor_regra_at TIMESTAMPTZ`);
   await pool.query(`
@@ -50,10 +61,17 @@ export async function ensureMonitoramentoSchema(pool) {
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_monitor_log_ficha_idx ON atb_monitoramento_log(ficha_id, executado_em DESC)`);
 }
 
+// Restrição opcional por VALOR atual: se sobrescrever_se tiver itens, a regra só
+// substitui quando o IrAS atual está na lista. Lista vazia/nula = sem restrição.
+function _valorLiberado(regra, irasAtual) {
+  const lista = Array.isArray(regra.sobrescrever_se) ? regra.sobrescrever_se.filter(Boolean) : [];
+  return lista.length === 0 || lista.includes(irasAtual);
+}
+
 // Executor: reavalia as fichas do tenant dentro da janela e aplica as regras.
 export async function executarMonitoramento(pool, inst) {
   const regras = (await pool.query(
-    `SELECT id, nome, condicoes, acao_iras, acao_etiol, janela_dias, sobrescrever
+    `SELECT id, nome, condicoes, acao_iras, acao_etiol, janela_dias, sobrescrever, sobrescrever_manual, sobrescrever_se
        FROM atb_monitoramento_regras
       WHERE ativo=true AND instituicao=$1
       ORDER BY prioridade ASC, id ASC`, [inst]
@@ -99,7 +117,8 @@ export async function executarMonitoramento(pool, inst) {
       const postoPorRegra = !!(av && (av.triagem_regra_id != null || av.monitor_regra_id != null));
       const alvo = (regra.acao_iras || '').trim();
 
-      const podeEscrever = vazio || (regra.sobrescrever && postoPorRegra);
+      const origemOk = postoPorRegra || regra.sobrescrever_manual === true;
+      const podeEscrever = vazio || (regra.sobrescrever && origemOk && _valorLiberado(regra, irasAtual));
       if (!podeEscrever || irasAtual === alvo) continue;
 
       await pool.query(
@@ -127,6 +146,14 @@ export async function executarMonitoramento(pool, inst) {
 
 function _tenant(req) { return req.atbTenant || 'HUSF'; }
 
+function _pillSobrescrever(r) {
+  const se = Array.isArray(r.sobrescrever_se) ? r.sobrescrever_se.filter(Boolean) : [];
+  const restr = se.length ? ` <span class="nota">só se atual ∈ ${esc(se.join(', '))}</span>` : '';
+  if (!r.sobrescrever) return '<span class="pill off">só se vazio</span>';
+  if (r.sobrescrever_manual) return `<span class="pill on">sobrescreve tudo</span>${restr}`;
+  return `<span class="pill on">sobrescreve regra</span>${restr}`;
+}
+
 function resumoCondMon(cond) {
   if (!cond) return '—';
   const linhas = cond.all || cond.any || [];
@@ -146,7 +173,18 @@ function paginaEditorMonitor(regra, campos) {
         <div><label class="lbl">Prioridade</label><input id="r_prio" type="number" value="${regra?.prioridade ?? 100}" style="width:100px"></div>
         <div><label class="lbl">Ativa</label><br><select id="r_ativo"><option value="true"${regra && !regra.ativo ? '' : ' selected'}>Sim</option><option value="false"${regra && !regra.ativo ? ' selected' : ''}>Não</option></select></div>
         <div><label class="lbl">Janela (dias)</label><input id="r_janela" type="number" value="${regra?.janela_dias ?? 14}" style="width:100px"></div>
-        <div><label class="lbl">Sobrescrever</label><br><select id="r_sobrescrever"><option value="false"${regra && regra.sobrescrever ? '' : ' selected'}>Não (só se vazio)</option><option value="true"${regra && regra.sobrescrever ? ' selected' : ''}>Sim (reclassifica; protege manual)</option></select></div>
+        <div><label class="lbl">Sobrescrever</label><br><select id="r_sobrescrever">
+          <option value="nao">Não — só se estiver vazio</option>
+          <option value="regra">Sim — reclassifica regra, protege manual</option>
+          <option value="tudo">Sim — inclusive entrada manual</option>
+        </select></div>
+      </div>
+      <div id="r_se_wrap" style="margin-top:10px">
+        <label class="lbl">Só sobrescrever quando o IrAS atual for <span class="nota">(opcional — vazio = qualquer valor)</span></label><br>
+        <select id="r_sobrescrever_se" multiple size="6" style="min-width:260px">
+          ${IRAS_VALORES.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}
+        </select>
+        <p class="nota" style="margin-top:4px">Use quando o valor atual for um marcador de pendência (ex.: <strong>Sem dados</strong> = aguardando hemocultura). Assim a regra resolve a pendência sem tocar num IrAS que você decidiu.</p>
       </div>
     </div>
     <div class="card"><h2>Condições</h2>
@@ -231,12 +269,15 @@ function paginaEditorMonitor(regra, campos) {
       }
       function payload(){
         var ir=document.getElementById('a_iras').value, et=document.getElementById('a_etiol').value.trim();
+        var _sob=document.getElementById('r_sobrescrever').value;
         return { nome:document.getElementById('r_nome').value.trim(),
                  descricao:document.getElementById('r_desc').value.trim(),
                  prioridade:Number(document.getElementById('r_prio').value)||100,
                  ativo:document.getElementById('r_ativo').value==='true',
                  janela_dias:Number(document.getElementById('r_janela').value)||14,
-                 sobrescrever:document.getElementById('r_sobrescrever').value==='true',
+                 sobrescrever:_sob!=='nao',
+                 sobrescrever_manual:_sob==='tudo',
+                 sobrescrever_se:Array.prototype.filter.call(document.getElementById('r_sobrescrever_se').options,function(o){return o.selected;}).map(function(o){return o.value;}),
                  condicoes:coletarCond(), acao_iras:ir||null, acao_etiol:et||null }; }
       function salvar(){
         var p=payload(); if(!p.nome){ document.getElementById('msg').textContent='Dê um nome à regra.'; return; }
@@ -260,6 +301,11 @@ function paginaEditorMonitor(regra, campos) {
       document.getElementById('r_combinador').value = rc.all ? 'all' : (rc.any ? 'any' : 'all');
       var lista = rc.all || rc.any || [];
       if(lista.length){ lista.forEach(function(c){ addRow(c); }); } else { addRow(); }
+      if(D.regra){
+        document.getElementById('r_sobrescrever').value = D.regra.sobrescrever ? (D.regra.sobrescrever_manual ? 'tudo' : 'regra') : 'nao';
+        var _se = D.regra.sobrescrever_se || [];
+        if(_se.length) Array.prototype.forEach.call(document.getElementById('r_sobrescrever_se').options, function(o){ o.selected = _se.indexOf(o.value)!==-1; });
+      }
       if(D.regra){ if(D.regra.acao_iras) document.getElementById('a_iras').value=D.regra.acao_iras;
                    if(D.regra.acao_etiol) document.getElementById('a_etiol').value=D.regra.acao_etiol; }
     </script>`);
@@ -303,7 +349,7 @@ export function registerMonitoramentoRoutes(app, pool, adminRequired) {
           <td><strong>${esc(r.nome)}</strong>${r.descricao ? `<br><span class="nota">${esc(r.descricao)}</span>` : ''}</td>
           <td>${r.prioridade}</td>
           <td>${r.janela_dias}d</td>
-          <td>${r.sobrescrever ? '<span class="pill on">sobrescreve</span>' : '<span class="pill off">só se vazio</span>'}</td>
+          <td>${_pillSobrescrever(r)}</td>
           <td><span class="nota">${esc(resumoCondMon(r.condicoes))} → IrAS ${esc(r.acao_iras || '—')}</span></td>
           <td>${r.ativo ? '<span class="pill on">ativa</span>' : '<span class="pill off">inativa</span>'}</td>
           <td class="row">
@@ -345,19 +391,23 @@ export function registerMonitoramentoRoutes(app, pool, adminRequired) {
     try {
       const b = req.body || {};
       if (!b.nome || !b.condicoes) return res.status(400).json({ ok: false, error: 'nome e condições obrigatórios' });
+      const _se = Array.isArray(b.sobrescrever_se) ? b.sobrescrever_se.filter(Boolean) : [];
       const vals = [inst, b.nome, b.descricao || null, Number(b.prioridade) || 100, b.ativo !== false,
         JSON.stringify(b.condicoes), b.acao_iras || null, b.acao_etiol || null,
-        Number(b.janela_dias) || 14, b.sobrescrever === true];
+        Number(b.janela_dias) || 14, b.sobrescrever === true,
+        b.sobrescrever_manual === true, _se.length ? JSON.stringify(_se) : null];
       if (id) {
         await pool.query(
           `UPDATE atb_monitoramento_regras SET nome=$2, descricao=$3, prioridade=$4, ativo=$5,
-             condicoes=$6::jsonb, acao_iras=$7, acao_etiol=$8, janela_dias=$9, sobrescrever=$10, updated_at=now()
-           WHERE id=$1 AND instituicao=$11`, [id, ...vals.slice(1), inst]);
+             condicoes=$6::jsonb, acao_iras=$7, acao_etiol=$8, janela_dias=$9, sobrescrever=$10,
+             sobrescrever_manual=$11, sobrescrever_se=$12::jsonb, updated_at=now()
+           WHERE id=$1 AND instituicao=$13`, [id, ...vals.slice(1), inst]);
       } else {
         await pool.query(
           `INSERT INTO atb_monitoramento_regras
-             (instituicao, nome, descricao, prioridade, ativo, condicoes, acao_iras, acao_etiol, janela_dias, sobrescrever)
-           VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)`, vals);
+             (instituicao, nome, descricao, prioridade, ativo, condicoes, acao_iras, acao_etiol, janela_dias,
+              sobrescrever, sobrescrever_manual, sobrescrever_se)
+           VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb)`, vals);
       }
       res.json({ ok: true });
     } catch (e) { console.error('[monitor] salvar:', e.message); res.status(500).json({ ok: false, error: e.message }); }

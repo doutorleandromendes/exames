@@ -267,13 +267,27 @@ export function registerHealthcheckRoutes(app, pool, adminRequired) {
           `<th style="padding:6px 10px">Caso</th><th style="padding:6px 10px">Condicao</th><th style="padding:6px 10px">Problema</th>` +
           `</tr></thead><tbody>${linhas}</tbody></table>`
         : `<p style="color:#1a8a52;font-size:13px;margin-top:8px">Todos os testes passaram.</p>`;
+      // Fuso do PROCESSO (env var TZ no Render). Detector de drift: se a env var
+      // sumir num redeploy, dias_uti/idade voltam a errar +1 dia nas fichas enviadas
+      // apos as 21h e as datas exibidas pulam de dia — tudo em silencio. Esta linha
+      // e o aviso. Data/hora sem timeZone de proposito: mostra o que o app enxerga.
+      const _tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '(indefinido)';
+      const _tzOk = _tz === 'America/Sao_Paulo';
+      const _agora = new Date().toLocaleString('pt-BR');
+      const tzLinha =
+        `<div style="margin-top:12px;padding:9px 12px;border-radius:8px;font-size:13px;` +
+        `border:1px solid ${_tzOk ? '#dbe9de' : '#f3c2c2'};background:${_tzOk ? '#f6faf7' : '#fff4f4'};` +
+        `color:${_tzOk ? '#1a8a52' : '#a4282b'}">` +
+        `${_tzOk ? '&#10003;' : '&#9888;'} Fuso do processo: <strong>${esc(_tz)}</strong> &middot; agora: ${esc(_agora)}` +
+        `${_tzOk ? '' : ' &mdash; esperado <strong>America/Sao_Paulo</strong>. Com outro fuso, dias_uti/dias_internacao/idade saem com +1 dia nas fichas enviadas apos as 21h, e as datas exibidas pulam de dia. Confira a env var <strong>TZ</strong> no Render.'}` +
+        `</div>`;
       res.send(`<!doctype html><html lang="pt-br"><head><meta charset="utf-8">` +
         `<meta name="viewport" content="width=device-width,initial-scale=1"><title>Saude do sistema</title></head>` +
         `<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:24px auto;padding:0 16px;color:#202124">` +
         `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px">` +
         `<h1 style="font-size:18px;margin:0">Saude do sistema</h1>` +
         `<a href="/atb/admin/healthcheck/painel?run=1" style="font-size:13px;padding:7px 12px;border:1px solid #d0d3d9;border-radius:8px;text-decoration:none;color:#1a73e8;background:#f8fafe">&#8635; Rodar verificacao agora</a>` +
-        `</div>${renderHealthCard(hc)}${tabela}` +
+        `</div>${tzLinha}${renderHealthCard(hc)}${tabela}` +
         `<p style="margin-top:18px"><a href="/scih" style="font-size:13px;color:#5f6368">&#8592; Voltar ao Portal do SCIH</a></p>` +
         `</body></html>`);
     } catch (e) { res.status(500).send('Erro: ' + e.message); }

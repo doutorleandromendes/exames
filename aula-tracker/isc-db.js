@@ -149,6 +149,10 @@ export async function runIscMigrations(pool) {
     ['isc_criterios', `JSONB DEFAULT '[]'`],
     // DDD deduzido da cidade no import — a agenda pede confirmação antes do envio.
     ['telefone_presumido', 'BOOLEAN DEFAULT false'],
+    // Nº da cirurgia no Tasy (col A do Relação das Cirurgias). Único e estável
+    // por cirurgia — melhor chave de deduplicação que atendimento+data, que
+    // quebra quando a cirurgia é remarcada.
+    ['cirurgia_id', 'TEXT'],
   ];
   for (const [col, tipo] of colsExtras) {
     await pool.query(`ALTER TABLE isc_fichas ADD COLUMN IF NOT EXISTS ${col} ${tipo}`);
@@ -163,11 +167,17 @@ export async function runIscMigrations(pool) {
   // STABLE, não IMMUTABLE, e o Postgres recusa o índice de expressão. O filtro
   // "mês da cirurgia" do grid é resolvido por RANGE (>= 1º do mês, < 1º do mês
   // seguinte), que é sargável e usa o btree de data_cirurgia acima.
-  // Anti-duplicata: mesmo atendimento + mesma data de cirurgia = mesma ficha.
+  // Anti-duplicata (fallback): mesmo atendimento + mesma data = mesma ficha.
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS isc_fichas_unica_idx
       ON isc_fichas (instituicao_id, atendimento, data_cirurgia)
      WHERE atendimento IS NOT NULL AND atendimento <> ''
+  `);
+  // Anti-duplicata (preferencial): o nº da cirurgia do Tasy.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS isc_fichas_cirurgia_idx
+      ON isc_fichas (instituicao_id, cirurgia_id)
+     WHERE cirurgia_id IS NOT NULL AND cirurgia_id <> ''
   `);
 
   // ── Contatos ──────────────────────────────────────────────────────────────
@@ -364,6 +374,22 @@ export async function runIscMigrations(pool) {
     UPDATE isc_equipes e SET codigo_cve = r.codigo_cve
       FROM isc_triagem_regras r
      WHERE r.equipe_id = e.id AND r.codigo_cve IS NOT NULL AND e.codigo_cve IS NULL`);
+
+  // Perfil semeado do Tasy_Rel (mapeamento conferido coluna a coluna pelo SCIH).
+  // Os índices são da PLANILHA, não do rótulo: no layout de impressão o título
+  // fica na coluna errada — "Data Inicio" está na K, a data na I.
+  //   A=0 nº cirurgia · D=3 atend · F=5 procedimento · G=6 endereço+fone
+  //   I=8 data · N=13 duração · O=14 paciente · X=23 cirurgião · AA=26 anestesia
+  await pool.query(`
+    INSERT INTO isc_import_perfis (instituicao_id, nome, mapeamento, delim)
+    SELECT i.id, 'Tasy_Rel — Relação das Cirurgias', $1::jsonb, E'\t'
+      FROM atb_instituicoes i WHERE i.sigla = 'HUSF'
+    ON CONFLICT (instituicao_id, nome) DO NOTHING
+  `, [JSON.stringify({
+    0: 'cirurgia_id', 3: 'atendimento', 5: 'procedimento', 6: 'contato_blob',
+    8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome',
+    23: 'cirurgiao', 26: 'tipo_anestesia',
+  })]);
 
   await pool.query(`ALTER TABLE isc_fichas ADD COLUMN IF NOT EXISTS import_lote_id INTEGER REFERENCES isc_import_lotes(id) ON DELETE SET NULL`);
   await pool.query(`CREATE INDEX IF NOT EXISTS isc_fichas_lote_idx ON isc_fichas (import_lote_id)`);

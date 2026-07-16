@@ -12,6 +12,7 @@ import { renderShell } from './ui-shell.js';
 import {
   detectaDelimitador, partirLinha, parseTabular, parseDataFlexivel,
   parseBoolFlexivel, parsePotencial, parseAsa, adivinhaMapeamento, montarPrevia,
+  chaveDedup,
 } from './isc-import.js';
 import { addDays, hojeISO } from './isc-core.js';
 
@@ -128,12 +129,45 @@ t('equipe desconhecida preserva texto', porNome('PEDRO')?.ficha.especialidade ==
 t('equipe desconhecida avisa', porNome('PEDRO')?.avisos.some(a => /não cadastrada/.test(a)));
 
 console.log('\n── Dedup contra o banco ──');
-const prev2 = montarPrevia(linhas, mapa, equipes, new Set([`A100|${D}`]));
+// A chave agora é prefixada (`at:` vs `cir:`) — usa chaveDedup em vez de montar à mão.
+const prev2 = montarPrevia(linhas, mapa, equipes, new Set([chaveDedup({ atendimento: 'A100', data_cirurgia: D })]));
 eq('ficha já existente vira duplicada', prev2.resumo.novas, 3);
 eq('duplicadas sobem p/ 2', prev2.resumo.duplicadas, 2);
 
 // Daqui em diante, sem_triagem=1: este harness cobre parsing, dedup, lote e
 // isolamento — o recorte clínico tem harness próprio (harness-isc-triagem).
+console.log('\n── chaveDedup: nº da cirurgia tem prioridade ──');
+eq('sem nº → atendimento+data', chaveDedup({ atendimento: 'A1', data_cirurgia: '2026-07-13' }), 'at:A1|2026-07-13');
+eq('com nº → o nº manda', chaveDedup({ cirurgia_id: '286711', atendimento: 'A1', data_cirurgia: '2026-07-13' }), 'cir:286711');
+// O ganho: cirurgia remarcada muda a data, mas não o nº → não vira ficha nova.
+eq('remarcada mantém a mesma chave', chaveDedup({ cirurgia_id: '286711', data_cirurgia: '2026-07-20' }), 'cir:286711');
+t('sem nada → sem chave', chaveDedup({ paciente_nome: 'X' }) === null);
+
+console.log('\n── Palpite: as armadilhas de substring ──');
+// "contaMINacao" contém "min" — a versão frouxa mapeava Min → potencial_contaminacao.
+t('"Min" NÃO vira potencial_contaminacao', adivinhaMapeamento(['Min'])[0] !== 'potencial_contaminacao');
+// No Tasy_Rel, "Cirurgia" é o nº da cirurgia — não a descrição do procedimento.
+t('"Cirurgia" NÃO vira procedimento', adivinhaMapeamento(['Cirurgia'])[0] !== 'procedimento');
+t('"CID" não vira nada', adivinhaMapeamento(['CID'])[0] === undefined);
+// O que tem de continuar funcionando:
+eq('"Atend" ainda vira atendimento', adivinhaMapeamento(['Atend'])[0], 'atendimento');
+eq('"Procedimento Principal" ainda casa', adivinhaMapeamento(['Procedimento Principal'])[0], 'procedimento');
+eq('"Data da Cirurgia" ainda casa', adivinhaMapeamento(['Data da Cirurgia'])[0], 'data_cirurgia');
+eq('"Paciente" ainda casa', adivinhaMapeamento(['Paciente'])[0], 'paciente_nome');
+
+console.log('\n── Refino por valor: o rótulo mente, o dado não ──');
+// Rótulo errado de propósito: no Tasy_Rel o rótulo mais próximo da data é "CID".
+const linhasV = [
+  ['286711', '13/07/2026 02:00', 'Rua A Itatiba SP 13250000 Fone: 1146039995 Celular: 968650910', 'Leonardo Soares de Pugas'],
+  ['286715', '13/07/2026 07:55', 'Rua B Itatiba SP 13250000 Fone:  Celular: 997651317', 'Anthony Moreira Lima'],
+  ['286721', '13/07/2026 08:00', 'Rua C Itatiba SP 13250000 Fone:  Celular: 964154403', 'Amanda Dorneles Barros'],
+];
+const mv = adivinhaMapeamento(['Cirurgia', 'CID', 'CID', 'Paciente'], linhasV);
+eq('acha a data pela CARA do dado, apesar do rótulo "CID"', mv[1], 'data_cirurgia');
+eq('acha o bloco de contato por "Fone:/Celular:"', mv[2], 'contato_blob');
+eq('paciente pelo rótulo', mv[3], 'paciente_nome');
+t('sem as linhas, a data não é achada (só o rótulo mente)', adivinhaMapeamento(['Cirurgia', 'CID', 'CID', 'Paciente'])[1] === undefined);
+
 console.log('\n── E2E: gravar / desfazer ──');
 const app = express();
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));

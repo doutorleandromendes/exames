@@ -20,6 +20,7 @@ import { triar } from './isc-triagem.js';
 // obrigatorio: sem ele a linha é erro. chave: participa da dedup.
 export const CAMPOS_IMPORTAVEIS = [
   { key: 'paciente_nome',  label: 'Nome do paciente',      obrigatorio: true },
+  { key: 'cirurgia_id',    label: 'Nº da cirurgia (Tasy)' },
   { key: 'data_cirurgia',  label: 'Data da cirurgia',      obrigatorio: true, chave: true, tipo: 'data' },
   { key: 'atendimento',    label: 'Atendimento',           chave: true },
   { key: 'prontuario',     label: 'Prontuário' },
@@ -257,11 +258,11 @@ export function resolveTelefone({ fone, celular, cidade }, ddds = DDD_CIDADES) {
 const SINONIMOS = {
   paciente_nome:  ['paciente', 'nome', 'nomepaciente', 'nomedopaciente', 'pacientenome'],
   data_cirurgia:  ['datacirurgia', 'datadacirurgia', 'data', 'datacir', 'dtcirurgia', 'dataprocedimento', 'datadoprocedimento', 'dtcir', 'datahora', 'datahorario'],
-  atendimento:    ['atendimento', 'nratendimento', 'natendimento', 'numeroatendimento', 'codatendimento', 'internacao'],
+  atendimento:    ['atendimento', 'atend', 'nratendimento', 'natendimento', 'numeroatendimento', 'codatendimento', 'internacao'],
   prontuario:     ['prontuario', 'pront', 'nrprontuario', 'numeroprontuario', 'registro', 'matricula'],
   paciente_dn:    ['datanascimento', 'dtnascimento', 'nascimento', 'dn', 'datadenascimento'],
   telefone:       ['telefone', 'fone', 'celular', 'whatsapp', 'zap', 'contato', 'tel'],
-  procedimento:   ['procedimento', 'cirurgia', 'proc', 'descricao', 'procedimentorealizado', 'descricaoprocedimento'],
+  procedimento:   ['procedimento', 'proc', 'descricao', 'procedimentorealizado', 'descricaoprocedimento', 'procedimentoprincipal'],
   cirurgiao:      ['cirurgiao', 'medico', 'responsavel', 'medicoresponsavel', 'profissional', 'executante'],
   equipe:         ['equipe', 'especialidade', 'clinica', 'setor', 'servico'],
   data_alta:      ['dataalta', 'dtalta', 'alta', 'datadealta'],
@@ -279,10 +280,16 @@ const SINONIMOS = {
 
 // Devolve { indiceDaColuna: 'campo' }. Cada campo é usado no máximo 1x:
 // vence o match exato; parcial só entra se o campo ainda estiver livre.
-export function adivinhaMapeamento(header) {
+//
+// PARCIAL É ESTRITO DE PROPÓSITO. A versão frouxa (`c.includes(s) || s.includes(c)`)
+// mapeou "Min" → potencial_contaminacao, porque "contaMINacao" contém "min" —
+// a mesma doença do `raque` casando em TRAQUEOSTOMIA. Agora exige ≥4 caracteres
+// e que o sinônimo COMECE com o nome da coluna ("atendimento".startsWith("atend")),
+// nunca o contrário ("datacirurgia".startsWith("cirurgia") é falso → bom).
+export function adivinhaMapeamento(header, linhas = null) {
   const mapa = {};
   const usados = new Set();
-  const cols = header.map(norm);
+  const cols = (header || []).map(norm);
 
   for (const [campo, syns] of Object.entries(SINONIMOS)) {
     const i = cols.findIndex((c, idx) => c && syns.includes(c) && !(idx in mapa));
@@ -290,8 +297,50 @@ export function adivinhaMapeamento(header) {
   }
   for (const [campo, syns] of Object.entries(SINONIMOS)) {
     if (usados.has(campo)) continue;
-    const i = cols.findIndex((c, idx) => c && !(idx in mapa) && syns.some(s => c.includes(s) || s.includes(c)));
+    const i = cols.findIndex((c, idx) => c && c.length >= 4 && !(idx in mapa) &&
+      syns.some(s => s.length >= 4 && (c.includes(s) || s.startsWith(c))));
     if (i >= 0) { mapa[i] = campo; usados.add(campo); }
+  }
+  if (linhas && linhas.length) refinaPorValor(mapa, usados, linhas);
+  return mapa;
+}
+
+// Em relatório de impressão o rótulo mente (fica na coluna errada), mas o VALOR
+// não. Quando o campo obrigatório não foi encontrado pelo nome, procura pela
+// cara do dado. É isto que salva a data: o rótulo mais próximo da coluna da data
+// no Tasy_Rel é "CID".
+export function refinaPorValor(mapa, usados, linhas) {
+  const amostra = linhas.slice(0, 40);
+  const fracao = (col, teste) => {
+    const vals = amostra.map(l => String(l[col] ?? '').trim()).filter(Boolean);
+    if (vals.length < 3) return 0;
+    return vals.filter(teste).length / vals.length;
+  };
+  const largura = Math.max(...amostra.map(l => l.length));
+  const livre = c => !(c in mapa);
+
+  // data_cirurgia: ≥80% das células parseáveis como data.
+  if (!usados.has('data_cirurgia')) {
+    for (let c = 0; c < largura; c++) {
+      if (!livre(c)) continue;
+      if (fracao(c, v => !!parseDataFlexivel(v)) >= 0.8) { mapa[c] = 'data_cirurgia'; usados.add('data_cirurgia'); break; }
+    }
+  }
+  // contato_blob: o bloco do Tasy é inconfundível ("Fone:" / "Celular:").
+  if (!usados.has('contato_blob')) {
+    for (let c = 0; c < largura; c++) {
+      if (!livre(c)) continue;
+      if (fracao(c, v => /Fone:|Celular:/i.test(v)) >= 0.8) { mapa[c] = 'contato_blob'; usados.add('contato_blob'); break; }
+    }
+  }
+  // paciente_nome: texto com ≥2 palavras, sem dígito.
+  if (!usados.has('paciente_nome')) {
+    for (let c = 0; c < largura; c++) {
+      if (!livre(c)) continue;
+      if (fracao(c, v => !/\d/.test(v) && v.split(/\s+/).length >= 2 && v.length >= 8) >= 0.8) {
+        mapa[c] = 'paciente_nome'; usados.add('paciente_nome'); break;
+      }
+    }
   }
   return mapa;
 }
@@ -402,11 +451,15 @@ export function normalizaLinha(colunas, mapa, equipes = []) {
 // existentes: Set de chaves "atendimento|data_cirurgia" já no banco.
 // Classifica cada linha e detecta duplicata DENTRO do próprio arquivo também
 // (mapa cirúrgico repete linha quando a cirurgia é remarcada).
+// Prefere o nº da cirurgia: é único e NÃO muda quando a cirurgia é remarcada.
+// atendimento+data é o fallback para planilhas que não trazem o nº.
 export function chaveDedup(ficha) {
+  const cir = String(ficha?.cirurgia_id ?? '').trim();
+  if (cir) return `cir:${cir}`;
   const at = String(ficha?.atendimento ?? '').trim();
   const dt = toISODate(ficha?.data_cirurgia);
   if (!at || !dt) return null;
-  return `${at}|${dt}`;
+  return `at:${at}|${dt}`;
 }
 
 // regras: quando fornecidas, filtram o que entra na vigilância. Sem regras

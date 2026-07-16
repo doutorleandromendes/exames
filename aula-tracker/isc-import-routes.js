@@ -84,12 +84,18 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   }
 
   // Chaves atendimento|data já existentes, para a prévia marcar duplicata.
+  // Guarda as DUAS formas de chave: a ficha antiga pode ter entrado sem o nº da
+  // cirurgia (cadastro manual), a nova vem com ele.
   async function chavesExistentes(instId) {
     const { rows } = await pool.query(
-      `SELECT atendimento, data_cirurgia FROM isc_fichas
-        WHERE atendimento IS NOT NULL AND atendimento <> ''
-          AND ($1::int IS NULL OR instituicao_id = $1)`, [instId]);
-    return new Set(rows.map(r => `${String(r.atendimento).trim()}|${toISODate(r.data_cirurgia)}`));
+      `SELECT cirurgia_id, atendimento, data_cirurgia FROM isc_fichas
+        WHERE ($1::int IS NULL OR instituicao_id = $1)`, [instId]);
+    const s = new Set();
+    for (const r of rows) {
+      if (r.cirurgia_id) s.add(`cir:${String(r.cirurgia_id).trim()}`);
+      if (r.atendimento) s.add(`at:${String(r.atendimento).trim()}|${toISODate(r.data_cirurgia)}`);
+    }
+    return s;
   }
 
   function chrome(sigla, titulo, sub) {
@@ -251,7 +257,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           [Number(b.perfil_id), instId]);
         if (rows[0]) mapa = rows[0].mapeamento;
       }
-      if (!mapa) mapa = adivinhaMapeamento(header);
+      if (!mapa) mapa = adivinhaMapeamento(header, linhas);
 
       const equipes = await equipesDe(instId);
       const existentes = await chavesExistentes(instId);
@@ -382,7 +388,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       const norm = normalizaAoA(ent.aoa, modo);
       const linhas = norm.linhas;
       let mapa = {};
-      try { mapa = JSON.parse(b.mapa_json || '{}'); } catch { mapa = adivinhaMapeamento(norm.rotulos); }
+      try { mapa = JSON.parse(b.mapa_json || '{}'); } catch { mapa = adivinhaMapeamento(norm.rotulos, norm.linhas); }
 
       const equipes = await equipesDe(instId);
       const existentes = await chavesExistentes(instId);
@@ -412,8 +418,9 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
                (instituicao_id, paciente_nome, paciente_iniciais, paciente_dn, prontuario, atendimento,
                 telefone, telefone_raw, contato_alternativo, equipe_id, especialidade, procedimento,
                 cirurgiao, data_cirurgia, data_alta, implante, potencial_contaminacao, duracao_min,
-                asa, antibioticoprofilaxia, janelas, observacao, telefone_presumido, origem, import_lote_id)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'import',$24)
+                asa, antibioticoprofilaxia, janelas, observacao, telefone_presumido, cirurgia_id,
+                origem, import_lote_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,'import',$25)
              RETURNING id`,
             [instId, f.paciente_nome || null, f.paciente_iniciais || null, f.paciente_dn || null,
              f.prontuario || null, f.atendimento || null, f.telefone || null, f.telefone_raw || null,
@@ -421,7 +428,8 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
              f.procedimento || null, f.cirurgiao || null, f.data_cirurgia, f.data_alta || null,
              f.implante === true, f.potencial_contaminacao || null, f.duracao_min ?? null,
              f.asa || null, f.antibioticoprofilaxia || null, JSON.stringify(janelas),
-             f.observacao || null, f.telefone_presumido === true, lote.id]);
+             f.observacao || null, f.telefone_presumido === true,
+             f.cirurgia_id ? String(f.cirurgia_id) : null, lote.id]);
           ids.push(rows[0].id);
           criadas++;
         } catch (e) {

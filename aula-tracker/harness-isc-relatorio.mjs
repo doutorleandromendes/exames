@@ -12,7 +12,7 @@ import * as XLSX from 'xlsx';
 import {
   normalizaAoA, normalizaRelatorio, normalizaPlano, detectaAncora, detectaLayout,
 } from './isc-import-relatorio.js';
-import { adivinhaMapeamento, montarPrevia, parseContato, resolveTelefone } from './isc-import.js';
+import { adivinhaMapeamento, montarPrevia, parseContato, resolveTelefone, chaveDedup } from './isc-import.js';
 
 let ok = 0, fail = 0;
 const t = (n, c, x = '') => { if (c) { ok++; console.log('  ✓', n); } else { fail++; console.log('  ✗ FALHOU:', n, x); } };
@@ -193,6 +193,18 @@ if (fs.existsSync(REAL_FONE)) {
   const m2 = { 14: 'paciente_nome', 3: 'atendimento', 8: 'data_cirurgia', 5: 'procedimento', 13: 'duracao_min', 23: 'cirurgiao', 6: 'contato_blob' };
   const p2 = montarPrevia(r2.linhas, m2, [], new Set());
   eq('67 fichas, 0 erro', [p2.resumo.novas, p2.resumo.erros], [67, 0]);
+  // Mapeamento CONFERIDO pelo SCIH, coluna a coluna (é o perfil semeado).
+  console.log('  — perfil Tasy_Rel (mapeamento conferido) —');
+  const PERFIL = { 0: 'cirurgia_id', 3: 'atendimento', 5: 'procedimento', 6: 'contato_blob',
+                   8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome',
+                   23: 'cirurgiao', 26: 'tipo_anestesia' };
+  const pp = montarPrevia(r2.linhas, PERFIL, [], new Set());
+  eq('67 fichas, 0 erro com o perfil', [pp.resumo.novas, pp.resumo.erros], [67, 0]);
+  t('nº da cirurgia capturado', pp.itens[0].ficha.cirurgia_id === '286711', pp.itens[0].ficha.cirurgia_id);
+  t('67 nº de cirurgia distintos', new Set(pp.itens.map(i => i.ficha.cirurgia_id)).size === 67);
+  t('duração capturada', pp.itens[0].ficha.duracao_min === 125, String(pp.itens[0].ficha.duracao_min));
+  t('dedup usa o nº da cirurgia', pp.itens.every(i => /^cir:/.test(chaveDedup(i.ficha) || '')));
+
   const comTel = p2.itens.filter(i => i.ficha.telefone).length;
   t(`${comTel}/67 com telefone resolvido`, comTel >= 60, `só ${comTel}`);
   t('todo telefone presumido está MARCADO', p2.itens.every(i => !i.ficha.telefone_presumido || !!i.ficha.telefone));

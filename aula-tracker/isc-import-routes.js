@@ -18,7 +18,7 @@ import {
   CAMPOS_IMPORTAVEIS, parseTabular, adivinhaMapeamento, montarPrevia,
   chaveDedup, detectaDelimitador,
 } from './isc-import.js';
-import { toISODate, janelasDe, recomputarEstado } from './isc-core.js';
+import { toISODate, dataBR, janelasDe, recomputarEstado } from './isc-core.js';
 import { normalizaAoA } from './isc-import-relatorio.js';
 
 function safe(s) {
@@ -171,7 +171,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
 
       const histo = lotes.map(l => `<tr>
         <td>${l.id}</td>
-        <td>${toISODate(l.created_at)}</td>
+        <td>${dataBR(l.created_at)}</td>
         <td>${safe(l.arquivo_nome || '—')}</td>
         <td>${l.criadas} criadas · ${l.ignoradas} ignoradas</td>
         <td>${l.vivas} no grid</td>
@@ -303,7 +303,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <td><span class="pill" style="background:${bg};color:${fg}">${tx}</span></td>
           <td>${safe(it.ficha.paciente_nome || '—')}</td>
           <td>${safe(it.ficha.atendimento || '—')}</td>
-          <td>${safe(it.ficha.data_cirurgia || '—')}</td>
+          <td>${safe(dataBR(it.ficha.data_cirurgia) || '—')}</td>
           <td>${safe(it.ficha.procedimento || '—')}</td>
           <td>${msgs || '<span class="sub">ok</span>'}</td>
         </tr>`;

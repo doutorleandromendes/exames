@@ -119,6 +119,20 @@ export function diffDias(isoA, isoB) {
 
 export function hojeISO() { return new Date().toISOString().slice(0, 10); }
 
+// ── Exibição de data ──────────────────────────────────────────────────────
+// DD-MM-AAAA: é como o SCIH lê data. Só para TELA.
+//
+// ⚠️ NUNCA usar no value de <input type="date">: o HTML exige AAAA-MM-DD e o
+// campo fica VAZIO em silêncio se receber outro formato — o usuário abre o
+// form de edição e acha que a data sumiu. Ali continua toISODate().
+// Idem para <input type="month"> (AAAA-MM) e para valor que vai para o banco.
+export function dataBR(d) {
+  const iso = toISODate(d);
+  if (!iso) return '';
+  const [y, m, dd] = iso.split('-');
+  return `${dd}-${m}-${y}`;
+}
+
 // ── Telefone ──────────────────────────────────────────────────────────────
 // Normaliza para E.164 brasileiro (55 + DDD + número). Devolve null se não der.
 // Guardamos o cru também (telefone_raw): nunca perder o que a pessoa digitou.
@@ -268,7 +282,9 @@ export function primeiroNome(nome) {
   return n.split(/\s+/)[0].replace(/^(.)(.*)$/, (_, a, b) => a.toUpperCase() + b.toLowerCase());
 }
 
-function dataBR(iso) {
+// Exibição em prosa, para a MENSAGEM DO PACIENTE: "sua cirurgia (01/07/2026)".
+// Barra é a forma natural em texto corrido — a tela usa hífen (dataBR).
+function dataBarra(iso) {
   const d = toISODate(iso);
   if (!d) return '';
   const [y, m, dd] = d.split('-');
@@ -283,7 +299,7 @@ export function renderTemplate(corpo, ctx) {
     primeiro_nome:  primeiroNome(ctx?.paciente_nome || ''),
     iniciais:       ctx?.paciente_iniciais || '',
     procedimento:   ctx?.procedimento || 'sua cirurgia',
-    data_cirurgia:  dataBR(ctx?.data_cirurgia),
+    data_cirurgia:  dataBarra(ctx?.data_cirurgia),
     dias_pos_op:    ctx?.dias_pos_op != null ? String(ctx.dias_pos_op) : '',
     equipe:         ctx?.equipe || ctx?.especialidade || 'equipe cirúrgica',
     hospital:       ctx?.hospital || '',

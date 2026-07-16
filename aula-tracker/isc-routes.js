@@ -28,7 +28,7 @@ import {
   CHECKLIST, RECOMENDACOES, MOTIVOS_INSUCESSO, CANAIS, ISC_TIPOS,
   ISC_CLASSIFICACOES, ISC_CRITERIOS, POTENCIAL_CONTAMINACAO, STATUS_VIGILANCIA,
   PLACEHOLDERS, recomputarEstado, normalizaTelefone, formataTelefone,
-  linkWhatsApp, renderTemplate, toISODate, addDays, diffDias, hojeISO,
+  linkWhatsApp, renderTemplate, toISODate, dataBR, addDays, diffDias, hojeISO,
   boolDe, enumDe, extraiRespostas, janelasDe, contatoTemAlerta,
 } from './isc-core.js';
 
@@ -321,7 +321,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         const badges = janelas.map(d => {
           const e = est[String(d)] || {};
           const [bg, fg, ic] = BADGE_JANELA[e.status] || BADGE_JANELA.pendente;
-          const tt = `${d}d · ${e.status || 'pendente'}${e.data_prevista ? ' · previsto ' + e.data_prevista : ''}${e.data_contato ? ' · contato ' + e.data_contato : ''}`;
+          const tt = `${d}d · ${e.status || 'pendente'}${e.data_prevista ? ' · previsto ' + dataBR(e.data_prevista) : ''}${e.data_contato ? ' · contato ' + dataBR(e.data_contato) : ''}`;
           return `<span class="jb" style="background:${bg};color:${fg}" title="${safe(tt)}">${d}d ${ic}</span>`;
         }).join('');
 
@@ -337,7 +337,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         const prox = f.status_vigilancia !== 'em_vigilancia'
           ? `<span class="sub">${safe(STATUS_LABEL[f.status_vigilancia] || '')}</span>`
           : f.proximo_contato_em
-            ? `<span style="${atraso > 0 ? 'color:#c0392b;font-weight:600' : ''}">${toISODate(f.proximo_contato_em)}${atraso > 0 ? ` (+${atraso}d)` : ''}</span><br><span class="sub">janela ${f.proxima_janela}d</span>`
+            ? `<span style="${atraso > 0 ? 'color:#c0392b;font-weight:600' : ''}">${dataBR(f.proximo_contato_em)}${atraso > 0 ? ` (+${atraso}d)` : ''}</span><br><span class="sub">janela ${f.proxima_janela}d</span>`
             : '—';
 
         const dpo = diffDias(toISODate(f.data_cirurgia), hoje);
@@ -350,13 +350,13 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           </td>
           <td>${safe(f.equipe_sigla || f.especialidade || '—')}</td>
           <td style="white-space:normal;max-width:220px">${safe(f.procedimento || '—')}${f.implante ? ' <span class="pill" style="background:#eef2ff;color:#4c51bf">implante</span>' : ''}</td>
-          <td>${toISODate(f.data_cirurgia) || '—'}<br><span class="sub">${dpo != null ? dpo + ' DPO' : ''}</span></td>
+          <td>${dataBR(f.data_cirurgia) || '—'}<br><span class="sub">${dpo != null ? dpo + ' DPO' : ''}</span></td>
           <td>${badges || '—'}</td>
           <td>${prox}</td>
           <td style="text-align:center">${f.tem_alerta ? '<span title="Alerta na triagem do contato">🔺</span>' : ''}${f.suspeita_isc ? ' <span title="Suspeita marcada pela colaboradora">👁</span>' : ''}</td>
           <td class="grp"><span class="pill" style="background:${clCor[0]};color:${clCor[1]}">${safe(clTxt)}</span></td>
           <td class="grp">${safe(TIPO_LABEL[f.isc_tipo] || '—')}</td>
-          <td class="grp">${toISODate(f.isc_data_diagnostico) || '—'}</td>
+          <td class="grp">${dataBR(f.isc_data_diagnostico) || '—'}</td>
           <td class="grp">${safe(f.isc_patogeno || '—')}</td>
           <td style="text-align:center">${f.telefone ? `<a href="${linkWhatsApp(f.telefone, '')}" target="_blank" rel="noopener" title="${safe(formataTelefone(f.telefone))}">📱</a>` : ''}</td>
         </tr>`;
@@ -478,7 +478,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
               <span class="pill" style="background:${atraso > 0 ? '#fdecea' : '#e8f0fe'};color:${atraso > 0 ? '#c0392b' : '#1a73e8'};margin-left:8px">janela ${dias}d${atraso > 0 ? ` · atrasado ${atraso}d` : atraso === 0 ? ' · hoje' : ` · em ${-atraso}d`}</span>
               ${tent > 0 ? `<span class="pill" style="background:#fff4e5;color:#b06000;margin-left:6px">${tent} tentativa${tent > 1 ? 's' : ''} sem sucesso</span>` : ''}
               ${f.telefone_presumido ? `<span class="pill" style="background:#fdecea;color:#c0392b;margin-left:6px" title="O DDD foi deduzido da cidade no import. Confirme o número antes de enviar: mensagem para o número errado revela a cirurgia a terceiros.">⚠ DDD presumido — confira</span>` : ''}
-              <div class="sub" style="margin-top:4px">${safe(f.procedimento || '')} · ${safe(f.equipe_nome || '')} · cirurgia ${toISODate(f.data_cirurgia)} (${dpo} DPO) · ${f.telefone ? safe(formataTelefone(f.telefone)) : '<span style="color:#c0392b">sem telefone</span>'}</div>
+              <div class="sub" style="margin-top:4px">${safe(f.procedimento || '')} · ${safe(f.equipe_nome || '')} · cirurgia ${dataBR(f.data_cirurgia)} (${dpo} DPO) · ${f.telefone ? safe(formataTelefone(f.telefone)) : '<span style="color:#c0392b">sem telefone</span>'}</div>
             </div>
             <div style="display:flex;gap:8px">
               ${wa ? `<a class="btn" style="text-decoration:none;background:#25D366" href="${wa}" target="_blank" rel="noopener">Abrir WhatsApp</a>` : ''}
@@ -644,7 +644,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           ? `<div style="margin-top:6px;font-size:12px"><span style="color:#5f6368">Recomendações:</span> ${safe(c.recomendacoes.join(' · '))}</div>` : '';
         return `<div class="tl-item ${cls}">
           <div style="font-size:13px;font-weight:600">
-            ${c.janela ? `Janela ${c.janela}d` : 'Contato avulso'} · ${toISODate(c.data_contato)}
+            ${c.janela ? `Janela ${c.janela}d` : 'Contato avulso'} · ${dataBR(c.data_contato)}
             <span class="pill" style="background:${c.sucesso === false ? '#f1f3f4' : '#e6f4ea'};color:${c.sucesso === false ? '#80868b' : '#1e7e34'};margin-left:6px">${c.sucesso === false ? 'sem sucesso' : 'contato realizado'}</span>
             ${c.suspeita_isc ? '<span class="pill" style="background:#fdecea;color:#c0392b;margin-left:4px">suspeita ISC</span>' : ''}
           </div>
@@ -669,7 +669,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         const e = est[String(d)] || {};
         const feito = e.status === 'concluida';
         const sel = String(f.proxima_janela) === String(d);
-        return `<option value="${d}" ${sel ? 'selected' : ''}>${d} dias${feito ? ' (já registrado)' : ''}${e.data_prevista ? ' · previsto ' + e.data_prevista : ''}</option>`;
+        return `<option value="${d}" ${sel ? 'selected' : ''}>${d} dias${feito ? ' (já registrado)' : ''}${e.data_prevista ? ' · previsto ' + dataBR(e.data_prevista) : ''}</option>`;
       }).join('');
 
       const badges = janelas.map(d => {
@@ -678,7 +678,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         return `<div style="background:${bg};color:${fg};border-radius:8px;padding:8px 12px;min-width:110px">
           <div style="font-size:16px;font-weight:700">${d}d ${ic}</div>
           <div style="font-size:11px;opacity:.85">${safe(e.status || 'pendente')}</div>
-          <div style="font-size:11px;opacity:.7">${e.data_contato || e.data_prevista || ''}</div>
+          <div style="font-size:11px;opacity:.7">${dataBR(e.data_contato || e.data_prevista) || ''}</div>
         </div>`;
       }).join('');
 
@@ -686,7 +686,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         `<option value="${safe(val)}" ${String(v) === String(val) ? 'selected' : ''}>${safe(lab)}</option>`).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, f.paciente_nome || f.paciente_iniciais || 'Ficha', `${dpo} DPO · cirurgia ${toISODate(f.data_cirurgia)}`, nav(req))}
+        ${chrome(sigla, f.paciente_nome || f.paciente_iniciais || 'Ficha', `${dpo} DPO · cirurgia ${dataBR(f.data_cirurgia)}`, nav(req))}
 
         <div class="card2">
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${badges}</div>
@@ -695,7 +695,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
             <div><span class="l">Equipe</span>${safe(equipe?.nome || f.especialidade || '—')}</div>
             <div><span class="l">Procedimento</span>${safe(f.procedimento || '—')}${f.implante ? ' <span class="pill" style="background:#eef2ff;color:#4c51bf">implante</span>' : ''}</div>
             <div><span class="l">Cirurgião</span>${safe(f.cirurgiao || '—')}</div>
-            <div><span class="l">Alta</span>${toISODate(f.data_alta) || '—'}</div>
+            <div><span class="l">Alta</span>${dataBR(f.data_alta) || '—'}</div>
             <div><span class="l">WhatsApp</span>${f.telefone ? `<a href="${linkWhatsApp(f.telefone, '')}" target="_blank" rel="noopener">${safe(formataTelefone(f.telefone))}</a>` : '<span style="color:#c0392b">não informado</span>'}</div>
             <div><span class="l">Status</span>${safe(STATUS_LABEL[f.status_vigilancia] || f.status_vigilancia)}</div>
             <div><span class="l">Profilaxia</span>${safe(f.antibioticoprofilaxia || '—')}</div>
@@ -765,10 +765,10 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
             <div style="display:grid;gap:10px;font-size:13px">
               <div><span class="l">Classificação</span><span class="pill" style="background:${f.isc_classificacao === 'confirmada' ? '#fdecea' : '#f1f3f4'};color:${f.isc_classificacao === 'confirmada' ? '#c0392b' : '#5f6368'}">${safe(CLASSIF_LABEL[f.isc_classificacao] || '—')}</span></div>
               <div><span class="l">Tipo</span>${safe(TIPO_LABEL[f.isc_tipo] || '—')}</div>
-              <div><span class="l">Data do diagnóstico</span>${toISODate(f.isc_data_diagnostico) || '—'}</div>
+              <div><span class="l">Data do diagnóstico</span>${dataBR(f.isc_data_diagnostico) || '—'}</div>
               <div><span class="l">Patógeno</span>${safe(f.isc_patogeno || '—')}</div>
               ${f.isc_observacao ? `<div><span class="l">Parecer</span><div style="white-space:pre-wrap">${safe(f.isc_observacao)}</div></div>` : ''}
-              ${f.classificado_em ? `<p class="sub">Classificado em ${toISODate(f.classificado_em)} por ${safe(f.classificado_por || '—')}</p>` : '<p class="sub">Aguardando avaliação médica.</p>'}
+              ${f.classificado_em ? `<p class="sub">Classificado em ${dataBR(f.classificado_em)} por ${safe(f.classificado_por || '—')}</p>` : '<p class="sub">Aguardando avaliação médica.</p>'}
               ${f.tem_alerta || f.suspeita_isc ? `<div class="pill" style="background:#fff4e5;color:#b06000;padding:8px 10px;line-height:1.5">Esta ficha está sinalizada e aparece na fila de classificação do médico.</div>` : ''}
             </div>` : `
             <form method="post" action="/isc/admin/ficha/${f.id}/classificar">
@@ -791,7 +791,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
                 <div><label class="l">Assinado por</label><input name="classificado_por" value="${safe(f.classificado_por || '')}"></div>
               </div>
               <button class="btn" style="margin-top:12px;background:#c0392b">Salvar classificação</button>
-              ${f.classificado_em ? `<p class="sub" style="margin-top:8px">Última classificação: ${toISODate(f.classificado_em)} por ${safe(f.classificado_por || '—')}</p>` : ''}
+              ${f.classificado_em ? `<p class="sub" style="margin-top:8px">Última classificação: ${dataBR(f.classificado_em)} por ${safe(f.classificado_por || '—')}</p>` : ''}
             </form>`}
           </div>
         </div>

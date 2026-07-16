@@ -183,6 +183,9 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       table.g tbody tr:hover td{background:#fafbfc}
       .isc .sticky-col{position:sticky;left:0;z-index:4;background:#fff;box-shadow:1px 0 0 #e8eaed;min-width:180px;max-width:180px}
       table.g th.sticky-col{z-index:6}
+      .isc .th-sort{color:inherit;text-decoration:none;cursor:pointer}
+      .isc .th-sort:hover,.isc .th-sort.on{color:#2bb673}
+      .isc .th-sort .arr{font-size:9px}
       .isc .pac{font-weight:600;color:#202124!important;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .isc .sub{font-size:11px;color:#9aa0a6}
       .isc .jb{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:22px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px}
@@ -247,12 +250,33 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       }
       const where = w.length ? 'WHERE ' + w.join(' AND ') : '';
 
-      const ORD = {
-        data: 'f.data_cirurgia', paciente: 'f.paciente_nome',
-        proximo: 'f.proximo_contato_em', classif: 'f.isc_classificacao',
+      // ── Ordenação (server-side; whitelist de colunas) ──
+      // Mesmo contrato do grid do ATB: ?sort=<chave>&dir=asc|desc, ciclo de 3
+      // cliques (asc → desc → sem ordenação) e desempate pela data da cirurgia.
+      // A whitelist é o que impede injeção: `sort` nunca entra cru no SQL.
+      const sort = String(q.sort || '');
+      const dir = String(q.dir || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc';
+      const SORT_MAP = {
+        paciente: 'f.paciente_nome', pront: 'f.prontuario', equipe: 'e.nome',
+        proc: 'f.procedimento', cirurgia: 'f.data_cirurgia',
+        janelas: 'f.contatos_ok', prox: 'f.proximo_contato_em',
+        sinal: 'f.tem_alerta', classif: 'f.isc_classificacao',
+        tipo: 'f.isc_tipo', dtdx: 'f.isc_data_diagnostico', patogeno: 'f.isc_patogeno',
       };
-      const ordCol = ORD[String(q.ord || 'data')] || 'f.data_cirurgia';
-      const dir = String(q.dir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+      const orderSql = SORT_MAP[sort]
+        ? `${SORT_MAP[sort]} ${dir.toUpperCase()} NULLS LAST, f.data_cirurgia DESC, f.id DESC`
+        : `f.data_cirurgia DESC, f.id DESC`;   // padrão: cirurgia mais recente primeiro
+
+      const sortLink = (label, key) => {
+        const ativo = sort === key;
+        const u = new URLSearchParams({ ...q, page: '1' });
+        let arr = '';
+        if (!ativo) { u.set('sort', key); u.set('dir', 'asc'); }
+        else if (dir === 'asc') { u.set('sort', key); u.set('dir', 'desc'); arr = '▲'; }
+        else { u.delete('sort'); u.delete('dir'); arr = '▼'; }   // 3º clique: volta ao padrão
+        const tt = !ativo ? 'Ordenar' : (dir === 'asc' ? 'Inverter (desc)' : 'Remover ordenação');
+        return `<a class="th-sort${ativo ? ' on' : ''}" href="/isc/admin/grid?${u}" title="${tt}">${safe(label)}${arr ? `<span class="arr"> ${arr}</span>` : ''}</a>`;
+      };
 
       const page = Math.max(1, parseInt(q.page || '1', 10) || 1);
       const LIM = 100;
@@ -266,7 +290,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
            FROM isc_fichas f
            LEFT JOIN isc_equipes e ON e.id = f.equipe_id
           ${where}
-          ORDER BY ${ordCol} ${dir} NULLS LAST, f.id DESC
+          ORDER BY ${orderSql}
           LIMIT ${LIM} OFFSET ${(page - 1) * LIM}`, p);
 
       // Métricas do recorte
@@ -357,6 +381,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         </div>
         <form method="get" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           ${travado ? '' : `<input type="hidden" name="inst" value="${safe(q.inst || '')}">`}
+          ${sort ? `<input type="hidden" name="sort" value="${safe(sort)}"><input type="hidden" name="dir" value="${safe(dir)}">` : ''}
           <input class="fil" name="busca" placeholder="Paciente, prontuário, procedimento…" value="${safe(q.busca || '')}" style="min-width:230px">
           <select class="fil" name="equipe">${opt(equipes.map(e => [e.id, e.nome]), q.equipe, 'Todas as equipes')}</select>
           <select class="fil" name="classif">${opt(ISC_CLASSIFICACOES, q.classif, 'Toda classificação')}</select>
@@ -372,9 +397,18 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         </form>
         <div class="grid-wrap"><table class="g">
           <thead><tr>
-            <th>#</th><th class="sticky-col">Paciente</th><th>Equipe</th><th>Procedimento</th>
-            <th>Cirurgia</th><th>Janelas</th><th>Próx. contato</th><th style="text-align:center">Sinal</th>
-            <th class="grp">Classificação</th><th class="grp">Tipo</th><th class="grp">Dt. dx</th><th class="grp">Patógeno</th>
+            <th>#</th>
+            <th class="sticky-col">${sortLink('Paciente', 'paciente')}</th>
+            <th>${sortLink('Equipe', 'equipe')}</th>
+            <th>${sortLink('Procedimento', 'proc')}</th>
+            <th>${sortLink('Cirurgia', 'cirurgia')}</th>
+            <th>${sortLink('Janelas', 'janelas')}</th>
+            <th>${sortLink('Próx. contato', 'prox')}</th>
+            <th style="text-align:center">${sortLink('Sinal', 'sinal')}</th>
+            <th class="grp">${sortLink('Classificação', 'classif')}</th>
+            <th class="grp">${sortLink('Tipo', 'tipo')}</th>
+            <th class="grp">${sortLink('Dt. dx', 'dtdx')}</th>
+            <th class="grp">${sortLink('Patógeno', 'patogeno')}</th>
             <th style="text-align:center">Zap</th>
           </tr></thead>
           <tbody>${linhas || `<tr><td colspan="13" style="padding:30px;text-align:center;color:#80868b">Nenhuma ficha no recorte.</td></tr>`}</tbody>

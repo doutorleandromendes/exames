@@ -113,6 +113,7 @@ function _layout(titulo, miolo) {
   td{padding:9px 12px;border-bottom:1px solid #f0f1f3;vertical-align:middle}
   tr:hover td{background:#fafbfc}
   td.dt{white-space:nowrap;color:var(--mut)}
+  td.dt .hr{font-size:11px;opacity:.7;font-variant-numeric:tabular-nums}
   .nome{font-weight:600}
   td.atb{max-width:240px}
   .pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px}
@@ -156,7 +157,7 @@ function paginaConsulta(rows, cardHtml = '', mostrarDias = false) {
     const espec = (temVerd && f.recomendacoes_especificacao)
       ? `<span class="espec">${_safe(f.recomendacoes_especificacao)}</span>` : '';
     return `<tr>
-      <td class="dt">${dt(f.data_ficha)}</td>
+      <td class="dt">${f.envio_dia || dt(f.data_ficha)}${f.envio_hora ? `<div class="hr" title="Horário em que a ficha foi enviada (horário de Brasília)">${f.envio_hora}</div>` : ''}</td>
       <td class="nome">${_safe(nome)}</td>
       <td>${_safe(f.prontuario || '')}</td>
       <td>${_safe(f.setor || '')}</td>
@@ -178,7 +179,7 @@ function paginaConsulta(rows, cardHtml = '', mostrarDias = false) {
     </div>
     <div class="wrap">
       <table>
-        <thead><tr><th>Data</th><th>Paciente</th><th>Prontuário</th><th>Setor</th><th>ATB</th>${mostrarDias ? '<th title="Tempo previsto de tratamento solicitado na ficha">Dias</th>' : ''}<th>Parecer</th></tr></thead>
+        <thead><tr><th title="Data e horário em que a ficha foi enviada (horário de Brasília)">Data / hora</th><th>Paciente</th><th>Prontuário</th><th>Setor</th><th>ATB</th>${mostrarDias ? '<th title="Tempo previsto de tratamento solicitado na ficha">Dias</th>' : ''}<th>Parecer</th></tr></thead>
         <tbody id="corpo">${linhas || `<tr><td colspan="${mostrarDias?7:6}" class="vazio">Nenhuma ficha nos últimos 30 dias.</td></tr>`}</tbody>
       </table>
     </div>
@@ -220,10 +221,16 @@ export function registerConsultaRoutes(app, pool) {
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
                f.atb_solicitado, f.tempo_previsto, f.recomendacao_scih, f.recomendacoes_especificacao,
-               COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) AS data_ficha
+               COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) AS data_ficha,
+               -- Data e hora do ENVIO em horário de Brasília, convertidas no Postgres:
+               -- jotform_created_at/created_at são TIMESTAMPTZ, e o servidor roda em UTC —
+               -- formatar via new Date() em JS mostraria a hora (e às vezes o dia) errados.
+               to_char(COALESCE(f.jotform_created_at, f.created_at) AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YY') AS envio_dia,
+               to_char(COALESCE(f.jotform_created_at, f.created_at) AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI') AS envio_hora
         FROM atb_fichas f
         WHERE f.deletado_em IS NULL
-          AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'${escopo}
+          AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'
+          AND NOT COALESCE(f.retrospectiva, false)${escopo}
         ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`, params);
       const hc = await getLatestHealthcheck(pool, inst || 'HUSF').catch(() => null);
       const mostrarDias = !inst || String(inst).toUpperCase() === 'HUSF';

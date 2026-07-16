@@ -1,0 +1,462 @@
+// isc-import.js
+// ──────────────────────────────────────────────────────────────────────────
+// Núcleo do importador de MAPA CIRÚRGICO — puro, sem banco/Express/HTML.
+//
+// PRINCÍPIO: não fixar o formato. Nenhum layout de mapa cirúrgico é estável
+// (muda de hospital, de sistema, e de versão do sistema). Em vez de acoplar a
+// um cabeçalho específico, o importador lê QUALQUER tabela e o operador mapeia
+// coluna → campo na tela. adivinhaMapeamento() só chuta o palpite inicial.
+//
+// O importador NUNCA grava direto: sempre passa por prévia (dry-run) que
+// classifica cada linha em nova/duplicada/erro. Mapa cirúrgico é dado sujo —
+// linha de cabeçalho repetida no meio, "SUSPENSA", nome vazio, data em 3
+// formatos. Gravar sem prévia é como o programa de vigilância morre.
+// ──────────────────────────────────────────────────────────────────────────
+
+import { normalizaTelefone, toISODate } from './isc-core.js';
+import { triar } from './isc-triagem.js';
+
+// Campos da ficha que podem receber coluna do mapa.
+// obrigatorio: sem ele a linha é erro. chave: participa da dedup.
+export const CAMPOS_IMPORTAVEIS = [
+  { key: 'paciente_nome',  label: 'Nome do paciente',      obrigatorio: true },
+  { key: 'data_cirurgia',  label: 'Data da cirurgia',      obrigatorio: true, chave: true, tipo: 'data' },
+  { key: 'atendimento',    label: 'Atendimento',           chave: true },
+  { key: 'prontuario',     label: 'Prontuário' },
+  { key: 'paciente_dn',    label: 'Data de nascimento',    tipo: 'data' },
+  { key: 'telefone',       label: 'Telefone / WhatsApp',   tipo: 'telefone' },
+  { key: 'procedimento',   label: 'Procedimento' },
+  { key: 'cirurgiao',      label: 'Cirurgião' },
+  { key: 'equipe',         label: 'Equipe / especialidade', tipo: 'equipe' },
+  { key: 'data_alta',      label: 'Data da alta',          tipo: 'data' },
+  { key: 'implante',       label: 'Implante / prótese',    tipo: 'bool' },
+  { key: 'potencial_contaminacao', label: 'Potencial de contaminação', tipo: 'potencial' },
+  { key: 'duracao_min',    label: 'Duração (min)',         tipo: 'int' },
+  { key: 'asa',            label: 'ASA',                   tipo: 'asa' },
+  { key: 'antibioticoprofilaxia', label: 'Antibioticoprofilaxia' },
+  { key: 'paciente_iniciais', label: 'Iniciais' },
+  { key: 'contato_alternativo', label: 'Contato alternativo' },
+  { key: 'observacao',     label: 'Observação' },
+  // Coluna "endereço + Fone: + Celular:" do Tasy_Rel, num blob só.
+  { key: 'contato_blob',   label: 'Endereço + Fone (bloco do Tasy)', tipo: 'contato' },
+  // Auxiliares: alimentam a triagem, não viram coluna da ficha.
+  { key: 'tipo_anestesia', label: 'Tipo de anestesia (só p/ triagem)', tipo: 'auxiliar' },
+];
+
+// ── Parsing tabular ───────────────────────────────────────────────────────
+// Detecta o separador olhando qual gera mais colunas de forma CONSISTENTE
+// entre as primeiras linhas (não só na primeira — cabeçalho pode ter vírgula
+// no texto e enganar a contagem).
+export function detectaDelimitador(texto) {
+  const linhas = String(texto ?? '').split(/\r?\n/).filter(l => l.trim()).slice(0, 10);
+  if (!linhas.length) return '\t';
+  let melhor = '\t', melhorScore = -1;
+  for (const d of ['\t', ';', ',', '|']) {
+    const contagens = linhas.map(l => partirLinha(l, d).length);
+    const max = Math.max(...contagens);
+    if (max < 2) continue;
+    // consistência: quantas linhas têm exatamente o nº modal de colunas
+    const modal = contagens.sort((a, b) => contagens.filter(x => x === b).length - contagens.filter(x => x === a).length)[0];
+    const consist = contagens.filter(c => c === modal).length / contagens.length;
+    const score = modal * consist;
+    if (score > melhorScore) { melhorScore = score; melhor = d; }
+  }
+  return melhor;
+}
+
+// Split respeitando aspas duplas (CSV real: "SILVA, MARIA" é uma célula só).
+export function partirLinha(linha, delim) {
+  const out = [];
+  let atual = '', dentro = false;
+  const s = String(linha ?? '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"') {
+      if (dentro && s[i + 1] === '"') { atual += '"'; i++; }   // "" escapado
+      else dentro = !dentro;
+    } else if (ch === delim && !dentro) { out.push(atual); atual = ''; }
+    else atual += ch;
+  }
+  out.push(atual);
+  return out.map(x => x.trim());
+}
+
+// texto → { header:[], linhas:[[]] }. Ignora linhas totalmente vazias.
+export function parseTabular(texto, delim) {
+  const d = delim || detectaDelimitador(texto);
+  const brutas = String(texto ?? '').split(/\r?\n/).filter(l => l.trim() !== '');
+  if (!brutas.length) return { header: [], linhas: [], delim: d };
+  const header = partirLinha(brutas[0], d);
+  const linhas = brutas.slice(1)
+    .map(l => partirLinha(l, d))
+    .filter(cs => cs.some(c => c !== ''));
+  return { header, linhas, delim: d };
+}
+
+// ── Normalização de valores ───────────────────────────────────────────────
+const norm = s => String(s ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Datas de mapa cirúrgico vêm em tudo quanto é formato, inclusive serial do
+// Excel (nº de dias desde 1899-12-30) quando a célula é copiada como número.
+export function parseDataFlexivel(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+
+  // Serial do Excel: número puro entre 20000 (1954) e 60000 (2064).
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const n = parseFloat(s);
+    if (n > 20000 && n < 60000) {
+      const ms = Math.round((n - 25569) * 86400000);   // 25569 = 1970-01-01
+      return new Date(ms).toISOString().slice(0, 10);
+    }
+  }
+  // ISO / yyyy-mm-dd (aceita hora junto)
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // dd/mm/yyyy · dd-mm-yyyy · dd.mm.yyyy (+ hora opcional)
+  m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})/);
+  if (m) {
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = (Number(y) > 50 ? '19' : '20') + y;
+    const dd = d.padStart(2, '0'), mm = mo.padStart(2, '0');
+    if (Number(mm) > 12 || Number(dd) > 31 || Number(mm) < 1 || Number(dd) < 1) return null;
+    const iso = `${y}-${mm}-${dd}`;
+    // valida de verdade (31/02 não existe)
+    const dt = new Date(iso + 'T12:00:00Z');
+    if (Number.isNaN(dt.getTime()) || dt.toISOString().slice(0, 10) !== iso) return null;
+    return iso;
+  }
+  return null;
+}
+
+const SIM = new Set(['sim', 's', 'yes', 'y', '1', 'true', 'x', 'verdadeiro']);
+const NAO = new Set(['nao', 'n', 'no', '0', 'false', '', 'falso']);
+export function parseBoolFlexivel(v) {
+  const s = norm(v);
+  if (SIM.has(s)) return true;
+  if (NAO.has(s)) return false;
+  return null;
+}
+
+export function parsePotencial(v) {
+  const s = norm(v);
+  if (!s) return null;
+  if (s.includes('potencialmente') || s.includes('potencial')) return 'potencialmente_contaminada';
+  if (s.includes('infectad')) return 'infectada';
+  if (s.includes('contaminad')) return 'contaminada';
+  if (s.includes('limpa')) return 'limpa';
+  return null;
+}
+
+export function parseAsa(v) {
+  const s = String(v ?? '').toUpperCase().replace(/[^IVX0-9]/g, '');
+  if (!s) return null;
+  const mapa = { '1': 'I', '2': 'II', '3': 'III', '4': 'IV', '5': 'V' };
+  if (mapa[s]) return mapa[s];
+  return ['I', 'II', 'III', 'IV', 'V'].includes(s) ? s : null;
+}
+
+export function parseIntFlexivel(v) {
+  const s = String(v ?? '').replace(/[^\d]/g, '');
+  if (!s) return null;
+  const n = parseInt(s, 10);
+  return Number.isInteger(n) ? n : null;
+}
+
+// ── Contato (bloco do Tasy) ───────────────────────────────────────────────
+// Formato observado:
+//   "Rua X,123 Bairro Cidade UF 12345678 Fone: 950948572 Celular: 968650910"
+//
+// PROBLEMA: no HUSF, NENHUM dos 67 telefones vinha com DDD. Um WhatsApp para o
+// número errado revela a um estranho que alguém foi operado — então o DDD NUNCA
+// é presumido em silêncio. Ele só é aplicado quando a CIDADE do endereço está
+// na tabela abaixo, e a ficha fica marcada como telefone presumido, para a
+// agenda pedir confirmação antes do primeiro envio. Cidade fora da tabela →
+// ficha entra SEM telefone e com aviso. Melhor sem telefone que com o errado.
+//
+// ⚠️ TABELA A CONFIRMAR pelo SCIH: são as cidades da região do HUSF. Errar aqui
+// manda mensagem para outra pessoa.
+export const DDD_CIDADES = {
+  // DDD 11
+  'saopaulo': '11', 'bragancapaulista': '11', 'atibaia': '11', 'itatiba': '11',
+  'jarinu': '11', 'piracaia': '11', 'nazarepaulista': '11', 'joanopolis': '11',
+  'bomjesusdosperdoes': '11', 'vargem': '11', 'pinhalzinho': '11', 'pedrabela': '11',
+  'tuiuti': '11',
+  // DDD 19
+  'campinas': '19', 'morungaba': '19', 'socorro': '19', 'amparo': '19',
+  // DDD 35 (MG)
+  'extrema': '35', 'camanducaia': '35', 'itapeva': '35',
+};
+
+const chaveCidade = s => String(s ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^a-z]/g, '');
+
+// Extrai as partes do bloco. Não decide nada — só separa.
+export function parseContato(blob) {
+  const s = String(blob ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return {};
+  const dig = v => String(v ?? '').replace(/\D/g, '');
+  const fone = dig((s.match(/Fone:\s*([\d\s-]*)/i) || [])[1]);
+  const celular = dig((s.match(/Celular:\s*([\d\s-]*)/i) || [])[1]);
+  // "... Bairro Cidade UF 12345678 Fone:" → cidade é o que antecede UF+CEP
+  const m = s.match(/([A-Za-zÀ-ÿ'.\- ]+?)\s+([A-Z]{2})\s+(\d{8})\s*(?:Fone:|Celular:|$)/);
+  let cidade = null, uf = null, cep = null;
+  if (m) {
+    uf = m[2]; cep = m[3];
+    // O trecho antes do UF é "bairro cidade": a cidade é o sufixo que casa
+    // com a tabela. Testa do fim para o começo.
+    const toks = m[1].trim().split(/\s+/);
+    for (let i = 0; i < toks.length; i++) {
+      const cand = toks.slice(i).join(' ');
+      if (DDD_CIDADES[chaveCidade(cand)]) { cidade = cand; break; }
+    }
+    if (!cidade) cidade = toks.slice(-2).join(' ');   // palpite p/ exibir no aviso
+  }
+  const endereco = s.replace(/\s*(Fone|Celular):.*$/i, '').trim();
+  return { fone, celular, cidade, uf, cep, endereco };
+}
+
+// Escolhe o número e resolve o DDD. Devolve { e164, presumido, aviso }.
+// Celular tem prioridade: o fluxo é WhatsApp.
+export function resolveTelefone({ fone, celular, cidade }, ddds = DDD_CIDADES) {
+  const cands = [celular, fone].filter(n => n && n.length >= 8);   // celular primeiro
+  if (!cands.length) return { e164: null, aviso: 'Sem telefone aproveitável no mapa' };
+
+  const movelComDDD = n => n.length === 11 && n[2] === '9';
+  const movelSemDDD = n => n.length === 9 && n[0] === '9';
+  const fixoComDDD  = n => n.length === 10;
+  const ddd = cidade ? ddds[chaveCidade(cidade)] : null;
+
+  // Prioridade pelo FLUXO, não pela completude: o canal é WhatsApp, então um
+  // celular sem DDD (que a cidade resolve) vale mais que um fixo com DDD — em
+  // fixo, WhatsApp não chega. Ordem: móvel c/ DDD > móvel s/ DDD + cidade >
+  // fixo c/ DDD (a colaboradora liga) > nada.
+  const m1 = cands.find(movelComDDD);
+  if (m1) return { e164: '55' + m1, presumido: false };
+
+  const m2 = cands.find(movelSemDDD);
+  if (m2 && ddd) return { e164: '55' + ddd + m2, presumido: true, aviso: `DDD ${ddd} presumido pela cidade (${cidade}) — confirmar antes do 1º envio` };
+
+  const f1 = cands.find(fixoComDDD);
+  if (f1) return { e164: '55' + f1, presumido: false, aviso: 'Só telefone fixo — WhatsApp não chega, contato por ligação' };
+
+  if (m2 && !ddd) {
+    return { e164: null, aviso: `Celular sem DDD e cidade ${cidade ? `"${cidade}" fora da tabela` : 'não identificada'} — ficha entra sem WhatsApp` };
+  }
+  // 8 dígitos: fixo antigo ou celular sem o 9 — não dá para reconstruir com
+  // segurança. Número errado = revelar a cirurgia a um estranho. Não inventa.
+  return { e164: null, aviso: `Número com ${cands[0].length} dígitos e sem DDD — ambíguo, ficha entra sem WhatsApp` };
+}
+
+// ── Palpite de mapeamento ─────────────────────────────────────────────────
+// Sinônimos vistos em mapa cirúrgico brasileiro. É só o CHUTE INICIAL — o
+// operador confirma na tela. Errar aqui não quebra nada.
+const SINONIMOS = {
+  paciente_nome:  ['paciente', 'nome', 'nomepaciente', 'nomedopaciente', 'pacientenome'],
+  data_cirurgia:  ['datacirurgia', 'datadacirurgia', 'data', 'datacir', 'dtcirurgia', 'dataprocedimento', 'datadoprocedimento', 'dtcir', 'datahora', 'datahorario'],
+  atendimento:    ['atendimento', 'nratendimento', 'natendimento', 'numeroatendimento', 'codatendimento', 'internacao'],
+  prontuario:     ['prontuario', 'pront', 'nrprontuario', 'numeroprontuario', 'registro', 'matricula'],
+  paciente_dn:    ['datanascimento', 'dtnascimento', 'nascimento', 'dn', 'datadenascimento'],
+  telefone:       ['telefone', 'fone', 'celular', 'whatsapp', 'zap', 'contato', 'tel'],
+  procedimento:   ['procedimento', 'cirurgia', 'proc', 'descricao', 'procedimentorealizado', 'descricaoprocedimento'],
+  cirurgiao:      ['cirurgiao', 'medico', 'responsavel', 'medicoresponsavel', 'profissional', 'executante'],
+  equipe:         ['equipe', 'especialidade', 'clinica', 'setor', 'servico'],
+  data_alta:      ['dataalta', 'dtalta', 'alta', 'datadealta'],
+  implante:       ['implante', 'protese', 'opme', 'material'],
+  potencial_contaminacao: ['potencial', 'potencialcontaminacao', 'classificacao', 'contaminacao', 'potencialdecontaminacao'],
+  duracao_min:    ['duracao', 'tempo', 'duracaomin', 'tempocirurgico', 'minutos'],
+  asa:            ['asa', 'classificacaoasa', 'riscoasa'],
+  antibioticoprofilaxia: ['antibiotico', 'profilaxia', 'atb', 'antibioticoprofilaxia', 'atbprofilaxia'],
+  paciente_iniciais: ['iniciais'],
+  contato_alternativo: ['contatoalternativo', 'telefone2', 'recado', 'contatorecado'],
+  observacao:     ['observacao', 'obs', 'observacoes'],
+  contato_blob:   ['endereco', 'contato', 'fone', 'endereçofone'],
+  tipo_anestesia: ['tipo', 'anestesia', 'tipoanestesia'],
+};
+
+// Devolve { indiceDaColuna: 'campo' }. Cada campo é usado no máximo 1x:
+// vence o match exato; parcial só entra se o campo ainda estiver livre.
+export function adivinhaMapeamento(header) {
+  const mapa = {};
+  const usados = new Set();
+  const cols = header.map(norm);
+
+  for (const [campo, syns] of Object.entries(SINONIMOS)) {
+    const i = cols.findIndex((c, idx) => c && syns.includes(c) && !(idx in mapa));
+    if (i >= 0) { mapa[i] = campo; usados.add(campo); }
+  }
+  for (const [campo, syns] of Object.entries(SINONIMOS)) {
+    if (usados.has(campo)) continue;
+    const i = cols.findIndex((c, idx) => c && !(idx in mapa) && syns.some(s => c.includes(s) || s.includes(c)));
+    if (i >= 0) { mapa[i] = campo; usados.add(campo); }
+  }
+  return mapa;
+}
+
+// ── Normalização de linha ─────────────────────────────────────────────────
+// mapa: { indiceColuna: 'campo' }. equipes: [{id,nome,sigla,implante_default}]
+// Devolve { ficha, erros:[], avisos:[] }.
+export function normalizaLinha(colunas, mapa, equipes = []) {
+  const ficha = {};
+  const erros = [], avisos = [];
+  const bruto = {};
+
+  for (const [idx, campo] of Object.entries(mapa)) {
+    if (!campo) continue;
+    const v = colunas[Number(idx)];
+    if (v == null || String(v).trim() === '') continue;
+    bruto[campo] = String(v).trim();
+  }
+
+  const def = CAMPOS_IMPORTAVEIS.reduce((a, c) => (a[c.key] = c, a), {});
+
+  for (const [campo, v] of Object.entries(bruto)) {
+    const d = def[campo];
+    if (!d) continue;
+    switch (d.tipo) {
+      case 'data': {
+        const iso = parseDataFlexivel(v);
+        if (!iso) { erros.push(`${d.label}: data não reconhecida ("${v}")`); }
+        else ficha[campo] = iso;
+        break;
+      }
+      case 'telefone': {
+        const tel = normalizaTelefone(v);
+        if (!tel) avisos.push(`Telefone não reconhecido ("${v}") — ficha entra sem WhatsApp`);
+        else { ficha.telefone = tel; ficha.telefone_raw = v; }
+        break;
+      }
+      case 'bool': {
+        const b = parseBoolFlexivel(v);
+        if (b === null) avisos.push(`${d.label}: valor não reconhecido ("${v}") — assumido Não`);
+        ficha[campo] = b === true;
+        break;
+      }
+      case 'int': {
+        const n = parseIntFlexivel(v);
+        if (n === null) avisos.push(`${d.label}: número não reconhecido ("${v}")`);
+        else ficha[campo] = n;
+        break;
+      }
+      case 'asa': {
+        const a = parseAsa(v);
+        if (!a) avisos.push(`ASA não reconhecido ("${v}")`);
+        else ficha.asa = a;
+        break;
+      }
+      case 'potencial': {
+        const pc = parsePotencial(v);
+        if (!pc) avisos.push(`Potencial de contaminação não reconhecido ("${v}")`);
+        else ficha.potencial_contaminacao = pc;
+        break;
+      }
+      case 'equipe': {
+        const alvo = norm(v);
+        const eq = equipes.find(e => norm(e.nome) === alvo || norm(e.sigla) === alvo)
+                || equipes.find(e => alvo && (norm(e.nome).includes(alvo) || alvo.includes(norm(e.nome))));
+        if (eq) {
+          ficha.equipe_id = eq.id;
+          // Equipe de implante por padrão só marca se o mapa não disse nada.
+          if (eq.implante_default && bruto.implante == null) ficha.implante = true;
+        } else {
+          avisos.push(`Equipe "${v}" não cadastrada — ficha entra sem equipe`);
+          ficha.especialidade = v;   // preserva o texto: não perder o dado
+        }
+        break;
+      }
+      case 'contato': {
+        const partes = parseContato(v);
+        const r = resolveTelefone(partes);
+        if (r.e164) { ficha.telefone = r.e164; ficha.telefone_raw = partes.celular || partes.fone; }
+        if (r.presumido) ficha.telefone_presumido = true;
+        if (r.aviso) avisos.push(r.aviso);
+        // Nunca perder o dado: o número cru e o endereço ficam no contato
+        // alternativo, para a colaboradora completar à mão se preciso.
+        const alt = [partes.celular && `Cel: ${partes.celular}`, partes.fone && `Fone: ${partes.fone}`,
+                     partes.cidade && `(${partes.cidade}${partes.uf ? '/' + partes.uf : ''})`]
+                    .filter(Boolean).join(' · ');
+        if (alt) ficha.contato_alternativo = alt.slice(0, 500);
+        if (partes.endereco) ficha.observacao = [ficha.observacao, partes.endereco].filter(Boolean).join(' | ').slice(0, 2000);
+        break;
+      }
+      case 'auxiliar':
+        break;   // já está em `bruto`, que é o que a triagem lê
+      default:
+        ficha[campo] = String(v).slice(0, 500);
+    }
+  }
+
+  for (const c of CAMPOS_IMPORTAVEIS) {
+    if (c.obrigatorio && !ficha[c.key]) erros.push(`${c.label} é obrigatório`);
+  }
+  if (!bruto.atendimento) {
+    avisos.push('Sem atendimento — não dá para detectar duplicata desta linha');
+  }
+  return { ficha, erros, avisos, bruto };
+}
+
+// ── Prévia (dry-run) ──────────────────────────────────────────────────────
+// existentes: Set de chaves "atendimento|data_cirurgia" já no banco.
+// Classifica cada linha e detecta duplicata DENTRO do próprio arquivo também
+// (mapa cirúrgico repete linha quando a cirurgia é remarcada).
+export function chaveDedup(ficha) {
+  const at = String(ficha?.atendimento ?? '').trim();
+  const dt = toISODate(ficha?.data_cirurgia);
+  if (!at || !dt) return null;
+  return `${at}|${dt}`;
+}
+
+// regras: quando fornecidas, filtram o que entra na vigilância. Sem regras
+// (colar um CSV próprio, por ex.), tudo é candidato — o comportamento antigo.
+export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regras = null) {
+  const vistas = new Set();
+  const usarTriagem = Array.isArray(regras) && regras.length > 0;
+
+  const itens = linhas.map((colunas, i) => {
+    const { ficha, erros, avisos, bruto } = normalizaLinha(colunas, mapa, equipes);
+
+    // Triagem primeiro: não faz sentido apontar erro de campo numa cirurgia
+    // que nem entra no recorte (uma Bera sem telefone não é problema de nada).
+    let triagem = null;
+    if (usarTriagem) {
+      triagem = triar({
+        procedimento: ficha.procedimento || bruto.procedimento || '',
+        cirurgiao: ficha.cirurgiao || bruto.cirurgiao || '',
+        tipo_anestesia: bruto.tipo_anestesia || '',
+      }, regras);
+      if (!triagem || !triagem.vigiar) {
+        return {
+          linha: i + 2, status: 'fora_recorte', ficha, erros: [], avisos: [],
+          bruto, motivo: triagem ? triagem.motivo : 'Nenhuma regra de vigilância casou',
+        };
+      }
+      // A regra manda na equipe/implante — o mapa do Tasy não traz nem um nem outro.
+      if (triagem.equipe_id) ficha.equipe_id = triagem.equipe_id;
+      if (triagem.implante != null && ficha.implante == null) ficha.implante = triagem.implante;
+      if (triagem.codigo_cve) ficha.codigo_cve = triagem.codigo_cve;
+    }
+
+    const chave = chaveDedup(ficha);
+    let status = 'nova';
+    if (erros.length) status = 'erro';
+    else if (chave && existentes.has(chave)) status = 'duplicada';
+    else if (chave && vistas.has(chave)) { status = 'duplicada'; avisos.push('Linha repetida dentro do próprio arquivo'); }
+    if (status === 'nova' && chave) vistas.add(chave);
+    return { linha: i + 2, status, ficha, erros, avisos, bruto, motivo: triagem?.motivo || null };
+  });
+
+  return {
+    itens,
+    resumo: {
+      total: itens.length,
+      novas: itens.filter(x => x.status === 'nova').length,
+      duplicadas: itens.filter(x => x.status === 'duplicada').length,
+      erros: itens.filter(x => x.status === 'erro').length,
+      fora_recorte: itens.filter(x => x.status === 'fora_recorte').length,
+      avisos: itens.filter(x => x.status !== 'erro' && x.avisos.length).length,
+    },
+  };
+}

@@ -19,6 +19,9 @@ import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADICIONAR (numeradores CVE)
+import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
+import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
+import { registerIscImportRoutes } from './isc-import-routes.js';  // ← ADICIONAR (importador de mapa cirúrgico)
 import { runProntMigrations } from './pront-db.js';
 import { registerProntRoutes } from './pront-routes.js';
 import { runAgendaMigrations } from './agenda-db.js';
@@ -125,7 +128,10 @@ const {
 runAulasMigrations(migratorPool).catch(e=>console.error('migration error', e));
 
 runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
-runAtbMigrations(migratorPool).catch(e => console.error('atb migration error', e));   // ← ADICIONAR
+// ISC depende de atb_instituicoes (FK): encadeia depois das migrações do ATB.
+runAtbMigrations(migratorPool)                                                        // ← ADICIONAR
+  .then(() => runIscMigrations(migratorPool))
+  .catch(e => console.error('atb/isc migration error', e));
 runProntMigrations(migratorPool)
   .then(() => runAgendaMigrations(migratorPool))   // agenda depende de pront_pacientes
   .catch(e => console.error('pront/agenda migration error', e));
@@ -160,6 +166,10 @@ try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerCveNumeradoresRoutes(app, pool); }
 catch (e) { console.error('ERRO registerCveNumeradoresRoutes', e); }
+try { registerIscRoutes(app, pool, scihRequired, renderShell); }
+catch (e) { console.error('ERRO registerIscRoutes', e); }
+try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }
+catch (e) { console.error('ERRO registerIscImportRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }

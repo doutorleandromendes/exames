@@ -51,9 +51,14 @@ export function applyGridFilters(query, where, params, colsReais) {
   const q = query || {};
   const push = (clause, val) => { params.push(val); where.push(clause.replace('$$', '$' + params.length)); };
 
-  // Data de referência (intervalo)
-  if (q.data_de)  push('f.data_referencia >= $$::date', q.data_de);
-  if (q.data_ate) push('f.data_referencia <  ($$::date + interval \'1 day\')', q.data_ate);
+  // Data de referência (intervalo) — usa a data CANÔNICA da ficha, a mesma expressão
+  // da coluna "Data (ref.)" do catálogo (COLS.data_ref). Antes filtrava por
+  // f.data_referencia pura: como essa coluna só é preenchida em ficha retrospectiva
+  // (e nas antigas do JotForm), as fichas do formulário nativo — que têm
+  // data_referencia NULL — ficavam INVISÍVEIS ao filtro (NULL >= data = falso),
+  // embora a coluna exibisse a data delas.
+  if (q.data_de)  push("COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= $$::date", q.data_de);
+  if (q.data_ate) push("COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) <  ($$::date + interval '1 day')", q.data_ate);
 
   // Submission date (jotform_created_at, fallback created_at) — intervalo
   if (q.sub_de)  push('COALESCE(f.jotform_created_at, f.created_at) >= $$::date', q.sub_de);

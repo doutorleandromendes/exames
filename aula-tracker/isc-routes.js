@@ -85,9 +85,15 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
   // Devolve { sigla, instId } do deploy. sigla null = modo legado (sem lock):
   // aceita ?inst= como o ATB faz, e sem ?inst= enxerga tudo.
+  //
+  // Lê o body também: form POST manda `inst` como campo escondido, não na query.
+  // Só a query fazia o tenant virar null em todo POST de formulário — e, sem
+  // tenant, carregarFicha() não tinha o que comparar e a guarda cross-tenant
+  // deixava passar. Em produção o subdomínio salva (tenantFromReq), mas depender
+  // disso é ter uma guarda que só funciona por acidente.
   async function resolveInst(req) {
     const travado = tenantFromReq(req);
-    const sigla = travado || sanitizeSigla(req.query?.inst || '') || null;
+    const sigla = travado || sanitizeSigla(req.query?.inst || req.body?.inst || '') || null;
     const instId = sigla ? await instIdDeSigla(sigla) : null;
     return { sigla, instId, travado: !!travado };
   }
@@ -435,16 +441,20 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       const horizonte = Math.min(30, Math.max(0, parseInt(req.query.dias || '2', 10) || 0));
       const limite = addDays(hojeISO(), horizonte);
 
+      // O LEFT JOIN na fila é o que separa "a enviar" de "já mandei, aguardando".
+      // Sem isso a agenda mostra os mesmos 15 o dia inteiro e ela reenvia.
       const { rows } = await pool.query(
-        `SELECT f.*, e.nome AS equipe_nome
+        `SELECT f.*, e.nome AS equipe_nome,
+                ev.status AS envio_status, ev.enviado_em, ev.enviado_por
            FROM isc_fichas f
            LEFT JOIN isc_equipes e ON e.id = f.equipe_id
+           LEFT JOIN isc_envios ev ON ev.ficha_id = f.id AND ev.janela = f.proxima_janela
           WHERE f.status_vigilancia = 'em_vigilancia'
             AND f.proximo_contato_em IS NOT NULL
             AND f.proximo_contato_em <= $1
             AND ($2::int IS NULL OR f.instituicao_id = $2)
-          ORDER BY f.proximo_contato_em ASC, f.id ASC
-          LIMIT 300`, [limite, instId]);
+          ORDER BY (ev.enviado_em IS NOT NULL), f.proximo_contato_em ASC, f.id ASC
+          LIMIT 300`, [limite, instId]);   // quem falta enviar vem primeiro
 
       const { rows: tpls } = await pool.query(
         `SELECT * FROM isc_msg_templates
@@ -458,7 +468,10 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       const zapInst = cfg.whatsapp_business || null;
 
       const hoje = hojeISO();
-      const cards = rows.map(f => {
+      const aEnviar = rows.filter(f => !f.enviado_em).length;
+      const jaEnviadas = rows.length - aEnviar;
+      const visiveis = req.query.pendentes === '1' ? rows.filter(f => !f.enviado_em) : rows;
+      const cards = visiveis.map(f => {
         const dias = f.proxima_janela;
         const tpl = tpls.find(t => Number(t.janela) === Number(dias)) || tpls.find(t => t.janela == null);
         const dpo = diffDias(toISODate(f.data_cirurgia), hoje);
@@ -470,19 +483,30 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         const atraso = diffDias(toISODate(f.proximo_contato_em), hoje);
         const wa = f.telefone ? linkWhatsApp(f.telefone, corpo) : null;
         const tent = f.tentativas_falhas || 0;
+        const enviada = !!f.enviado_em;
 
-        return `<div class="card2">
+        return `<div class="card2"${enviada ? ' style="opacity:.62"' : ''}>
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
             <div>
               <a href="/isc/admin/ficha/${f.id}" style="font-weight:600;font-size:15px">${safe(f.paciente_nome || f.paciente_iniciais || '(sem nome)')}</a>
               <span class="pill" style="background:${atraso > 0 ? '#fdecea' : '#e8f0fe'};color:${atraso > 0 ? '#c0392b' : '#1a73e8'};margin-left:8px">janela ${dias}d${atraso > 0 ? ` · atrasado ${atraso}d` : atraso === 0 ? ' · hoje' : ` · em ${-atraso}d`}</span>
               ${tent > 0 ? `<span class="pill" style="background:#fff4e5;color:#b06000;margin-left:6px">${tent} tentativa${tent > 1 ? 's' : ''} sem sucesso</span>` : ''}
               ${f.telefone_presumido ? `<span class="pill" style="background:#fdecea;color:#c0392b;margin-left:6px" title="O DDD foi deduzido da cidade no import. Confirme o número antes de enviar: mensagem para o número errado revela a cirurgia a terceiros.">⚠ DDD presumido — confira</span>` : ''}
+              ${enviada ? `<span class="pill" style="background:#e6f4ea;color:#1e7e34;margin-left:6px">✓ enviada ${dataBR(f.enviado_em)}${f.enviado_por ? ' por ' + safe(f.enviado_por) : ''} · aguardando resposta</span>` : ''}
               <div class="sub" style="margin-top:4px">${safe(f.procedimento || '')} · ${safe(f.equipe_nome || '')} · cirurgia ${dataBR(f.data_cirurgia)} (${dpo} DPO) · ${f.telefone ? safe(formataTelefone(f.telefone)) : '<span style="color:#c0392b">sem telefone</span>'}</div>
             </div>
-            <div style="display:flex;gap:8px">
-              ${wa ? `<a class="btn" style="text-decoration:none;background:#25D366" href="${wa}" target="_blank" rel="noopener">Abrir WhatsApp</a>` : ''}
-              <a class="btn btn-sec" style="text-decoration:none" href="/isc/admin/ficha/${f.id}#contato">Registrar</a>
+            <div style="display:flex;gap:8px;align-items:center">
+              ${wa ? `<a class="btn" style="text-decoration:none;background:${enviada ? '#8bcfa4' : '#25D366'}" href="${wa}" target="_blank" rel="noopener">${enviada ? 'Reabrir conversa' : 'Abrir WhatsApp'}</a>` : ''}
+              ${enviada
+                ? `<form method="post" action="/isc/admin/envio/desmarcar" style="display:inline">
+                     <input type="hidden" name="inst" value="${safe(sigla || '')}">
+                     <input type="hidden" name="ficha_id" value="${f.id}"><input type="hidden" name="janela" value="${dias}">
+                     <button class="btn btn-sec" title="Marquei sem querer / não cheguei a enviar">Desmarcar</button></form>`
+                : (wa ? `<form method="post" action="/isc/admin/envio/marcar" style="display:inline">
+                     <input type="hidden" name="inst" value="${safe(sigla || '')}">
+                     <input type="hidden" name="ficha_id" value="${f.id}"><input type="hidden" name="janela" value="${dias}">
+                     <button class="btn btn-sec" title="Sai da fila de envio e passa a aguardar resposta">Já enviei</button></form>` : '')}
+              <a class="btn btn-sec" style="text-decoration:none" href="/isc/admin/ficha/${f.id}#contato">Registrar resposta</a>
             </div>
           </div>
           <details style="margin-top:10px"><summary style="cursor:pointer;font-size:12px;color:#5f6368">Ver mensagem (${safe(tpl?.nome || '—')})</summary>
@@ -511,14 +535,16 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           <b style="font-size:13px">Número do WhatsApp Business não configurado</b>
           <p class="sub" style="margin:6px 0 0">Sem ele não dá para conferir de qual número as mensagens estão saindo. <a href="/isc/admin/templates">Configurar agora</a>.</p>
         </div>`}
-        <form method="get" style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
+        <form method="get" style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <label class="l" style="margin:0">Horizonte</label>
           <select class="fil" name="dias" onchange="this.form.submit()">
             ${[0, 2, 7, 15, 30].map(d => `<option value="${d}" ${String(horizonte) === String(d) ? 'selected' : ''}>${d === 0 ? 'Vencidos + hoje' : `Próximos ${d} dias`}</option>`).join('')}
           </select>
-          <span class="sub">${rows.length} paciente(s) na fila</span>
+          <label class="chk"><input type="checkbox" name="pendentes" value="1" ${req.query.pendentes === '1' ? 'checked' : ''} onchange="this.form.submit()"> só as que faltam enviar</label>
+          <span class="pill" style="background:#fff4e5;color:#b06000">${aEnviar} a enviar</span>
+          <span class="pill" style="background:#e6f4ea;color:#1e7e34">${jaEnviadas} aguardando resposta</span>
         </form>
-        ${cards || `<div class="card2" style="text-align:center;color:#80868b;padding:40px">Nada pendente neste horizonte. 🎉</div>`}
+        ${cards || `<div class="card2" style="text-align:center;color:#80868b;padding:40px">${aEnviar === 0 && jaEnviadas > 0 ? 'Tudo enviado — aguardando as respostas. 🎉' : 'Nada pendente neste horizonte. 🎉'}</div>`}
       </div>${CSS}`;
 
       res.send(renderShell(`ISC · Agenda${sigla ? ' · ' + sigla : ''}`, html, sigla ? getTenantLogo(sigla) : undefined));
@@ -994,6 +1020,71 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
          ON CONFLICT (instituicao_id) DO UPDATE SET whatsapp_business=EXCLUDED.whatsapp_business, updated_at=now()`,
         [instId, tel]);
       res.redirect('/isc/admin/templates');
+    } catch (e) { erro(res, e); }
+  });
+
+  // ── Marcar envio ────────────────────────────────────────────────────────
+  // O sistema NÃO envia: ela dispara no WhatsApp e volta aqui para dizer que
+  // enviou. Sem este passo a agenda não distingue "mandei, esperando resposta"
+  // de "nem mandei" — e o paciente recebe a mesma mensagem duas vezes.
+  //
+  // Deliberadamente NÃO marcamos no clique do botão "Abrir WhatsApp": abrir a
+  // conversa não é enviar. Registrar envio que não aconteceu é pior que não
+  // registrar — some da fila e ninguém contata o paciente.
+  app.post('/isc/admin/envio/marcar', scihRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      const id = Number(req.body?.ficha_id);
+      const janela = Number(req.body?.janela);
+      if (!id || !janela) return res.status(400).send('Ficha e janela obrigatórias');
+
+      const dados = await carregarFicha(id, instId);
+      if (!dados) return res.status(404).send('Ficha não encontrada');
+      const { ficha: f, equipe } = dados;
+
+      // Snapshot do que foi enviado: o template pode mudar depois, e aí não se
+      // saberia mais o que o paciente recebeu.
+      const hospital = await nomeInst(sigla);
+      const { rows: tpls } = await pool.query(
+        `SELECT * FROM isc_msg_templates
+          WHERE ativo = true AND ($1::int IS NULL OR instituicao_id = $1)
+          ORDER BY ordem, id`, [instId]);
+      const tpl = tpls.find(t => Number(t.janela) === janela) || tpls.find(t => t.janela == null) || null;
+      const corpo = tpl ? renderTemplate(tpl.corpo, {
+        paciente_nome: f.paciente_nome, paciente_iniciais: f.paciente_iniciais,
+        procedimento: f.procedimento, data_cirurgia: f.data_cirurgia,
+        dias_pos_op: diffDias(toISODate(f.data_cirurgia), hojeISO()),
+        equipe: equipe?.nome, cirurgiao: f.cirurgiao, hospital,
+      }) : null;
+
+      await pool.query(
+        `INSERT INTO isc_envios (ficha_id, janela, template_id, telefone, corpo, status,
+                                 agendado_para, enviado_em, enviado_por, provider)
+         VALUES ($1,$2,$3,$4,$5,'manual',$6,now(),$7,'manual')
+         ON CONFLICT (ficha_id, janela) WHERE janela IS NOT NULL DO UPDATE
+           SET status='manual', enviado_em=now(), enviado_por=EXCLUDED.enviado_por,
+               corpo=COALESCE(EXCLUDED.corpo, isc_envios.corpo),
+               telefone=COALESCE(EXCLUDED.telefone, isc_envios.telefone), updated_at=now()`,
+        [id, janela, tpl?.id || null, f.telefone, corpo,
+         toISODate(f.proximo_contato_em), (req.user && req.user.full_name) || null]);
+
+      res.redirect(`/isc/admin/agenda?${new URLSearchParams({ ...req.query, inst: sigla || '' })}`);
+    } catch (e) { erro(res, e); }
+  });
+
+  // Desfazer: marcou sem querer, ou o envio falhou. Volta para a fila.
+  app.post('/isc/admin/envio/desmarcar', scihRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      const id = Number(req.body?.ficha_id);
+      const janela = Number(req.body?.janela);
+      if (!id || !janela) return res.status(400).send('Ficha e janela obrigatórias');
+      const dados = await carregarFicha(id, instId);
+      if (!dados) return res.status(404).send('Ficha não encontrada');
+      await pool.query(
+        `UPDATE isc_envios SET status='pendente', enviado_em=NULL, enviado_por=NULL, updated_at=now()
+          WHERE ficha_id=$1 AND janela=$2`, [id, janela]);
+      res.redirect(`/isc/admin/agenda?${new URLSearchParams({ ...req.query, inst: sigla || '' })}`);
     } catch (e) { erro(res, e); }
   });
 

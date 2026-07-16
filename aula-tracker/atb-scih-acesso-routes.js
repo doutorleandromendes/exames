@@ -85,10 +85,34 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
   // Relatórios de vigilância publicados no GitHub Pages (repo vigilancia_husf).
   // Para mudar a base é só editar VIG.
   const VIG = 'https://doutorleandromendes.github.io/vigilancia_husf';
-  app.get('/scih', adminSuper, (req, res) => {
+  app.get('/scih', adminSuper, async (req, res) => {
     const nome = (req.user && req.user.full_name) || 'Dr. Leandro';
-    const card = (href, icon, label, ext) =>
-      `<a class="hubcard" href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}>${icon} ${label}${ext ? ' <span class="ext">↗</span>' : ''}</a>`;
+    const card = (href, icon, label, ext, badge) =>
+      `<a class="hubcard" href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}>${icon} ${label}${
+        badge ? ` <span style="background:#e85d5d;color:#fff;border-radius:9px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px">${badge}</span>` : ''
+      }${ext ? ' <span class="ext">↗</span>' : ''}</a>`;
+
+    // Contadores ao vivo do ISC. Um portal diário sem número é só lista de links.
+    // Nunca deixa o portal cair por causa disto: se a query falhar, os cards vão
+    // sem badge (o módulo pode nem estar migrado ainda no primeiro boot).
+    const sigISC = tenantFromReq(req);
+    let iscVenc = 0, iscTriagem = 0, iscOk = true;
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          count(*) FILTER (WHERE f.status_vigilancia = 'em_vigilancia'
+                             AND f.proximo_contato_em <= CURRENT_DATE)::int AS vencidos,
+          count(*) FILTER (WHERE f.tem_alerta AND f.isc_classificacao = 'nao_avaliada')::int AS triagem
+          FROM isc_fichas f
+          LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
+         WHERE ($1::text IS NULL OR i.sigla = $1)`, [sigISC || null]);
+      iscVenc = rows[0]?.vencidos || 0;
+      iscTriagem = rows[0]?.triagem || 0;
+    } catch (e) { iscOk = false; }
+
+    // Fase 1 do ISC é só HUSF (equipes, regras e perfil são semeados lá). Em
+    // modo legado (sem tenant) também mostra. Some no SCMI até a fase 2.
+    const mostrarISC = !sigISC || String(sigISC).toUpperCase() === 'HUSF';
     res.send(page('Portal do SCIH', `
       <div class="card">
         <h1>Portal do SCIH — HUSF</h1>
@@ -103,6 +127,15 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/ficha', '📝', 'Formulário do prescritor')}
         </div>
 
+        ${mostrarISC ? `
+        <div class="sec">Vigilância pós-alta — ISC</div>
+        <div class="hub">
+          ${card('/isc/admin/agenda', '📞', 'Agenda de contatos', false, iscVenc || null)}
+          ${card('/isc/admin/grid', '🩹', 'Grid de vigilância', false, iscTriagem || null)}
+          ${card('/isc/admin/nova', '➕', 'Nova ficha (manual)')}
+          ${card('/isc/admin/importar', '📥', 'Importar mapa cirúrgico')}
+        </div>` : ''}
+
         <div class="sec">Indicadores &amp; consumo</div>
         <div class="hub">
           ${card('/atb/admin/adesao', '📈', 'Adesão aos pareceres')}
@@ -114,7 +147,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card(VIG + '/', '🦠', 'Respiratória (SG/SRAG)', true)}
           ${card(VIG + '/indicadores.html', '📊', 'IrAS &amp; determinantes', true)}
           ${card(VIG + '/mdr_mensal.html', '🧫', 'MDR mensal', true)}
-          ${card(VIG + '/isc_v4.html', '🩹', 'Infecção de sítio cirúrgico', true)}
+          ${card(VIG + '/isc_v4.html', '🩹', 'ISC — histórico (JotForm)', true)}
           ${card(VIG + '/micro.html', '🔬', 'Microbiologia', true)}
           ${card(VIG + '/sciet.html', '🧭', 'Algoritmo empírico UTI', true)}
         </div>
@@ -131,6 +164,14 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
           ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema')}
         </div>
+        ${mostrarISC ? `
+        <div class="sec">Configuração — ISC</div>
+        <div class="hub">
+          ${card('/isc/admin/triagem', '🔀', 'Regras de triagem (o que entra)')}
+          ${card('/isc/admin/templates', '💬', 'Mensagens do WhatsApp')}
+          ${card('/isc/admin/export.csv', '📄', 'Exportar CSV')}
+        </div>
+        ${iscOk ? '' : '<p class="mut" style="font-size:12px;margin-top:8px">⚠ Não consegui ler os contadores do ISC — se acabou de subir, confira o log das migrações.</p>'}` : ''}
         ${(() => {
           // Atalhos para as OUTRAS instituições do ATB_TENANT_MAP (links absolutos,
           // pois cada tenant é um subdomínio). Inerte no modo legado/env (sem mapa).

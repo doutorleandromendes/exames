@@ -172,6 +172,9 @@ console.log('\n── E2E: gravar / desfazer ──');
 const app = express();
 app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 app.use(express.json());
+// Sessão de médico: cobre importar + desfazer lote (ato médico). O corte de
+// permissão tem harness próprio (harness-isc-perfis).
+app.use((req, res, next) => { req.user = { id: 1, full_name: 'Dr. Leandro', scih: true, super_admin: true }; next(); });
 registerIscRoutes(app, pool, (q, s, n) => n(), renderShell);
 registerIscImportRoutes(app, pool, (q, s, n) => n(), renderShell);
 const srv = app.listen(0);

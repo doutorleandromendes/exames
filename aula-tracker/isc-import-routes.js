@@ -51,6 +51,22 @@ function entradaParaAoA(b) {
 
 export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
 
+  // Regra de triagem define o DENOMINADOR da taxa de ISC, e desfazer lote apaga
+  // ficha: os dois são do médico do SCIH, não da operação. Mesmo gate do
+  // isc-routes.js (incl. break-glass pelo cookie adm).
+  function ehMedico(req) {
+    return !!((req.user && req.user.super_admin) || req.cookies?.adm === '1');
+  }
+  function ensureMedico(req, res, next) {
+    if (ehMedico(req)) return next();
+    return res.status(403).send(renderShell('Sem permissão', `<div class="card">
+      <h1>Restrito ao médico do SCIH</h1>
+      <p class="mut">As regras de triagem definem quais cirurgias entram na vigilância — e portanto
+      o denominador da taxa de ISC. Desfazer um lote apaga fichas. Sua conta importa e opera, mas não altera isto.</p>
+      <a href="/isc/admin/importar">← Voltar</a></div>`));
+  }
+  const medicoRequired = [scihRequired, ensureMedico];
+
   const _instCache = new Map();
   async function instIdDeSigla(sigla) {
     const key = sanitizeSigla(sigla);
@@ -98,7 +114,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
     return s;
   }
 
-  function chrome(sigla, titulo, sub) {
+  function chrome(sigla, titulo, sub, med) {
     const cor = CORES[String(sigla).toUpperCase()] || '#0c447c';
     const logo = sigla ? getTenantLogo(sigla) : '';
     return `
@@ -109,7 +125,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <span style="color:#80868b;font-size:13px">${safe(sub)}</span>
         </div>
         ${sigla && logo ? `<img src="${logo}" alt="${safe(sigla)}" style="height:40px;width:auto;max-width:230px;object-fit:contain">` : ''}
-        <div style="display:flex;gap:14px"><a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a><a href="/isc/admin/nova">+ Manual</a><a href="/isc/admin/importar">Importar</a><a href="/isc/admin/triagem">Triagem</a></div>
+        <div style="display:flex;gap:14px"><a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a><a href="/isc/admin/nova">+ Manual</a><a href="/isc/admin/importar">Importar</a>${med ? '<a href="/isc/admin/triagem">Triagem</a>' : ''}</div>
       </div>`;
   }
 
@@ -161,14 +177,14 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         <td>${l.vivas} no grid</td>
         <td>${l.desfeito_em
           ? `<span class="sub">desfeito em ${toISODate(l.desfeito_em)}</span>`
-          : (l.vivas > 0
+          : (l.vivas > 0 && ehMedico(req)
             ? `<form method="post" action="/isc/admin/importar/lote/${l.id}/desfazer" style="display:inline" onsubmit="return confirm('Desfazer o lote ${l.id}? Fichas que já receberam contato ou classificação NÃO serão apagadas.')">
                  <button class="btn btn-sec" style="padding:4px 10px;font-size:11px">Desfazer</button></form>`
             : '<span class="sub">—</span>')}</td>
       </tr>`).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, 'Importar mapa cirúrgico', 'Cria fichas em lote — convive com o cadastro manual')}
+        ${chrome(sigla, 'Importar mapa cirúrgico', 'Cria fichas em lote — convive com o cadastro manual', ehMedico(req))}
         <div class="card2" style="background:#f8f9fa">
           <b style="font-size:13px">Como funciona</b>
           <p class="sub" style="margin:6px 0 0;line-height:1.6">
@@ -294,7 +310,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       }).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, 'Prévia da importação', `${resumo.total} linha(s) lidas · separador ${delim === '\t' ? 'TAB' : `"${delim}"`}`)}
+        ${chrome(sigla, 'Prévia da importação', `${resumo.total} linha(s) lidas · separador ${delim === '\t' ? 'TAB' : `"${delim}"`}`, ehMedico(req))}
         <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
           <div class="metric" style="border-left-color:#74c47d"><div class="mv" style="color:#3a8a4a">${resumo.novas}</div><div class="ml">Serão criadas</div></div>
           <div class="metric" style="border-left-color:#8e9aaf"><div class="mv" style="color:#5f6368">${resumo.fora_recorte || 0}</div><div class="ml">Fora do recorte</div></div>
@@ -302,7 +318,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${resumo.erros}</div><div class="ml">Com erro (puladas)</div></div>
           <div class="metric" style="border-left-color:#f0a500"><div class="mv" style="color:#b06000">${resumo.avisos}</div><div class="ml">Com aviso</div></div>
         </div>
-        ${regras ? `<p class="sub" style="margin:-6px 0 12px">Triagem ativa: <b>${regras.filter(x => x.vigiar).length} regra(s) de vigilância</b> e ${regras.filter(x => !x.vigiar).length} de exclusão. <a href="/isc/admin/triagem">Ajustar regras</a></p>` : ''}
+        ${regras ? `<p class="sub" style="margin:-6px 0 12px">Triagem ativa: <b>${regras.filter(x => x.vigiar).length} regra(s) de vigilância</b> e ${regras.filter(x => !x.vigiar).length} de exclusão. ${ehMedico(req) ? '<a href="/isc/admin/triagem">Ajustar regras</a>' : ''}</p>` : ''}
 
         <div class="card2" style="background:${diag.modo === 'relatorio' ? '#f2f7fd' : '#f8f9fa'};border-left:3px solid ${diag.modo === 'relatorio' ? '#3b6fd4' : '#dadce0'}">
           <b style="font-size:13px">${diag.modo === 'relatorio' ? 'Relatório em layout de impressão detectado' : 'Tabela plana'}</b>
@@ -465,7 +481,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   // ── Desfazer lote ───────────────────────────────────────────────────────
   // SÓ apaga ficha intocada: sem contato registrado e sem classificação.
   // Se alguém já trabalhou a ficha, o dado é dela — não do importador.
-  app.post('/isc/admin/importar/lote/:id/desfazer', scihRequired, async (req, res) => {
+  app.post('/isc/admin/importar/lote/:id/desfazer', medicoRequired, async (req, res) => {
     try {
       const { instId } = await resolveInst(req);
       const id = Number(req.params.id);
@@ -488,7 +504,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   // ── Regras de triagem ───────────────────────────────────────────────────
   // A tela existe para a implantação escalonada não depender de deploy:
   // ampliar para o rol do CVE = adicionar linhas aqui.
-  app.get('/isc/admin/triagem', scihRequired, async (req, res) => {
+  app.get('/isc/admin/triagem', medicoRequired, async (req, res) => {
     try {
       const { sigla, instId } = await resolveInst(req);
       const { rows } = await pool.query(
@@ -531,7 +547,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         </form>`;
 
       const html = `<div class="isc">
-        ${chrome(sigla, 'Regras de triagem', 'O que do mapa cirúrgico entra na vigilância')}
+        ${chrome(sigla, 'Regras de triagem', 'O que do mapa cirúrgico entra na vigilância', true)}
         <div class="card2" style="background:#f8f9fa">
           <b style="font-size:13px">Como funciona</b>
           <p class="sub" style="margin:6px 0 0;line-height:1.6">
@@ -549,7 +565,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
     } catch (e) { erro(res, e); }
   });
 
-  app.post('/isc/admin/triagem', scihRequired, async (req, res) => {
+  app.post('/isc/admin/triagem', medicoRequired, async (req, res) => {
     try {
       const { instId } = await resolveInst(req);
       const b = req.body || {};

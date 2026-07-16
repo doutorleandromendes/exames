@@ -26,7 +26,10 @@ await pool.query('TRUNCATE isc_envios, isc_contatos, isc_fichas RESTART IDENTITY
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-// scihRequired fake: passa direto (o auth real é testado em outro lugar)
+// Sessão de médico do SCIH: este harness exercita o módulo inteiro, inclusive a
+// classificação (que é ato médico). A separação colaboradora × médico tem
+// harness próprio (harness-isc-perfis).
+app.use((req, res, next) => { req.user = { id: 1, full_name: 'Dr. Leandro', scih: true, super_admin: true }; next(); });
 registerIscRoutes(app, pool, (req, res, next) => next(), renderShell);
 const srv = app.listen(0);
 const base = `http://127.0.0.1:${srv.address().port}`;

@@ -15,9 +15,12 @@
 // CRON
 //   POST /isc/cron/agendar → 202 imediato, agenda envios das janelas vencendo.
 //
-// TENANCY: o tenantLock do atb-tenant.js só cobre /atb. Aqui a separação é
-// feita explicitamente: resolveInst() decide o instituicao_id e TODA query de
-// ficha passa por ele; ficha de outro tenant → 404 opaco (anti-enumeração).
+// TENANCY: o tenantLock do atb-routes.js é app.use(), então roda em TODA
+// requisição e já popula req.atbTenant aqui — é o que faz o scihRequired barrar
+// usuário vinculado a outra unidade. Mas o lock só FORÇA o filtro (req.query.inst)
+// em rotas /atb. Por isso a separação do ISC é explícita e não depende dele:
+// resolveInst() decide o instituicao_id e TODA query de ficha passa por ele;
+// ficha de outro tenant → 404 opaco (anti-enumeração).
 // ──────────────────────────────────────────────────────────────────────────
 
 import { tenantFromReq, getTenantLogo, sanitizeSigla } from './atb-tenant.js';
@@ -49,6 +52,24 @@ const BADGE_JANELA = {
 };
 
 export function registerIscRoutes(app, pool, scihRequired, renderShell) {
+
+  // ── Ato médico ──────────────────────────────────────────────────────────
+  // Classificar ISC é decisão médica e alimenta o numerador do CVE: no SCIH do
+  // HUSF só o médico classifica. `scih` sozinho dá acesso à operação (agenda,
+  // contato, importação) — não a esta. Mesmo padrão do ensureSuper do
+  // atb-scih-acesso-routes.js, inclusive o break-glass pelo cookie adm.
+  function ehMedico(req) {
+    return !!((req.user && req.user.super_admin) || req.cookies?.adm === '1');
+  }
+  function ensureMedico(req, res, next) {
+    if (ehMedico(req)) return next();
+    return res.status(403).send(renderShell('Sem permissão', `<div class="card">
+      <h1>Restrito ao médico do SCIH</h1>
+      <p class="mut">A classificação de ISC é ato médico e alimenta os numeradores do CVE.
+      Sua conta registra contatos e opera a vigilância, mas não classifica.</p>
+      <a href="/isc/admin/grid">← Voltar ao grid</a></div>`));
+  }
+  const medicoRequired = [scihRequired, ensureMedico];
 
   // ── Tenancy ─────────────────────────────────────────────────────────────
   const _instCache = new Map();
@@ -138,7 +159,10 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       </div>`;
   }
 
-  const NAV = `<a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a><a href="/isc/admin/nova">+ Nova ficha</a><a href="/isc/admin/importar">Importar mapa</a><a href="/isc/admin/triagem">Triagem</a><a href="/isc/admin/templates">Mensagens</a>`;
+  const nav = (req) => `<a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a>`
+    + `<a href="/isc/admin/nova">+ Nova ficha</a><a href="/isc/admin/importar">Importar mapa</a>`
+    + (ehMedico(req) ? `<a href="/isc/admin/triagem">Triagem</a>` : '')
+    + `<a href="/isc/admin/templates">Mensagens</a>`;
 
   const CSS = `
     <style>
@@ -322,7 +346,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           `<option value="${safe(v)}" ${String(sel) === String(v) ? 'selected' : ''}>${safe(l)}</option>`).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, 'Vigilância ISC', 'Busca ativa pós-alta · classificação · indicadores', NAV + `<a href="/isc/admin/export.csv?${new URLSearchParams(q)}">CSV</a>`)}
+        ${chrome(sigla, 'Vigilância ISC', 'Busca ativa pós-alta · classificação · indicadores', nav(req) + `<a href="/isc/admin/export.csv?${new URLSearchParams(q)}">CSV</a>`)}
         <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${m.confirmadas || 0}</div><div class="ml">ISC confirmadas</div></div>
           <div class="metric" style="border-left-color:#5a9bf0"><div class="mv" style="color:#2c6fb5">${m.investigando || 0}</div><div class="ml">Em investigação</div></div>
@@ -423,7 +447,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       }).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, 'Agenda de contatos', 'Quem precisa ser contatado — mensagem já pronta', NAV)}
+        ${chrome(sigla, 'Agenda de contatos', 'Quem precisa ser contatado — mensagem já pronta', nav(req))}
         <form method="get" style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
           <label class="l" style="margin:0">Horizonte</label>
           <select class="fil" name="dias" onchange="this.form.submit()">
@@ -446,7 +470,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       const { sigla, instId } = await resolveInst(req);
       const equipes = await equipesDe(instId);
       const html = `<div class="isc">
-        ${chrome(sigla, 'Nova ficha de vigilância', '1 paciente-cirurgia = 1 ficha', NAV)}
+        ${chrome(sigla, 'Nova ficha de vigilância', '1 paciente-cirurgia = 1 ficha', nav(req))}
         <form method="post" action="/isc/admin/fichas">
           <div class="card2"><h2>Paciente</h2><div class="ff">
             <div><label class="l">Nome completo</label><input name="paciente_nome" required></div>
@@ -599,7 +623,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         `<option value="${safe(val)}" ${String(v) === String(val) ? 'selected' : ''}>${safe(lab)}</option>`).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, f.paciente_nome || f.paciente_iniciais || 'Ficha', `${dpo} DPO · cirurgia ${toISODate(f.data_cirurgia)}`, NAV)}
+        ${chrome(sigla, f.paciente_nome || f.paciente_iniciais || 'Ficha', `${dpo} DPO · cirurgia ${toISODate(f.data_cirurgia)}`, nav(req))}
 
         <div class="card2">
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${badges}</div>
@@ -671,7 +695,19 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
           <div class="card2" style="border-left:3px solid #e85d5d">
             <h2>Classificação SCIH</h2>
-            <p class="sub" style="margin-top:-6px">Campo do médico. O contato da colaboradora nunca sobrescreve isto.</p>
+            <p class="sub" style="margin-top:-6px">Ato médico. O contato da colaboradora nunca sobrescreve isto.</p>
+            ${!ehMedico(req) ? `
+            <!-- Leitura para quem não classifica: mostrar um formulário que dá 403
+                 ao salvar seria pior que não mostrar nada. -->
+            <div style="display:grid;gap:10px;font-size:13px">
+              <div><span class="l">Classificação</span><span class="pill" style="background:${f.isc_classificacao === 'confirmada' ? '#fdecea' : '#f1f3f4'};color:${f.isc_classificacao === 'confirmada' ? '#c0392b' : '#5f6368'}">${safe(CLASSIF_LABEL[f.isc_classificacao] || '—')}</span></div>
+              <div><span class="l">Tipo</span>${safe(TIPO_LABEL[f.isc_tipo] || '—')}</div>
+              <div><span class="l">Data do diagnóstico</span>${toISODate(f.isc_data_diagnostico) || '—'}</div>
+              <div><span class="l">Patógeno</span>${safe(f.isc_patogeno || '—')}</div>
+              ${f.isc_observacao ? `<div><span class="l">Parecer</span><div style="white-space:pre-wrap">${safe(f.isc_observacao)}</div></div>` : ''}
+              ${f.classificado_em ? `<p class="sub">Classificado em ${toISODate(f.classificado_em)} por ${safe(f.classificado_por || '—')}</p>` : '<p class="sub">Aguardando avaliação médica.</p>'}
+              ${f.tem_alerta || f.suspeita_isc ? `<div class="pill" style="background:#fff4e5;color:#b06000;padding:8px 10px;line-height:1.5">Esta ficha está sinalizada e aparece na fila de classificação do médico.</div>` : ''}
+            </div>` : `
             <form method="post" action="/isc/admin/ficha/${f.id}/classificar">
               <div style="display:grid;gap:12px">
                 <div><label class="l">Classificação</label><select name="isc_classificacao">${sel(ISC_CLASSIFICACOES, f.isc_classificacao)}</select></div>
@@ -693,7 +729,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
               </div>
               <button class="btn" style="margin-top:12px;background:#c0392b">Salvar classificação</button>
               ${f.classificado_em ? `<p class="sub" style="margin-top:8px">Última classificação: ${toISODate(f.classificado_em)} por ${safe(f.classificado_por || '—')}</p>` : ''}
-            </form>
+            </form>`}
           </div>
         </div>
       </div>${CSS}`;
@@ -748,7 +784,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
   });
 
   // ── Classificar ─────────────────────────────────────────────────────────
-  app.post('/isc/admin/ficha/:id/classificar', scihRequired, async (req, res) => {
+  app.post('/isc/admin/ficha/:id/classificar', medicoRequired, async (req, res) => {
     try {
       const { instId } = await resolveInst(req);
       const id = Number(req.params.id);
@@ -841,7 +877,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         </div>`).join('');
 
       const html = `<div class="isc">
-        ${chrome(sigla, 'Mensagens padronizadas', 'Texto enviado pelo WhatsApp Business em cada janela', NAV)}
+        ${chrome(sigla, 'Mensagens padronizadas', 'Texto enviado pelo WhatsApp Business em cada janela', nav(req))}
         <div class="card2" style="background:#f8f9fa">
           <b style="font-size:13px">Placeholders disponíveis</b>
           <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">${PLACEHOLDERS.map(p => `<code style="background:#fff;border:1px solid #e8eaed;border-radius:6px;padding:2px 6px;font-size:12px">${safe(p)}</code>`).join('')}</div>

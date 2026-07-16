@@ -98,6 +98,12 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     return rows[0]?.nome || sigla;
   }
 
+  async function configDe(instId) {
+    if (instId == null) return {};
+    const { rows } = await pool.query('SELECT * FROM isc_config WHERE instituicao_id = $1', [instId]);
+    return rows[0] || {};
+  }
+
   async function equipesDe(instId) {
     const { rows } = await pool.query(
       `SELECT * FROM isc_equipes
@@ -445,6 +451,12 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           WHERE ativo = true AND ($1::int IS NULL OR instituicao_id = $1)
           ORDER BY ordem, id`, [instId]);
 
+      // O link wa.me NÃO escolhe o remetente: sai de qualquer conta logada no
+      // navegador. Não há como o servidor saber qual é — então o que dá para
+      // fazer é lembrar qual DEVERIA ser, no momento exato do envio.
+      const cfg = await configDe(instId);
+      const zapInst = cfg.whatsapp_business || null;
+
       const hoje = hojeISO();
       const cards = rows.map(f => {
         const dias = f.proxima_janela;
@@ -482,6 +494,23 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
       const html = `<div class="isc">
         ${chrome(sigla, 'Agenda de contatos', 'Quem precisa ser contatado — mensagem já pronta', nav(req))}
+        ${zapInst ? `
+        <div class="card2" style="border-left:3px solid #25D366;background:#f4fbf6">
+          <b style="font-size:13px">Enviar sempre pelo WhatsApp Business: ${safe(formataTelefone(zapInst))}</b>
+          <p class="sub" style="margin:6px 0 8px;line-height:1.6">
+            O botão abaixo abre a conversa com o paciente pela conta que estiver logada <b>neste navegador</b> —
+            se for a sua conta pessoal, a mensagem sai dela e o paciente fica com o seu contato particular.
+          </p>
+          <a class="btn btn-sec" style="text-decoration:none;display:inline-block"
+             href="${linkWhatsApp(zapInst, 'Teste de remetente — SCIH')}" target="_blank" rel="noopener">
+            Testar de qual número estou enviando
+          </a>
+          <span class="sub" style="margin-left:8px">Abre conversa com o próprio Business: se aparecer <b>“(Você)”</b>, está certo. Se abrir como contato normal, você está em outra conta.</span>
+        </div>` : `
+        <div class="card2" style="border-left:3px solid #f0a500;background:#fffaf2">
+          <b style="font-size:13px">Número do WhatsApp Business não configurado</b>
+          <p class="sub" style="margin:6px 0 0">Sem ele não dá para conferir de qual número as mensagens estão saindo. <a href="/isc/admin/templates">Configurar agora</a>.</p>
+        </div>`}
         <form method="get" style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
           <label class="l" style="margin:0">Horizonte</label>
           <select class="fil" name="dias" onchange="this.form.submit()">
@@ -910,8 +939,18 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           </form>
         </div>`).join('');
 
+      const cfg = await configDe(instId);
       const html = `<div class="isc">
         ${chrome(sigla, 'Mensagens padronizadas', 'Texto enviado pelo WhatsApp Business em cada janela', nav(req))}
+        <div class="card2" style="border-left:3px solid #25D366">
+          <h2>Número institucional (WhatsApp Business)</h2>
+          <p class="sub" style="margin-top:-8px">Aparece na agenda como lembrete e alimenta o autoteste de remetente. Fixo é aceito no Business.</p>
+          <form method="post" action="/isc/admin/config" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div><label class="l">Número com DDD</label><input name="whatsapp_business" value="${safe(cfg.whatsapp_business ? formataTelefone(cfg.whatsapp_business) : '')}" placeholder="(11) 2490-1268" style="max-width:220px"></div>
+            <button class="btn">Salvar</button>
+            ${cfg.whatsapp_business ? `<span class="sub">Gravado: ${safe(cfg.whatsapp_business)}</span>` : ''}
+          </form>
+        </div>
         <div class="card2" style="background:#f8f9fa">
           <b style="font-size:13px">Placeholders disponíveis</b>
           <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap">${PLACEHOLDERS.map(p => `<code style="background:#fff;border:1px solid #e8eaed;border-radius:6px;padding:2px 6px;font-size:12px">${safe(p)}</code>`).join('')}</div>
@@ -933,6 +972,28 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         </div>
       </div>${CSS}`;
       res.send(renderShell('ISC · Mensagens', html, sigla ? getTenantLogo(sigla) : undefined));
+    } catch (e) { erro(res, e); }
+  });
+
+  app.post('/isc/admin/config', scihRequired, async (req, res) => {
+    try {
+      const { instId } = await resolveInst(req);
+      if (instId == null) return res.status(400).send('Instituição não resolvida');
+      // Fixo institucional (10 dígitos) é número válido de Business — o
+      // normalizaTelefone já aceita; o que ele rejeita é número sem DDD.
+      const tel = normalizaTelefone(req.body?.whatsapp_business);
+      if (!tel) {
+        return res.status(400).send(renderShell('ISC · Config', `<div class="card">
+          <h1>Número inválido</h1>
+          <p class="mut">Informe com DDD, ex.: (11) 2490-1268.</p>
+          <a href="/isc/admin/templates">← Voltar</a></div>`));
+      }
+      await pool.query(
+        `INSERT INTO isc_config (instituicao_id, whatsapp_business, updated_at)
+         VALUES ($1,$2,now())
+         ON CONFLICT (instituicao_id) DO UPDATE SET whatsapp_business=EXCLUDED.whatsapp_business, updated_at=now()`,
+        [instId, tel]);
+      res.redirect('/isc/admin/templates');
     } catch (e) { erro(res, e); }
   });
 

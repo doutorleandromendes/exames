@@ -256,6 +256,19 @@ export async function runIscMigrations(pool) {
     ON CONFLICT (instituicao_id, nome) DO NOTHING
   `);
 
+  // ── Config de mensageria ──────────────────────────────────────────────────
+  // O número institucional do WhatsApp Business. Serve para (a) lembrar a
+  // colaboradora, no momento do envio, de qual número a mensagem DEVE sair, e
+  // (b) o autoteste de remetente. Fica no banco, não no código: número de
+  // hospital muda e não vai virar deploy.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS isc_config (
+      instituicao_id    INTEGER PRIMARY KEY REFERENCES atb_instituicoes(id),
+      whatsapp_business TEXT,     -- E.164 (ex.: 551124901268)
+      updated_at        TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+
   // ── Fila de envios ────────────────────────────────────────────────────────
   // PROVISÃO PARA ENVIO AUTOMÁTICO. Fase 1: o sistema agenda + renderiza a
   // mensagem e a colaboradora dispara pelo WhatsApp Business (link wa.me) e

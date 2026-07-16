@@ -198,6 +198,36 @@ t('link wa.me montado', html.includes('https://wa.me/5511987654321'));
 t('janela certa na fila', html.includes('janela 7d'));
 t('não vaza placeholder', !html.includes('{{'));
 
+console.log('\n── Número institucional e autoteste de remetente ──');
+// O wa.me NÃO escolhe o remetente — sai da conta logada no navegador, e o
+// servidor não tem como saber qual é. O que dá para fazer é lembrar qual
+// DEVERIA ser e oferecer um autoteste seguro (conversa com o próprio Business).
+await pool.query('DELETE FROM isc_config');
+html = await (await get('/isc/admin/agenda?inst=HUSF&dias=0')).text();
+t('sem número → agenda avisa', html.includes('não configurado'));
+t('link wa.me do paciente continua funcionando', html.includes('https://wa.me/5511987654321'));
+
+r = await post('/isc/admin/config?inst=HUSF', { whatsapp_business: '11 24901268' });
+t('salva o número', r.status === 302);
+t('grava em E.164 (fixo institucional é válido no Business)',
+  (await pool.query('SELECT whatsapp_business w FROM isc_config')).rows[0].w === '551124901268');
+r = await post('/isc/admin/config?inst=HUSF', { whatsapp_business: '24901268' });
+t('sem DDD → 400', r.status === 400, `status=${r.status}`);
+t('e não sobrescreve o número bom',
+  (await pool.query('SELECT whatsapp_business w FROM isc_config')).rows[0].w === '551124901268');
+r = await post('/isc/admin/config?inst=HUSF', { whatsapp_business: 'abc' });
+t('lixo → 400', r.status === 400);
+
+html = await (await get('/isc/admin/agenda?inst=HUSF&dias=0')).text();
+t('banner mostra o número formatado', html.includes('(11) 2490-1268'));
+t('autoteste aponta para o próprio Business', html.includes('https://wa.me/551124901268'));
+t('explica o sinal "(Você)"', html.includes('(Você)'));
+t('avisa que sai da conta do navegador', html.includes('neste navegador'));
+html = await (await get('/isc/admin/templates?inst=HUSF')).text();
+t('tela de mensagens tem o form do número', html.includes('name="whatsapp_business"'));
+html = await (await get('/isc/admin/agenda?inst=SCMI')).text();
+t('SCMI não vê o número do HUSF', !html.includes('2490-1268'));
+
 console.log('\n── Cron ──');
 r = await post('/isc/cron/agendar', {});
 t('cron responde 202 imediato', r.status === 202, `status=${r.status}`);

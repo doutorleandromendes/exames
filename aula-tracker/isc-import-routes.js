@@ -15,8 +15,8 @@
 import * as XLSX from 'xlsx';
 import { tenantFromReq, getTenantLogo, sanitizeSigla } from './atb-tenant.js';
 import {
-  CAMPOS_IMPORTAVEIS, parseTabular, adivinhaMapeamento, montarPrevia,
-  chaveDedup, detectaDelimitador,
+  CAMPOS_IMPORTAVEIS, CAMPOS_COMPLEMENTAVEIS, parseTabular, adivinhaMapeamento,
+  montarPrevia, chaveDedup, detectaDelimitador,
 } from './isc-import.js';
 import { toISODate, dataBR, janelasDe, recomputarEstado } from './isc-core.js';
 import { normalizaAoA } from './isc-import-relatorio.js';
@@ -100,18 +100,20 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   }
 
   // Chaves atendimento|data já existentes, para a prévia marcar duplicata.
-  // Guarda as DUAS formas de chave: a ficha antiga pode ter entrado sem o nº da
-  // cirurgia (cadastro manual), a nova vem com ele.
-  async function chavesExistentes(instId) {
+  // Map chave→ficha (não só as chaves): a prévia precisa do CONTEÚDO da ficha
+  // existente para saber o que dá para complementar. Guarda as duas formas de
+  // chave — ficha antiga pode ter entrado sem o nº da cirurgia (cadastro manual).
+  async function fichasExistentes(instId) {
+    const cols = ['id', 'cirurgia_id', 'atendimento', 'data_cirurgia', ...CAMPOS_COMPLEMENTAVEIS]
+      .filter((c, i, a) => a.indexOf(c) === i).join(', ');
     const { rows } = await pool.query(
-      `SELECT cirurgia_id, atendimento, data_cirurgia FROM isc_fichas
-        WHERE ($1::int IS NULL OR instituicao_id = $1)`, [instId]);
-    const s = new Set();
+      `SELECT ${cols} FROM isc_fichas WHERE ($1::int IS NULL OR instituicao_id = $1)`, [instId]);
+    const m = new Map();
     for (const r of rows) {
-      if (r.cirurgia_id) s.add(`cir:${String(r.cirurgia_id).trim()}`);
-      if (r.atendimento) s.add(`at:${String(r.atendimento).trim()}|${toISODate(r.data_cirurgia)}`);
+      if (r.cirurgia_id) m.set(`cir:${String(r.cirurgia_id).trim()}`, r);
+      if (r.atendimento) m.set(`at:${String(r.atendimento).trim()}|${toISODate(r.data_cirurgia)}`, r);
     }
-    return s;
+    return m;
   }
 
   function chrome(sigla, titulo, sub, med) {
@@ -173,12 +175,12 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         <td>${l.id}</td>
         <td>${dataBR(l.created_at)}</td>
         <td>${safe(l.arquivo_nome || '—')}</td>
-        <td>${l.criadas} criadas · ${l.ignoradas} ignoradas</td>
+        <td>${l.criadas} criadas${l.complementadas ? ` · ${l.complementadas} complementadas` : ''} · ${l.ignoradas} ignoradas</td>
         <td>${l.vivas} no grid</td>
         <td>${l.desfeito_em
           ? `<span class="sub">desfeito em ${toISODate(l.desfeito_em)}</span>`
           : (l.vivas > 0 && ehMedico(req)
-            ? `<form method="post" action="/isc/admin/importar/lote/${l.id}/desfazer" style="display:inline" onsubmit="return confirm('Desfazer o lote ${l.id}? Fichas que já receberam contato ou classificação NÃO serão apagadas.')">
+            ? `<form method="post" action="/isc/admin/importar/lote/${l.id}/desfazer" style="display:inline" onsubmit="return confirm('Desfazer o lote ${l.id}?\n\nApaga apenas as ${l.criadas} ficha(s) que ELE criou — e só as que ainda não receberam contato nem classificação.\n\nCampos complementados por ele NÃO voltam atrás.')">
                  <button class="btn btn-sec" style="padding:4px 10px;font-size:11px">Desfazer</button></form>`
             : '<span class="sub">—</span>')}</td>
       </tr>`).join('');
@@ -276,7 +278,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       if (!mapa) mapa = adivinhaMapeamento(header, linhas);
 
       const equipes = await equipesDe(instId);
-      const existentes = await chavesExistentes(instId);
+      const existentes = await fichasExistentes(instId);
       const regras = b.sem_triagem === '1' ? null : await regrasDe(instId);
       const { itens, resumo } = montarPrevia(linhas, mapa, equipes, existentes, regras);
 
@@ -291,10 +293,18 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         </div>`; }).join('');
 
       const PILL = { nova: ['#e6f4ea', '#1e7e34', 'nova'], duplicada: ['#f1f3f4', '#80868b', 'já existe'],
+                     complementa: ['#e8f0fe', '#1a73e8', 'complementa'],
                      erro: ['#fdecea', '#c0392b', 'erro'], fora_recorte: ['#eceff3', '#8e9aaf', 'fora do recorte'] };
+      const rotulo = Object.fromEntries(CAMPOS_IMPORTAVEIS.map(c => [c.key, c.label]));
+      rotulo.telefone = 'Telefone'; rotulo.telefone_raw = 'Telefone (original)';
+      rotulo.telefone_presumido = 'DDD presumido'; rotulo.equipe_id = 'Equipe'; rotulo.especialidade = 'Especialidade';
       const linhasUI = itens.slice(0, 300).map(it => {
         const [bg, fg, tx] = PILL[it.status];
+        const compl = it.complemento
+          ? `<span style="color:#1a73e8">Vai preencher: <b>${safe(Object.keys(it.complemento.campos).map(k => rotulo[k] || k).join(', '))}</b></span>`
+          : '';
         const msgs = [
+          compl,
           it.motivo ? `<span style="color:#5f6368">${safe(it.motivo)}</span>` : '',
           ...it.erros.map(e => `<span style="color:#c0392b">${safe(e)}</span>`),
           ...it.avisos.map(a => `<span style="color:#b06000">${safe(a)}</span>`)].filter(Boolean).join('<br>');
@@ -311,10 +321,11 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
 
       const html = `<div class="isc">
         ${chrome(sigla, 'Prévia da importação', `${resumo.total} linha(s) lidas · separador ${delim === '\t' ? 'TAB' : `"${delim}"`}`, ehMedico(req))}
-        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
           <div class="metric" style="border-left-color:#74c47d"><div class="mv" style="color:#3a8a4a">${resumo.novas}</div><div class="ml">Serão criadas</div></div>
+          <div class="metric" style="border-left-color:#3b6fd4"><div class="mv" style="color:#2c5aa8">${resumo.complementa || 0}</div><div class="ml">Serão complementadas</div></div>
           <div class="metric" style="border-left-color:#8e9aaf"><div class="mv" style="color:#5f6368">${resumo.fora_recorte || 0}</div><div class="ml">Fora do recorte</div></div>
-          <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${resumo.duplicadas}</div><div class="ml">Já existem (puladas)</div></div>
+          <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${resumo.duplicadas}</div><div class="ml">Já existem, nada a somar</div></div>
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${resumo.erros}</div><div class="ml">Com erro (puladas)</div></div>
           <div class="metric" style="border-left-color:#f0a500"><div class="mv" style="color:#b06000">${resumo.avisos}</div><div class="ml">Com aviso</div></div>
         </div>
@@ -364,11 +375,12 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <input type="hidden" name="modo" value="${safe(modo)}">
           <input type="hidden" name="sem_triagem" value="${b.sem_triagem === '1' ? '1' : ''}">
           <input type="hidden" name="mapa_json" id="mj2">
-          <button class="btn" ${resumo.novas === 0 ? 'disabled style="opacity:.5"' : ''} type="submit">
-            Gravar ${resumo.novas} ficha(s)
+          <button class="btn" ${(resumo.novas + (resumo.complementa || 0)) === 0 ? 'disabled style="opacity:.5"' : ''} type="submit">
+            ${[resumo.novas ? `Criar ${resumo.novas} ficha(s)` : '', resumo.complementa ? `complementar ${resumo.complementa}` : ''].filter(Boolean).join(' · ') || 'Nada a fazer'}
           </button>
           <a class="btn btn-sec" href="/isc/admin/importar" style="text-decoration:none;margin-left:8px;display:inline-block">Cancelar</a>
-          ${resumo.novas === 0 ? '<span class="sub" style="margin-left:10px">Nada novo para gravar.</span>' : ''}
+          ${(resumo.novas + (resumo.complementa || 0)) === 0 ? '<span class="sub" style="margin-left:10px">Nada novo para gravar.</span>' : ''}
+          ${resumo.complementa ? '<p class="sub" style="margin-top:8px">Complementar só <b>preenche campo vazio</b> — nunca sobrescreve o que já está na ficha, nem toca na classificação.</p>' : ''}
         </form>
 
         <script>
@@ -407,7 +419,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       try { mapa = JSON.parse(b.mapa_json || '{}'); } catch { mapa = adivinhaMapeamento(norm.rotulos, norm.linhas); }
 
       const equipes = await equipesDe(instId);
-      const existentes = await chavesExistentes(instId);
+      const existentes = await fichasExistentes(instId);
       const regras = b.sem_triagem === '1' ? null : await regrasDe(instId);
       // Recalcula a prévia no servidor: o que a tela mostrou é dica, não
       // autorização. Nunca confiar na classificação que veio do browser —
@@ -416,11 +428,13 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       const { itens } = montarPrevia(linhas, mapa, equipes, existentes, regras);
       const novas = itens.filter(i => i.status === 'nova');
 
+      const aComplementar = itens.filter(i => i.status === 'complementa');
+
       const { rows: [lote] } = await pool.query(
-        `INSERT INTO isc_import_lotes (instituicao_id, criado_por, arquivo_nome, mapeamento, total_linhas, criadas, ignoradas)
-         VALUES ($1,$2,$3,$4,$5,0,$6) RETURNING id`,
+        `INSERT INTO isc_import_lotes (instituicao_id, criado_por, arquivo_nome, mapeamento, total_linhas, criadas, complementadas, ignoradas)
+         VALUES ($1,$2,$3,$4,$5,0,0,$6) RETURNING id`,
         [instId, b.criado_por || null, b.arquivo_nome || null, JSON.stringify(mapa),
-         itens.length, itens.length - novas.length]);
+         itens.length, itens.length - novas.length - aComplementar.length]);
 
       let criadas = 0;
       const ids = [];
@@ -469,11 +483,31 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         } catch (e) { console.error('[isc-import] sync', id, e.message); }
       }
 
-      await pool.query(
-        `UPDATE isc_import_lotes SET criadas=$2, ignoradas=$3 WHERE id=$1`,
-        [lote.id, criadas, itens.length - criadas]);
+      // ── Complementação ────────────────────────────────────────────────────
+      // UPDATE só nas colunas de CAMPOS_COMPLEMENTAVEIS. O nome da coluna NUNCA
+      // vem de fora: é filtrado contra a whitelist antes de entrar no SQL — o
+      // valor vai parametrizado, mas identificador não parametriza.
+      const PERMITIDAS = new Set([...CAMPOS_COMPLEMENTAVEIS, 'telefone_raw', 'telefone_presumido']);
+      let complementadas = 0;
+      for (const it of aComplementar) {
+        const campos = Object.entries(it.complemento.campos).filter(([k]) => PERMITIDAS.has(k));
+        if (!campos.length) continue;
+        try {
+          const sets = campos.map(([k], i) => `${k} = $${i + 2}`);
+          const vals = campos.map(([, v]) => v);
+          const { rowCount } = await pool.query(
+            `UPDATE isc_fichas SET ${sets.join(', ')}, updated_at = now()
+              WHERE id = $1 AND ($${campos.length + 2}::int IS NULL OR instituicao_id = $${campos.length + 2})`,
+            [it.complemento.id, ...vals, instId]);
+          if (rowCount) complementadas++;
+        } catch (e) { console.error('[isc-import] complementar ficha', it.complemento.id, e.message); }
+      }
 
-      console.log(`[isc-import] lote ${lote.id}: ${criadas} ficha(s) criada(s) de ${itens.length} linha(s)`);
+      await pool.query(
+        `UPDATE isc_import_lotes SET criadas=$2, complementadas=$3, ignoradas=$4 WHERE id=$1`,
+        [lote.id, criadas, complementadas, itens.length - criadas - complementadas]);
+
+      console.log(`[isc-import] lote ${lote.id}: ${criadas} criada(s), ${complementadas} complementada(s) de ${itens.length} linha(s)`);
       res.redirect(`/isc/admin/grid?${new URLSearchParams({ inst: sigla || '', lote: String(lote.id) })}`);
     } catch (e) { erro(res, e); }
   });

@@ -94,7 +94,7 @@ t('col 7: dica erra (pega "CID"), por isso o operador confirma', n.rotulos[7] ==
 console.log('\n── Fim a fim: normalizar → mapear → prévia ──');
 const mapa = { 13: 'paciente_nome', 3: 'atendimento', 7: 'data_cirurgia', 5: 'procedimento', 12: 'duracao_min', 22: 'cirurgiao' };
 const prev = montarPrevia(n.linhas, mapa, [], new Set());
-eq('3 fichas válidas, 0 erro', prev.resumo, { total: 3, novas: 3, duplicadas: 0, erros: 0, fora_recorte: 0, avisos: 0 });
+eq('3 fichas válidas, 0 erro', prev.resumo, { total: 3, novas: 3, complementa: 0, duplicadas: 0, erros: 0, fora_recorte: 0, avisos: 0 });
 eq('data com hora → ISO', prev.itens[0].ficha.data_cirurgia, '2026-07-13');
 eq('nome completo na ficha', prev.itens[0].ficha.paciente_nome, 'Leonardo Soares de Pugas');
 eq('duração', prev.itens[0].ficha.duracao_min, 125);

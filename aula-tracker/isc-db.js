@@ -330,6 +330,7 @@ export async function runIscMigrations(pool) {
       mapeamento     JSONB DEFAULT '{}',
       total_linhas   INTEGER DEFAULT 0,
       criadas        INTEGER DEFAULT 0,
+      complementadas INTEGER DEFAULT 0,
       ignoradas      INTEGER DEFAULT 0,
       desfeito_em    TIMESTAMPTZ,
       created_at     TIMESTAMPTZ DEFAULT now()
@@ -404,6 +405,7 @@ export async function runIscMigrations(pool) {
     23: 'cirurgiao', 26: 'tipo_anestesia',
   })]);
 
+  await pool.query(`ALTER TABLE isc_import_lotes ADD COLUMN IF NOT EXISTS complementadas INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE isc_fichas ADD COLUMN IF NOT EXISTS import_lote_id INTEGER REFERENCES isc_import_lotes(id) ON DELETE SET NULL`);
   await pool.query(`CREATE INDEX IF NOT EXISTS isc_fichas_lote_idx ON isc_fichas (import_lote_id)`);
 

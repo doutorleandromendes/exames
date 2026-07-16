@@ -447,6 +447,54 @@ export function normalizaLinha(colunas, mapa, equipes = []) {
   return { ficha, erros, avisos, bruto };
 }
 
+// ── Complementação ────────────────────────────────────────────────────────
+// Caso real: importa-se o mapa sem contato e, depois, o MESMO recorte com a
+// coluna de endereço+fone. Sem isto, a 2ª importação dá "67 duplicadas, nada a
+// fazer" e 61 telefones se perdem calados.
+//
+// REGRA: PREENCHER LACUNA, NUNCA SOBRESCREVER. Só entra em campo que está vazio
+// na ficha. Se a colaboradora corrigiu um telefone na mão, reimportar o mapa não
+// pode atropelar — o dado dela vale mais que o do Tasy. É a mesma disciplina do
+// motor de monitoramento do ATB, que protege entrada manual.
+//
+// Fora desta lista de propósito:
+//   • classificação/tipo/patógeno → ato médico, importação nunca toca;
+//   • data_cirurgia → é chave de janela; mudar reescreveria toda a vigilância;
+//   • implante/janelas → vêm da regra de triagem, que é determinística;
+//   • booleano em geral → não dá para distinguir "false" de "não preenchido".
+export const CAMPOS_COMPLEMENTAVEIS = [
+  'cirurgia_id', 'atendimento', 'prontuario', 'paciente_nome', 'paciente_iniciais',
+  'paciente_dn', 'telefone', 'contato_alternativo',
+  'equipe_id', 'especialidade', 'procedimento', 'cirurgiao', 'data_alta',
+  'potencial_contaminacao', 'duracao_min', 'asa', 'antibioticoprofilaxia', 'observacao',
+];
+
+// Campos que só entram JUNTO com outro — sozinhos, mentem. Ex.: telefone_raw é
+// "o que estava escrito no telefone"; se o telefone é o que a colaboradora
+// corrigiu, o raw do Tasy ao lado só confunde quem for conferir.
+const ACOPLADOS = { telefone: ['telefone_raw', 'telefone_presumido'] };
+
+const vazio = v => v == null || String(v).trim() === '';
+
+// Devolve só o que a ficha existente NÃO tem e a importação traz.
+export function camposComplementaveis(atual, novo) {
+  const out = {};
+  if (!atual || !novo) return out;
+  for (const k of CAMPOS_COMPLEMENTAVEIS) {
+    if (vazio(atual[k]) && !vazio(novo[k])) out[k] = novo[k];
+  }
+  // Acoplados entram só na carona do campo principal.
+  for (const [principal, juntos] of Object.entries(ACOPLADOS)) {
+    if (!(principal in out)) continue;
+    for (const k of juntos) {
+      // telefone_presumido é booleano: acompanha sempre (inclusive como false).
+      if (k === 'telefone_presumido') out[k] = novo.telefone_presumido === true;
+      else if (!vazio(novo[k])) out[k] = novo[k];
+    }
+  }
+  return out;
+}
+
 // ── Prévia (dry-run) ──────────────────────────────────────────────────────
 // existentes: Set de chaves "atendimento|data_cirurgia" já no banco.
 // Classifica cada linha e detecta duplicata DENTRO do próprio arquivo também
@@ -464,6 +512,10 @@ export function chaveDedup(ficha) {
 
 // regras: quando fornecidas, filtram o que entra na vigilância. Sem regras
 // (colar um CSV próprio, por ex.), tudo é candidato — o comportamento antigo.
+//
+// existentes: Set de chaves (só detecta duplicata) OU Map chave→ficha (detecta
+// duplicata E o que dá para complementar). Aceitar os dois mantém compatível
+// quem só quer saber se já existe.
 export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regras = null) {
   const vistas = new Set();
   const usarTriagem = Array.isArray(regras) && regras.length > 0;
@@ -494,11 +546,23 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
 
     const chave = chaveDedup(ficha);
     let status = 'nova';
+    let complemento = null;
     if (erros.length) status = 'erro';
-    else if (chave && existentes.has(chave)) status = 'duplicada';
-    else if (chave && vistas.has(chave)) { status = 'duplicada'; avisos.push('Linha repetida dentro do próprio arquivo'); }
+    else if (chave && existentes.has(chave)) {
+      // Só o Map sabe o que a ficha já tem; com Set, segue "duplicada" e pronto.
+      const atual = typeof existentes.get === 'function' ? existentes.get(chave) : null;
+      const faltando = atual ? camposComplementaveis(atual, ficha) : {};
+      if (Object.keys(faltando).length) {
+        status = 'complementa';
+        complemento = { id: atual.id, campos: faltando };
+      } else {
+        status = 'duplicada';
+      }
+    } else if (chave && vistas.has(chave)) {
+      status = 'duplicada'; avisos.push('Linha repetida dentro do próprio arquivo');
+    }
     if (status === 'nova' && chave) vistas.add(chave);
-    return { linha: i + 2, status, ficha, erros, avisos, bruto, motivo: triagem?.motivo || null };
+    return { linha: i + 2, status, ficha, erros, avisos, bruto, complemento, motivo: triagem?.motivo || null };
   });
 
   return {
@@ -506,6 +570,7 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
     resumo: {
       total: itens.length,
       novas: itens.filter(x => x.status === 'nova').length,
+      complementa: itens.filter(x => x.status === 'complementa').length,
       duplicadas: itens.filter(x => x.status === 'duplicada').length,
       erros: itens.filter(x => x.status === 'erro').length,
       fora_recorte: itens.filter(x => x.status === 'fora_recorte').length,

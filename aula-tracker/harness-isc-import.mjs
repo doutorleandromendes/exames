@@ -110,7 +110,7 @@ const mapa = adivinhaMapeamento(header);
 const prev = montarPrevia(linhas, mapa, equipes, new Set());
 // erros = cabeçalho repetido + linha sem nome + data "A COMBINAR"
 // avisos = linha remarcada (dup interna) + equipe não cadastrada
-eq('resumo da prévia', prev.resumo, { total: 8, novas: 4, duplicadas: 1, erros: 3, fora_recorte: 0, avisos: 2 });
+eq('resumo da prévia', prev.resumo, { total: 8, novas: 4, complementa: 0, duplicadas: 1, erros: 3, fora_recorte: 0, avisos: 2 });
 
 const porNome = n => prev.itens.find(i => (i.ficha.paciente_nome || '').includes(n));
 t('nome com vírgula preservado', porNome('SILVA')?.ficha.paciente_nome === 'SILVA, MARIA DAS DORES');

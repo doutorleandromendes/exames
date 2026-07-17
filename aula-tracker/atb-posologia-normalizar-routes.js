@@ -152,10 +152,6 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
         if (!r.dTxt && !r.iTxt) st.vazias++;
         if (r.dTxt) st.comDose++;
         if (r.iTxt) st.comInt++;
-        if (r.dTxt) st.comDose++;
-        if (r.iTxt) st.comInt++;
-        if (r.dTxt) st.comDose++;
-        if (r.iTxt) st.comInt++;
         if (r.doseOk) { st.doseOk++; if (r.dose._porDroga) st.dosePorDroga++; }
         if (r.doseAmbigua) {
           st.doseAmbigua++;
@@ -177,6 +173,10 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
       if (mudou) porFicha.set(f.id, novas);
       if ((f.posologia || []).some((r) => r && typeof r === 'object' && String(r.dose || r.Dose || '').trim())) st.fichasComDose++;
     }
+    // Auto-checagem: se a aritmética não fecha, o preview mente — e um preview que
+    // mente é pior que preview nenhum. Melhor gritar do que exibir número errado.
+    st.coerente = (st.doseOk + st.doseAmbigua + st.doseFalha === st.comDose)
+               && (st.intOk + st.intFalha === st.comInt);
     return { st, falhas, ambiguas, amostra, porFicha };
   }
 
@@ -198,6 +198,10 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
           <h1>Normalizar posologia <span class="nota">(preview — nada foi gravado)</span></h1>
           <p class="mut">Converte <code>dose</code>/<code>intervalo</code> de texto livre para o modelo estruturado, de forma aditiva: os textos originais permanecem.</p>
         </div>
+        ${st.coerente ? '' : `<div class="card" style="border-left:3px solid #c5221f">
+          <h2>⚠ Números inconsistentes</h2>
+          <p class="nota">A soma dos classificadores não fecha com o total de linhas — os percentuais abaixo não são confiáveis. Isto é bug do preview, não do dado.</p>
+        </div>`}
         <div class="card">
           <h2>Resumo</h2>
           <table style="font-size:14px">

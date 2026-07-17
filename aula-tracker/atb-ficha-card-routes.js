@@ -73,6 +73,7 @@ function _posologia(p, s) {
   const a = _arr(p);
   if (!a.length) return '';
   const linhas = a.map(r => {
+    if (!r || typeof r !== 'object') return '';   // linha vazia/removida vem como null no jsonb
     const d = r.droga || r.Droga || '', dose = r.dose || r.Dose || '', iv = r.intervalo || r.Intervalo || '';
     if (!d && !dose && !iv) return '';
     return `<div class="fc-pos"><b>${s(d)}</b> ${s(dose)}${iv ? ' · ' + s(iv) : ''}</div>`;

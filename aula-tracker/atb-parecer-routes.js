@@ -18,6 +18,7 @@ function _posologiaHtml(posologia) {
   if (!Array.isArray(arr) || !arr.length) return '—';
   let rows = '';
   arr.forEach((row, i) => {
+    if (!row || typeof row !== 'object') return;   // linha vazia/removida vem como null no jsonb
     const droga     = row.droga     || row.Droga     || '';
     const dose      = row.dose      || row.Dose      || '';
     const intervalo = row.intervalo || row.Intervalo || '';

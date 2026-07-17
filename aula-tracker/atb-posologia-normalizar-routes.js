@@ -20,25 +20,33 @@
 
 import { page, esc } from './atb-regras-routes.js';
 
-// Unidade padrão por droga — resolve os valores digitados sem unidade
-// (ex.: "4,5" em Piperacilina/Tazobactam = 4,5 g). CONFIRMAR com o SCIH.
-export const UNIDADE_PADRAO = {
-  'Cefepime': 'g',
-  'Ceftriaxone': 'g',
-  'Fosfomicina': 'g',
-  'Meropenem': 'g',
-  'Piperacilina/Tazobactam': 'g',
-  'Vancomicina': 'g',
-  'Teicoplanina': 'mg',
-  'Anfotericina B': 'mg',
-  'Daptomicina': 'mg',
-  'Tigeciclina': 'mg',
-  'Micafungina': 'mg',
-  'Amicacina': 'mg',
-  'Gentamicina': 'mg',
-  'Polimixina B': null,                   // ⚠ UI ou mg? — definir antes de aplicar
-  'Polimixina E (colestimetato)': null,   // ⚠ mg ou MUI? — definir antes de aplicar
-  'NÃO PADRONIZADO': null,                // sem catálogo → sem inferência
+// Faixas de dose PLAUSÍVEIS por droga e unidade — usadas SÓ para desambiguar um
+// valor digitado sem unidade (ex.: "1" em Amicacina = 1 g; "500" = 500 mg).
+// NÃO são validação clínica: existem apenas para separar g de mg, e são
+// deliberadamente largas. A separação funciona porque as faixas não se
+// sobrepõem — o que dissolve o caso adulto (g) vs pediatria/neo (mg) sem
+// precisar olhar o setor: a magnitude denuncia a unidade.
+// Se um valor cair em NENHUMA faixa, ou em DUAS, vai para revisão — nunca chute.
+export const DOSE_PLAUSIVEL = {
+  'Cefepime':                     { g: [0.25, 4] },
+  'Ceftriaxone':                  { g: [0.25, 4] },
+  'Fosfomicina':                  { g: [1, 12] },
+  'Meropenem':                    { g: [0.25, 3] },
+  'Piperacilina/Tazobactam':      { g: [2, 6] },
+  'Vancomicina':                  { g: [0.25, 3],  mg: [50, 3000] },
+  'Amicacina':                    { g: [0.25, 2],  mg: [50, 2000] },
+  'Gentamicina':                  { mg: [5, 600] },
+  'Teicoplanina':                 { mg: [100, 1200] },
+  'Daptomicina':                  { mg: [100, 1000] },
+  'Tigeciclina':                  { mg: [25, 200] },
+  'Micafungina':                  { mg: [50, 300] },
+  'Anfotericina B':               { mg: [5, 500] },
+  'Polimixina B':                 { UI: [100000, 3000000], mg: [10, 400] },
+  'Polimixina E (colestimetato)': { mg: [50, 1000] },
+  // Fora do catálogo atual de 16, mas presentes no histórico (era JotForm):
+  'Ampicilina/Sulbactam':         { g: [0.75, 6] },
+  'Oxacilina':                    { g: [0.5, 3],  mg: [100, 3000] },
+  'NÃO PADRONIZADO':              {},
 };
 
 const _norm = (v) => String(v == null ? '' : v).toLowerCase().trim().replace(/\s+/g, ' ');
@@ -47,12 +55,20 @@ const _norm = (v) => String(v == null ? '' : v).toLowerCase().trim().replace(/\s
 export function parseIntervalo(txt) {
   const s = _norm(txt);
   if (!s) return null;
-  if (/^(dose )?[uú]nica$/.test(s) || s === 'agora') return { freq_tipo: 'unica', freq_horas: null };
+  // "dose única" (com ou sem observação entre parênteses)
+  if (/^(dose )?[uú]nic[ao]\b/.test(s) || s === 'agora') return { freq_tipo: 'unica', freq_horas: null };
   if (/^1 ?x( ?\/? ?(dia|ao dia))?$/.test(s)) return { freq_tipo: 'cada', freq_horas: 24 };
-  if (/(p[oó]s|ap[oó]s).*(hd|di[aá]lise)|dias de di[aá]lise/.test(s)) return { freq_tipo: 'hd', freq_horas: null };
-  let m = s.match(/^(\d{1,2})\s*\/\s*(\d{1,2})\s*(h|hs|hrs|horas?)?$/);
+  if (/(p[oó]s|ap[oó]s)\s+(cada\s+)?(hd|di[aá]lise)|dias de di[aá]lise/.test(s)) return { freq_tipo: 'hd', freq_horas: null };
+  // Esquema em duas fases ("cada 8h nas primeiras 24h, depois cada 24h") → revisão:
+  // extrair só o primeiro perderia o esquema real.
+  if (/primeir[ao]s?\s+\d+\s*h|logo\b|depois\b/.test(s)) return null;
+  // X/Xh no INÍCIO — a nota que vem depois ("> ajuste renal", "inalatória") é
+  // observação clínica, não altera a frequência.
+  let m = s.match(/^(\d{1,2})\s*\/\s*(\d{1,2})\s*(h|hs|hrs|horas?)?\b/);
   if (m && m[1] === m[2]) return { freq_tipo: 'cada', freq_horas: +m[1] };
-  m = s.match(/^(\d{1,2})\s*(h|hs|hrs|horas?)$/);
+  m = s.match(/^(?:1\s+dose\s+)?a?\s*cada\s+(\d{1,2})\s*(h|hs|hrs|horas?)/);
+  if (m) return { freq_tipo: 'cada', freq_horas: +m[1] };
+  m = s.match(/^(\d{1,2})\s*(h|hs|hrs|horas?)\b/);
   if (m) return { freq_tipo: 'cada', freq_horas: +m[1] };
   m = s.match(/^(\d{1,2})$/);
   if (m) return { freq_tipo: 'cada', freq_horas: +m[1] };
@@ -61,19 +77,37 @@ export function parseIntervalo(txt) {
 
 // ── DOSE ── (droga é usada só para resolver valor sem unidade)
 export function parseDose(txt, droga) {
-  const s = _norm(txt);
+  let s = _norm(txt);
   if (!s) return null;
-  let m = s.match(/^(\d{1,2})\s*amp\.?$/);
-  if (m) return { dose_valor: +m[1], dose_unidade: 'amp' };
-  m = s.match(/^([\d.,]+)\s*mg\s*\/\s*kg/);
+  // Múltiplas doses (ataque + manutenção, "1g / 500mg") → NUNCA extrair: qual das
+  // duas seria "a" dose? Vai para revisão. Essa nuance mora na história clínica.
+  if (/ataque|manuten|;|\+|\d\s*\/\s*\d\s*(mg|g)/.test(s)) return null;
+  // Nome de droga escrito junto (ficha com droga trocada) → revisão.
+  if (/amoxicilina|clavulanato|meropenem|vancomicina|cefepime|ceftriaxone/.test(s) && droga && !s.startsWith(_norm(droga)))
+    return null;
+  s = s.replace(/^\D*?(?=[\d])/, '');          // tira prefixo textual ("meropenem 1g" → "1g")
+  // mg/kg em todas as grafias: "mg/kg", "mg kg", "mgkg", "mgkgdose"
+  let m = s.match(/^([\d.,]+)\s*mg\s*\/?\s*kg/);
   if (m) return { dose_valor: +m[1].replace(',', '.'), dose_unidade: 'mg/kg' };
-  m = s.match(/^([\d.,]+)\s*(mg|g|gr|ui)$/);
-  if (m) return { dose_valor: +m[1].replace(',', '.'), dose_unidade: m[2] === 'gr' ? 'g' : (m[2] === 'ui' ? 'UI' : m[2]) };
-  m = s.match(/^([\d.,]+)$/);
+  // frasco-ampola / ampola / frascos
+  m = s.match(/^(\d{1,2})\s*(amp|ampola|fa|frasco)/);
+  if (m) return { dose_valor: +m[1], dose_unidade: 'amp' };
+  // número + unidade (aceita U/UI para polimixina; "mk" é erro de digitação de mg)
+  m = s.match(/^([\d.,]+)\s*(mg|mk|g|gr|ui|u)\b/);
   if (m) {
-    const un = UNIDADE_PADRAO[String(droga || '').trim()];
-    if (!un) return { _ambiguo: true, dose_valor: +m[1].replace(',', '.'), droga: droga || '(sem droga)' };
-    return { dose_valor: +m[1].replace(',', '.'), dose_unidade: un, _porDroga: true };
+    const u = m[2];
+    const un = (u === 'gr') ? 'g' : (u === 'mk') ? 'mg' : (u === 'ui' || u === 'u') ? 'UI' : u;
+    return { dose_valor: +m[1].replace(',', '.'), dose_unidade: un };
+  }
+  // número puro → desambigua pela faixa plausível da droga
+  m = s.match(/^([\d.,]+)\b/);
+  if (m) {
+    const v = +m[1].replace(',', '.');
+    const faixas = DOSE_PLAUSIVEL[String(droga || '').trim()] || {};
+    const cabem = Object.entries(faixas).filter(([, [lo, hi]]) => v >= lo && v <= hi).map(([u]) => u);
+    if (cabem.length === 1) return { dose_valor: v, dose_unidade: cabem[0], _porDroga: true };
+    return { _ambiguo: true, dose_valor: v, droga: droga || '(sem droga)',
+             motivo: cabem.length ? `cabe em ${cabem.join(' e ')}` : 'fora das faixas plausíveis' };
   }
   return null;
 }
@@ -105,7 +139,7 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
       `SELECT id, posologia FROM atb_fichas
         WHERE deletado_em IS NULL AND jsonb_typeof(posologia) = 'array'`);
     const st = { fichas: rows.length, linhas: 0, doseOk: 0, dosePorDroga: 0, doseAmbigua: 0, doseFalha: 0,
-                 intOk: 0, intFalha: 0, vazias: 0 };
+                 intOk: 0, intFalha: 0, vazias: 0, comDose: 0, comInt: 0, fichasComDose: 0 };
     const falhas = [], ambiguas = new Map(), amostra = [];
     const porFicha = new Map();
     for (const f of rows) {
@@ -116,10 +150,16 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
         if (!r) { novas.push(row); continue; }
         st.linhas++;
         if (!r.dTxt && !r.iTxt) st.vazias++;
+        if (r.dTxt) st.comDose++;
+        if (r.iTxt) st.comInt++;
+        if (r.dTxt) st.comDose++;
+        if (r.iTxt) st.comInt++;
+        if (r.dTxt) st.comDose++;
+        if (r.iTxt) st.comInt++;
         if (r.doseOk) { st.doseOk++; if (r.dose._porDroga) st.dosePorDroga++; }
         if (r.doseAmbigua) {
           st.doseAmbigua++;
-          const k = `${r.dose.droga} · "${r.dTxt}"`;
+          const k = `${r.dose.droga} · "${r.dTxt}" — ${r.dose.motivo || "sem faixa"}`;
           ambiguas.set(k, (ambiguas.get(k) || 0) + 1);
         }
         if (r.doseFalha) { st.doseFalha++; falhas.push({ id: f.id, campo: 'dose', droga: r.droga, txt: r.dTxt }); }
@@ -135,6 +175,7 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
             para: `${r.doseOk ? r.dose.dose_valor + ' ' + r.dose.dose_unidade : '—'} · ${r.intOk ? (r.intervalo.freq_tipo === 'cada' ? 'a cada ' + r.intervalo.freq_horas + 'h' : r.intervalo.freq_tipo === 'unica' ? 'dose única' : 'após HD') : '—'}` });
       }
       if (mudou) porFicha.set(f.id, novas);
+      if ((f.posologia || []).some((r) => r && typeof r === 'object' && String(r.dose || r.Dose || '').trim())) st.fichasComDose++;
     }
     return { st, falhas, ambiguas, amostra, porFicha };
   }
@@ -150,7 +191,7 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
         .map((f) => `<tr><td style="padding:3px 8px"><a href="/atb/admin/ficha/${f.id}">${f.id}</a></td><td style="padding:3px 8px">${esc(f.droga)}</td><td style="padding:3px 8px">${esc(f.campo)}</td><td style="padding:3px 8px"><code>${esc(f.txt)}</code></td></tr>`).join('');
       const linhasAmostra = amostra
         .map((a) => `<tr><td style="padding:3px 8px">${a.id}</td><td style="padding:3px 8px">${esc(a.droga)}</td><td style="padding:3px 8px"><code>${esc(a.de)}</code></td><td style="padding:3px 8px">→ <strong>${esc(a.para)}</strong></td></tr>`).join('');
-      const semUnidade = Object.entries(UNIDADE_PADRAO).filter(([, v]) => !v).map(([k]) => k);
+      const semUnidade = Object.entries(DOSE_PLAUSIVEL).filter(([, v]) => !v || !Object.keys(v).length).map(([k]) => k);
 
       res.send(page('Normalizar posologia — preview', `
         <div class="card">
@@ -160,13 +201,15 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
         <div class="card">
           <h2>Resumo</h2>
           <table style="font-size:14px">
-            <tr><td style="padding:4px 10px">Fichas com posologia</td><td><strong>${st.fichas}</strong></td><td></td></tr>
-            <tr><td style="padding:4px 10px">Linhas de posologia</td><td><strong>${st.linhas}</strong></td><td></td></tr>
-            <tr><td style="padding:4px 10px">Dose reconhecida</td><td><strong>${st.doseOk}</strong></td><td class="nota">${pct(st.doseOk, st.linhas)} — sendo ${st.dosePorDroga} resolvidas pela droga</td></tr>
-            <tr><td style="padding:4px 10px">Dose ambígua</td><td><strong>${st.doseAmbigua}</strong></td><td class="nota">${pct(st.doseAmbigua, st.linhas)} — valor sem unidade e droga sem padrão definido</td></tr>
-            <tr><td style="padding:4px 10px">Dose não reconhecida</td><td><strong>${st.doseFalha}</strong></td><td class="nota">${pct(st.doseFalha, st.linhas)} — revisão manual</td></tr>
-            <tr><td style="padding:4px 10px">Intervalo reconhecido</td><td><strong>${st.intOk}</strong></td><td class="nota">${pct(st.intOk, st.linhas)}</td></tr>
-            <tr><td style="padding:4px 10px">Intervalo não reconhecido</td><td><strong>${st.intFalha}</strong></td><td class="nota">${pct(st.intFalha, st.linhas)} — revisão manual</td></tr>
+            <tr><td style="padding:4px 10px">Fichas com linhas de posologia</td><td><strong>${st.fichas}</strong></td><td class="nota">${st.fichasComDose} têm dose escrita (as demais são da era JotForm, que não tinha o campo)</td></tr>
+            <tr><td style="padding:4px 10px">Linhas de posologia</td><td><strong>${st.linhas}</strong></td><td class="nota">${st.vazias} sem dose nem intervalo</td></tr>
+            <tr style="border-top:1px solid #eee"><td style="padding:4px 10px"><strong>Linhas com dose escrita</strong></td><td><strong>${st.comDose}</strong></td><td class="nota">← denominador da dose</td></tr>
+            <tr><td style="padding:4px 10px">· reconhecida</td><td><strong>${st.doseOk}</strong></td><td class="nota">${pct(st.doseOk, st.comDose)} — sendo ${st.dosePorDroga} pela faixa da droga</td></tr>
+            <tr><td style="padding:4px 10px">· ambígua</td><td><strong>${st.doseAmbigua}</strong></td><td class="nota">${pct(st.doseAmbigua, st.comDose)}</td></tr>
+            <tr><td style="padding:4px 10px">· não reconhecida</td><td><strong>${st.doseFalha}</strong></td><td class="nota">${pct(st.doseFalha, st.comDose)} — revisão manual</td></tr>
+            <tr style="border-top:1px solid #eee"><td style="padding:4px 10px"><strong>Linhas com intervalo escrito</strong></td><td><strong>${st.comInt}</strong></td><td class="nota">← denominador do intervalo</td></tr>
+            <tr><td style="padding:4px 10px">· reconhecido</td><td><strong>${st.intOk}</strong></td><td class="nota">${pct(st.intOk, st.comInt)}</td></tr>
+            <tr><td style="padding:4px 10px">· não reconhecido</td><td><strong>${st.intFalha}</strong></td><td class="nota">${pct(st.intFalha, st.comInt)} — revisão manual</td></tr>
             <tr><td style="padding:4px 10px">Fichas que seriam alteradas</td><td><strong>${porFicha.size}</strong></td><td></td></tr>
           </table>
         </div>
@@ -174,7 +217,7 @@ export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
           <h2>⚠ Definir antes de aplicar</h2>
           <p class="nota">Estas drogas não têm unidade padrão, então valores sem unidade ficam ambíguos:</p>
           <p style="font-size:14px"><strong>${semUnidade.map(esc).join(' · ')}</strong></p>
-          <p class="nota">Ajuste <code>UNIDADE_PADRAO</code> em <code>atb-posologia-normalizar-routes.js</code>.</p>
+          <p class="nota">Ajuste <code>DOSE_PLAUSIVEL</code> em <code>atb-posologia-normalizar-routes.js</code>.</p>
         </div>` : ''}
         <div class="card">
           <h2>Amostra do "de → para"</h2>

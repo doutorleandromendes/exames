@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { registerExplicarRoutes } from './atb-explicar-routes.js';
+import { registerPosologiaNormalizarRoutes } from './atb-posologia-normalizar-routes.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
 import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI, extraColExpr } from './atb-grid-filters.js';
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
@@ -99,6 +100,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerFichaCardRoutes(app, pool, adminRequired);
   registerFichaViewRoutes(app, pool, adminRequired);
   registerExplicarRoutes(app, pool, adminRequired);
+  registerPosologiaNormalizarRoutes(app, pool, adminRequired);
   registerGridMobileRoutes(app, pool, gridRequired);   // grade mobile (/atb/m)
   registerAnexosRoutes(app, pool, adminRequired);
   registerParecerImagemRoutes(app, pool, adminRequired);

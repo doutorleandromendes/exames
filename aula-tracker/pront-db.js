@@ -187,6 +187,15 @@ export async function runProntMigrations(pool) {
   CREATE INDEX IF NOT EXISTS idx_pront_cons_pac ON pront_consultas (paciente_id, data);
   ALTER TABLE pront_consultas ADD COLUMN IF NOT EXISTS transcricao TEXT;            -- transcript bruto, quando a consulta deriva de áudio
 
+  -- natureza do registro: mesma engine (texto ##/#/-), autorias e rótulos distintos.
+  --   consulta   -> ato médico (criação/edição restritas ao médico)
+  --   enfermagem -> anotação de enfermagem (secretária cria e edita as suas; médico edita tudo)
+  -- O histórico é todo ato médico: default 'consulta' rotula o passado corretamente.
+  -- ATENÇÃO: contagens de "consulta" (grid, card, última consulta) DEVEM filtrar tipo='consulta',
+  -- senão uma anotação de enfermagem faz um paciente sem consulta parecer já atendido.
+  ALTER TABLE pront_consultas ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'consulta';
+  CREATE INDEX IF NOT EXISTS idx_pront_cons_tipo ON pront_consultas (paciente_id, tipo, data DESC);
+
   -- documentos emitidos pelo gerador (receita/pedido/relatório/atestado), guardados na ficha
   CREATE TABLE IF NOT EXISTS pront_docs_emitidos (
     id          BIGSERIAL PRIMARY KEY,

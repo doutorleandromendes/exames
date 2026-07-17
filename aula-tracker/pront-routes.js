@@ -81,6 +81,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     const SORTS = {
       nome:    "lower(p.nome)",
       dn:      "p.dn",
+      criado:  "p.criado_em",
       ncons:   "ncons",
       ncol:    "ncol",
       ultima:  "ultima",
@@ -91,9 +92,9 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       ? `${SORTS[sort]} ${dir} NULLS LAST, lower(p.nome)`
       : `ultima DESC NULLS LAST, lower(p.nome)`;   // padrão
     const { rows } = await pool.query(
-      `SELECT p.id, p.nome, p.dn,
-              (SELECT count(*) FROM pront_consultas c WHERE c.paciente_id=p.id)::int ncons,
-              (SELECT max(data)  FROM pront_consultas c WHERE c.paciente_id=p.id) ultima,
+      `SELECT p.id, p.nome, p.dn, to_char(p.criado_em,'YYYY-MM-DD') criado,
+              (SELECT count(*) FROM pront_consultas c WHERE c.paciente_id=p.id AND c.tipo='consulta')::int ncons,
+              (SELECT max(data)  FROM pront_consultas c WHERE c.paciente_id=p.id AND c.tipo='consulta') ultima,
               (SELECT count(*) FROM pront_coletas  k WHERE k.paciente_id=p.id)::int ncol
          FROM pront_pacientes p
         WHERE ($1='' OR p.nome ILIKE '%'||$1||'%')
@@ -103,7 +104,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     // estatísticas do resumo
     const st = (await pool.query(`SELECT
         (SELECT count(*) FROM pront_pacientes)::int pac,
-        (SELECT count(*) FROM pront_consultas)::int cons,
+        (SELECT count(*) FROM pront_consultas WHERE tipo='consulta')::int cons,
         (SELECT count(*) FROM pront_coletas)::int col,
         (SELECT count(*) FROM pront_documentos WHERE status IN ('pendente','processando'))::int fila,
         (SELECT count(*) FROM pront_documentos WHERE status='extraido')::int conf`)).rows[0];
@@ -126,7 +127,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       <tr>
         <td><a href="/pront/paciente/${r.id}">${safe(r.nome)}</a></td>
         <td class="mut">${r.dn ? toBR(r.dn) + (idade(r.dn) != null ? ` · ${idade(r.dn)}a` : "") : "—"}</td>
-        <td>${r.ncons}</td>
+        <td class="mut">${toBR(r.criado)}</td>
+        <td>${r.ncons || `<span class="mut">—</span>`}</td>
         <td>${r.ncol ? `<a href="/pront/paciente/${r.id}/exames" title="ver evolução">${r.ncol}</a>` : "—"}</td>
         <td class="mut">${toBR(r.ultima)}</td>
       </tr>`).join("");
@@ -154,7 +156,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
         <div class="mut mt">${rows.length} paciente(s)${q ? ` para “${safe(q)}”` : ""}</div>
         <table class="mt">
           <thead><tr>${(() => {
-            const cols = [["nome", "Nome"], ["dn", "Nascimento"], ["ncons", "Consultas"], ["ncol", "Coletas"], ["ultima", "Última consulta"]];
+            const cols = [["nome", "Nome"], ["dn", "Nascimento"], ["criado", "Criado em"], ["ncons", "Consultas"], ["ncol", "Coletas"], ["ultima", "Última consulta"]];
             return cols.map(([key, label]) => {
               const ativo = sort === key;
               // ciclo: sem ordem -> asc -> desc -> reset
@@ -167,7 +169,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
               return `<th><a href="${href}" style="color:inherit;text-decoration:none">${label}${seta}</a></th>`;
             }).join("");
           })()}</tr></thead>
-          <tbody>${linhas || `<tr><td colspan="5" class="mut">Nenhum paciente.</td></tr>`}</tbody>
+          <tbody>${linhas || `<tr><td colspan="6" class="mut">Nenhum paciente.</td></tr>`}</tbody>
         </table>
       </div>`));
   });
@@ -179,7 +181,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1><a href="/pront">← Pacientes</a></div>`));
 
     const consultas = (await pool.query(
-      `SELECT id, data, texto, criado_por, transcricao FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
+      `SELECT id, data, texto, criado_por, transcricao, tipo FROM pront_consultas WHERE paciente_id=$1 ORDER BY data DESC, id DESC`, [id])).rows;
     const ncol = (await pool.query(`SELECT count(*)::int n FROM pront_coletas WHERE paciente_id=$1`, [id])).rows[0].n;
 
     // coletas do laboratório ligadas a este paciente (via lab_patients.pront_id); guardado se o lab não existir
@@ -214,15 +216,20 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       p.telefone && `<b>Tel.:</b> ${safe(p.telefone)}`,
     ].filter(Boolean).join(" &nbsp;·&nbsp; ");
 
-    const timeline = consultas.map(c => `
-      <div class="card mt" style="padding:16px">
+    const timeline = consultas.map(c => {
+      const enf = c.tipo === "enfermagem";
+      // enfermagem: a secretária edita as anotações; o médico edita tudo.
+      const podeEditar = enf ? true : !!req.user?.super_admin;
+      const alvo = enf ? `/pront/paciente/${id}/anotacao/${c.id}/editar` : `/pront/paciente/${id}/consulta/${c.id}/editar`;
+      return `
+      <div class="card mt" style="padding:16px${enf ? ";border-left:4px solid #0d9488" : ""}">
         <div class="right" style="justify-content:space-between">
-          <div style="font-weight:700">${toBR(c.data)}${c.criado_por ? ` <span class="mut" style="font-weight:400;font-size:.85em">· por ${safe(c.criado_por)}</span>` : ""}</div>
-          ${req.user?.super_admin ? `<a class="mut" style="font-size:.85em" href="/pront/paciente/${id}/consulta/${c.id}/editar">editar</a>` : ""}
+          <div style="font-weight:700">${toBR(c.data)}${enf ? ` <span style="font-weight:600;font-size:.75em;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:999px;padding:2px 8px;vertical-align:middle">Anotação de enfermagem</span>` : ""}${c.criado_por ? ` <span class="mut" style="font-weight:400;font-size:.85em">· por ${safe(c.criado_por)}</span>` : ""}</div>
+          ${podeEditar ? `<a class="mut" style="font-size:.85em" href="${alvo}">editar</a>` : ""}
         </div>
         <div class="mt" style="line-height:1.5">${renderConsulta(c.texto)}</div>
         ${(c.transcricao && req.user?.super_admin) ? `<details class="mt"><summary class="mut" style="cursor:pointer;font-size:.85em">Ver transcrição do áudio</summary><div class="mut mt" style="white-space:pre-wrap;font-size:.9em;line-height:1.5">${safe(c.transcricao)}</div></details>` : ""}
-      </div>`).join("");
+      </div>`; }).join("");
 
     res.send(renderShell(`Prontuário — ${safe(p.nome)}`, `
       <div class="admin-back-top"><a href="/pront">← Pacientes</a></div>
@@ -237,7 +244,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
             <a href="/pront/paciente/${id}/orcamento" target="_blank"><button type="button" style="background:#0d9488">Orçamento</button></a>
             ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/documento" target="_blank"><button type="button" style="background:#b45309">Emitir documento</button></a>` : ""}
             ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/consulta/audio"><button type="button" style="background:#6d28d9">Áudio</button></a>` : ""}
-            <a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>
+            <a href="/pront/paciente/${id}/anotacao/nova"><button type="button" style="background:#0d9488">+ Anotação de enfermagem</button></a>
+            ${req.user?.super_admin ? `<a href="/pront/paciente/${id}/consulta/nova"><button type="button">+ Consulta</button></a>` : ""}
           </div>
         </div>
         ${dados ? `<div class="mut mt">${dados}</div>` : ""}
@@ -338,7 +346,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           });
         });
       })();</script>` : ""}
-      <h2 class="mt2" style="margin-bottom:0">Consultas <span class="mut" style="font-weight:400">(${consultas.length})</span></h2>
+      <h2 class="mt2" style="margin-bottom:0">Consultas e anotações <span class="mut" style="font-weight:400">(${consultas.filter(c => c.tipo !== "enfermagem").length} consulta(s)${consultas.some(c => c.tipo === "enfermagem") ? ` · ${consultas.filter(c => c.tipo === "enfermagem").length} anotação(ões)` : ""})</span></h2>
       ${timeline || `<div class="card mt mut">Sem consultas registradas.</div>`}
     `));
   });
@@ -1274,19 +1282,20 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 
-  // formulário reutilizável de consulta (com preview ao vivo)
-  const formConsulta = (pid, c, action, titulo) => `
+  // formulário reutilizável de registro em texto (com preview ao vivo).
+  // Mesma engine para consulta e anotação de enfermagem: só mudam os rótulos (opts).
+  const formConsulta = (pid, c, action, titulo, opts = {}) => `
     <div class="card">
       <h1 style="margin-top:0">${titulo}</h1>
       <form method="post" action="${action}">
         <div style="max-width:200px"><label>Data</label><input name="data" type="date" value="${safe((c?.data || new Date().toISOString().slice(0,10)).toString().slice(0,10))}"/></div>
-        <label class="mt">Evolução</label>
+        <label class="mt">${safe(opts.rotulo || "Evolução")}</label>
         <div class="mut" style="font-size:.82em;margin-bottom:4px">Use <code>##</code> para título, <code>#</code> para tópico, <code>-</code> para itens.</div>
         <div class="row" style="grid-template-columns:1fr 1fr;align-items:start">
-          <textarea name="texto" id="txt" rows="16" placeholder="## Caso novo&#10;&#10;# História&#10;- ...">${safe(c?.texto || "")}</textarea>
+          <textarea name="texto" id="txt" rows="16" placeholder="${safe(opts.ph || "## Caso novo\n\n# História\n- ...")}">${safe(c?.texto || "")}</textarea>
           <div class="card" style="background:#fbfcfd;min-height:120px"><div class="mut" style="font-size:.8em;margin-bottom:6px">pré-visualização</div><div id="prev" style="line-height:1.5"></div></div>
         </div>
-        <div class="mt2"><button type="submit">Salvar consulta</button></div>
+        <div class="mt2"><button type="submit"${opts.cor ? ` style="background:${opts.cor}"` : ""}>${safe(opts.botao || "Salvar consulta")}</button></div>
       </form>
     </div>
     <script>
@@ -1303,24 +1312,24 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
       const upd=()=>prev.innerHTML=render(txt.value); txt.addEventListener('input',upd); upd();
     </script>`;
 
-  // nova consulta
-  app.get("/pront/paciente/:id/consulta/nova", authRequired, async (req, res) => {
+  // nova consulta (ato médico: criação restrita ao médico)
+  app.get("/pront/paciente/:id/consulta/nova", medicoRequired, async (req, res) => {
     const p = (await pool.query(`SELECT id,nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
     if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
     res.send(renderShell(`Nova consulta — ${safe(p.nome)}`, `<div class="admin-back-top"><a href="/pront/paciente/${p.id}">← ${safe(p.nome)}</a></div>${formConsulta(p.id, null, `/pront/paciente/${p.id}/consulta/nova`, "Nova consulta")}`));
   });
 
-  app.post("/pront/paciente/:id/consulta/nova", authRequired, async (req, res) => {
+  app.post("/pront/paciente/:id/consulta/nova", medicoRequired, async (req, res) => {
     const { data, texto } = req.body || {};
     if (!texto || !texto.trim()) return res.redirect(`/pront/paciente/${req.params.id}/consulta/nova`);
-    await pool.query(`INSERT INTO pront_consultas(paciente_id,data,texto,criado_por) VALUES($1,COALESCE(NULLIF($2,'')::date,current_date),$3,$4)`,
+    await pool.query(`INSERT INTO pront_consultas(paciente_id,data,texto,criado_por,tipo) VALUES($1,COALESCE(NULLIF($2,'')::date,current_date),$3,$4,'consulta')`,
       [req.params.id, data || "", texto.trim(), quem(req)]);
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 
-  // editar consulta
+  // editar consulta — escopado a tipo='consulta': anotação de enfermagem tem rota própria
   app.get("/pront/paciente/:id/consulta/:cid/editar", medicoRequired, async (req, res) => {
-    const c = (await pool.query(`SELECT id, to_char(data,'YYYY-MM-DD') data, texto FROM pront_consultas WHERE id=$1 AND paciente_id=$2`, [req.params.cid, req.params.id])).rows[0];
+    const c = (await pool.query(`SELECT id, to_char(data,'YYYY-MM-DD') data, texto FROM pront_consultas WHERE id=$1 AND paciente_id=$2 AND tipo='consulta'`, [req.params.cid, req.params.id])).rows[0];
     if (!c) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Consulta não encontrada</h1></div>`));
     res.send(renderShell("Editar consulta", `<div class="admin-back-top"><a href="/pront/paciente/${req.params.id}">← voltar</a></div>${formConsulta(req.params.id, c, `/pront/paciente/${req.params.id}/consulta/${c.id}/editar`, "Editar consulta")}`));
   });
@@ -1328,14 +1337,66 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
   app.post("/pront/paciente/:id/consulta/:cid/editar", medicoRequired, async (req, res) => {
     const { data, texto } = req.body || {};
     if (!texto || !texto.trim()) return res.redirect(`/pront/paciente/${req.params.id}/consulta/${req.params.cid}/editar`);
-    await pool.query(`UPDATE pront_consultas SET data=COALESCE(NULLIF($3,'')::date,data), texto=$4 WHERE id=$1 AND paciente_id=$2`,
+    await pool.query(`UPDATE pront_consultas SET data=COALESCE(NULLIF($3,'')::date,data), texto=$4 WHERE id=$1 AND paciente_id=$2 AND tipo='consulta'`,
       [req.params.cid, req.params.id, data || "", texto.trim()]);
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 
   // excluir consulta (médico)
   app.post("/pront/paciente/:id/consulta/:cid/excluir", authRequired, adminRequired, async (req, res) => {
-    await pool.query(`DELETE FROM pront_consultas WHERE id=$1 AND paciente_id=$2`, [req.params.cid, req.params.id]);
+    await pool.query(`DELETE FROM pront_consultas WHERE id=$1 AND paciente_id=$2 AND tipo='consulta'`, [req.params.cid, req.params.id]);
+    res.redirect(`/pront/paciente/${req.params.id}`);
+  });
+
+  // ===== ANOTAÇÃO DE ENFERMAGEM =====
+  // Mesma engine da consulta (formConsulta/renderConsulta, marcadores ##/#/-), mesma tabela
+  // com tipo='enfermagem'. Autoria: qualquer perfil com acesso ao prontuário (secretária)
+  // cria e edita; o médico, que também passa por authRequired, edita tudo.
+  // As rotas ficam escopadas a tipo='enfermagem' para que uma anotação nunca vire consulta
+  // (nem o contrário) por troca de URL.
+  const OPTS_ENF = {
+    rotulo: "Anotação de enfermagem",
+    botao: "Salvar anotação",
+    cor: "#0d9488",
+    ph: "## Anotação de enfermagem\n\n# Aferições\n- PA:\n- FC:\n- Tax:\n\n# Observações\n- ...",
+  };
+
+  app.get("/pront/paciente/:id/anotacao/nova", authRequired, async (req, res) => {
+    const p = (await pool.query(`SELECT id,nome FROM pront_pacientes WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Paciente não encontrado</h1></div>`));
+    res.send(renderShell(`Anotação de enfermagem — ${safe(p.nome)}`, `<div class="admin-back-top"><a href="/pront/paciente/${p.id}">← ${safe(p.nome)}</a></div>${formConsulta(p.id, null, `/pront/paciente/${p.id}/anotacao/nova`, "Nova anotação de enfermagem", OPTS_ENF)}`));
+  });
+
+  app.post("/pront/paciente/:id/anotacao/nova", authRequired, async (req, res) => {
+    const { data, texto } = req.body || {};
+    if (!texto || !texto.trim()) return res.redirect(`/pront/paciente/${req.params.id}/anotacao/nova`);
+    await pool.query(`INSERT INTO pront_consultas(paciente_id,data,texto,criado_por,tipo) VALUES($1,COALESCE(NULLIF($2,'')::date,current_date),$3,$4,'enfermagem')`,
+      [req.params.id, data || "", texto.trim(), quem(req)]);
+    res.redirect(`/pront/paciente/${req.params.id}`);
+  });
+
+  app.get("/pront/paciente/:id/anotacao/:cid/editar", authRequired, async (req, res) => {
+    const c = (await pool.query(`SELECT id, to_char(data,'YYYY-MM-DD') data, texto FROM pront_consultas WHERE id=$1 AND paciente_id=$2 AND tipo='enfermagem'`, [req.params.cid, req.params.id])).rows[0];
+    if (!c) return res.status(404).send(renderShell("Não encontrado", `<div class="card"><h1>Anotação não encontrada</h1></div>`));
+    res.send(renderShell("Editar anotação de enfermagem", `<div class="admin-back-top"><a href="/pront/paciente/${req.params.id}">← voltar</a></div>${formConsulta(req.params.id, c, `/pront/paciente/${req.params.id}/anotacao/${c.id}/editar`, "Editar anotação de enfermagem", OPTS_ENF)}
+      <div class="card mt">
+        <div class="mut" style="font-size:.85em;margin-bottom:6px">Excluir esta anotação remove o registro da ficha. Não pode ser desfeito.</div>
+        <form method="post" action="/pront/paciente/${req.params.id}/anotacao/${c.id}/excluir" onsubmit="return confirm('Excluir esta anotação de enfermagem?')">
+          <button type="submit" style="background:#b91c1c">Excluir anotação</button>
+        </form>
+      </div>`));
+  });
+
+  app.post("/pront/paciente/:id/anotacao/:cid/editar", authRequired, async (req, res) => {
+    const { data, texto } = req.body || {};
+    if (!texto || !texto.trim()) return res.redirect(`/pront/paciente/${req.params.id}/anotacao/${req.params.cid}/editar`);
+    await pool.query(`UPDATE pront_consultas SET data=COALESCE(NULLIF($3,'')::date,data), texto=$4 WHERE id=$1 AND paciente_id=$2 AND tipo='enfermagem'`,
+      [req.params.cid, req.params.id, data || "", texto.trim()]);
+    res.redirect(`/pront/paciente/${req.params.id}`);
+  });
+
+  app.post("/pront/paciente/:id/anotacao/:cid/excluir", authRequired, async (req, res) => {
+    await pool.query(`DELETE FROM pront_consultas WHERE id=$1 AND paciente_id=$2 AND tipo='enfermagem'`, [req.params.cid, req.params.id]);
     res.redirect(`/pront/paciente/${req.params.id}`);
   });
 

@@ -156,6 +156,27 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
     } catch (err) { console.error('EMISSOR IMG MOVE', err); res.status(500).json({ error: err.message }); }
   });
 
+  // ── Resultado: reordenar no laudo (troca sort_index com o vizinho) ──
+  app.post('/lab/admin/resultados/:id/move', adminRequired, async (req, res) => {
+    try {
+      const id  = parseInt(req.params.id, 10);
+      const dir = req.body?.dir === 'up' ? 'up' : 'down';
+      const { rows: [cur] } = await pool.query('SELECT collection_id FROM lab_results WHERE id=$1', [id]);
+      if (!cur) return res.status(404).json({ error: 'não encontrado' });
+      const { rows } = await pool.query(
+        'SELECT id, sort_index FROM lab_results WHERE collection_id=$1 ORDER BY sort_index NULLS LAST, id', [cur.collection_id]);
+      const idx = rows.findIndex(x => x.id === id);
+      const j = dir === 'up' ? idx - 1 : idx + 1;
+      if (idx < 0 || j < 0 || j >= rows.length) return res.json({ ok: true });
+      const a = rows[idx], b = rows[j];
+      const sa = a.sort_index == null ? idx * 10 : a.sort_index;
+      const sb = b.sort_index == null ? j   * 10 : b.sort_index;
+      await pool.query('UPDATE lab_results SET sort_index=$1 WHERE id=$2', [sb, a.id]);
+      await pool.query('UPDATE lab_results SET sort_index=$1 WHERE id=$2', [sa, b.id]);
+      res.json({ ok: true });
+    } catch (err) { console.error('EMISSOR RESULT MOVE', err); res.status(500).json({ error: err.message }); }
+  });
+
   // ── Catálogo rico ─────────────────────────────────────────────
   app.get('/lab/admin/api/exames-catalogo', adminRequired, (req, res) => {
     try { res.json(catalogoParaEmissor()); }
@@ -194,7 +215,7 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
       const { patient, collection, results } = data;
       const age = ageFrom(patient.birth_date);
 
-      const rowsHtml = results.map(r => {
+      const rowsHtml = results.map((r, ri) => {
         const tcMatch = r.result_value ? r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/) : null;
         const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
         const abgData = (r.result_value || '').startsWith('##ABG##') ? (() => { try { return JSON.parse(r.result_value.slice(7)); } catch { return null; } })() : null;
@@ -246,6 +267,8 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
             <div class="rr">${rightCell}</div></div>
           ${richBlock}
           <div class="acts">
+            <button class="ord" data-rmove="up" data-id="${r.id}" ${ri === 0 ? 'disabled' : ''} title="subir">↑</button>
+            <button class="ord" data-rmove="down" data-id="${r.id}" ${ri === results.length - 1 ? 'disabled' : ''} title="descer">↓</button>
             <button data-dup="${r.id}">duplicar</button>
             <button data-edit="${r.id}">editar</button>
             <button data-img="${r.id}" class="${nImg ? 'imgn' : ''}">imagens${nImg ? ' (' + nImg + ')' : ''}</button>
@@ -350,6 +373,7 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 .abgtab td{padding:.18rem .3rem;border-bottom:1px solid var(--slide-2);font-size:.84rem}
 .abgtab td:last-child{text-align:right;width:36px;font-family:var(--mono)}
 .acts{display:flex;gap:.9rem;padding:0 .3rem .7rem 1.3rem;font-family:var(--mono);font-size:.68rem}.acts button{background:none;border:none;color:var(--muted);padding:0;text-decoration:underline;text-underline-offset:2px}.acts button:hover{color:var(--safranin)}.acts .imgn{color:var(--safranin)}
+.acts .ord{text-decoration:none;font-size:.95rem;line-height:1}.acts .ord[disabled]{opacity:.3;cursor:default}
 .tray{display:none;padding:.5rem .3rem 1rem 1.3rem;flex-direction:column;gap:.6rem}.tray.open{display:flex}
 .imglist{display:flex;flex-direction:column;gap:.6rem}
 .imgrow{display:flex;gap:.7rem;align-items:flex-start;padding:.6rem;border:1px solid var(--hair);border-radius:10px;background:#fff}
@@ -556,6 +580,7 @@ $("#list").addEventListener("click",async e=>{
   else if(b.dataset.img){$("#tray"+b.dataset.img).classList.toggle("open");}
   else if(b.dataset.upl){uploadImg(b.dataset.upl);}
   else if(b.dataset.move){const rid=b.closest(".res")&&b.closest(".res").dataset.id;moveImg(b.dataset.id,b.dataset.move,rid);}
+  else if(b.dataset.rmove){moveResult(b.dataset.id,b.dataset.rmove);}
   else if(b.dataset.w!==undefined&&b.closest(".presets")){const id=b.closest(".presets").dataset.size;const w=+b.dataset.w;setSize(id,w);syncSize(id,w);}
 });
 /* slider de tamanho (ao vivo, com debounce) */
@@ -567,8 +592,11 @@ function syncSize(id,w){const p=document.querySelector('.presets[data-size="'+id
 async function setSize(id,w){try{await fetch("/lab/admin/images/"+id+"/update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({display_width:w})});}catch(e){}}
 async function setCaption(id,cap){try{await fetch("/lab/admin/images/"+id+"/update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({caption:cap})});}catch(e){}}
 async function moveImg(id,dir,rid){if(rid)sessionStorage.setItem("openTray",rid);await fetch("/lab/admin/images/"+id+"/move",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dir})});location.reload();}
+async function moveResult(id,dir){sessionStorage.setItem("scrollY",String(window.scrollY));await fetch("/lab/admin/resultados/"+id+"/move",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dir})});location.reload();}
 /* reabre a bandeja após reload (reordenar/remover imagem) */
 (function(){const ot=sessionStorage.getItem("openTray");if(ot){sessionStorage.removeItem("openTray");const t=document.getElementById("tray"+ot);if(t)t.classList.add("open");}})();
+/* restaura scroll após reordenar resultado */
+(function(){const y=sessionStorage.getItem("scrollY");if(y){sessionStorage.removeItem("scrollY");window.scrollTo(0,parseInt(y,10)||0);}})();
 /* toolbar da observação */
 wireTB($("#obsWrap"),$("#fObs"));
 

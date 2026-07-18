@@ -26,19 +26,23 @@ export const ANTIBIOGRAMA = {
       'Ertapenem', 'Meropenem', 'Ciprofloxacino', 'Sulfametoxazol-trimetoprima',
       'Gentamicina', 'Amicacina', 'Nitrofurantoína', 'Fosfomicina' ] },
 
-    { nome: 'Klebsiella pneumoniae', grupo: 'Enterobacterales', atbs: [
-      'Amoxicilina-clavulanato', 'Piperacilina-tazobactam',
+    { nome: 'Klebsiella pneumoniae', grupo: 'Enterobacterales',
+      presets: { 'Ampicilina': 'R' }, atbs: [
+      'Ampicilina', 'Amoxicilina-clavulanato', 'Piperacilina-tazobactam',
       'Cefuroxima', 'Ceftriaxona', 'Ceftazidima', 'Cefepime',
       'Ertapenem', 'Meropenem', 'Ciprofloxacino', 'Sulfametoxazol-trimetoprima',
       'Gentamicina', 'Amicacina', 'Ceftazidima-avibactam' ] },
 
-    { nome: 'Proteus mirabilis', grupo: 'Enterobacterales', atbs: [
+    { nome: 'Proteus mirabilis', grupo: 'Enterobacterales',
+      presets: { 'Nitrofurantoína': 'R', 'Tigeciclina': 'R', 'Polimixina B': 'R' }, atbs: [
       'Ampicilina', 'Amoxicilina-clavulanato', 'Piperacilina-tazobactam',
       'Cefuroxima', 'Ceftriaxona', 'Ceftazidima', 'Cefepime',
       'Ertapenem', 'Meropenem', 'Ciprofloxacino', 'Sulfametoxazol-trimetoprima',
-      'Gentamicina', 'Amicacina' ] },
+      'Gentamicina', 'Amicacina', 'Nitrofurantoína', 'Tigeciclina', 'Polimixina B' ] },
 
-    { nome: 'Enterobacter cloacae', grupo: 'Enterobacterales', atbs: [
+    { nome: 'Enterobacter cloacae', grupo: 'Enterobacterales',
+      presets: { 'Ampicilina': 'R', 'Amoxicilina-clavulanato': 'R', 'Cefuroxima': 'R' }, atbs: [
+      'Ampicilina', 'Amoxicilina-clavulanato', 'Cefuroxima',
       'Piperacilina-tazobactam', 'Cefepime', 'Ertapenem', 'Meropenem',
       'Ciprofloxacino', 'Sulfametoxazol-trimetoprima', 'Gentamicina', 'Amicacina' ] },
 

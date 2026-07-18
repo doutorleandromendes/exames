@@ -523,12 +523,12 @@ function buildABG(){const host=$("#resField");
     +'<button type="button" class="linkish" id="abgAdd" style="align-self:flex-start">+ adicionar ATB</button></div>';
   $("#abgOrg").onchange=()=>{const v=$("#abgOrg").value;
     if(v==="__outro"){$("#abgOrgManual").style.display="block";$("#abgOrgManual").focus();renderABGRows([]);}
-    else{$("#abgOrgManual").style.display="none";const o=ABG.organisms.find(x=>x.nome===v);renderABGRows(o?o.atbs:[]);}
+    else{$("#abgOrgManual").style.display="none";const o=ABG.organisms.find(x=>x.nome===v);renderABGRows(o?o.atbs:[],o&&o.presets);}
     genABG();};
   $("#abgOrgManual").oninput=genABG;
   $("#abgAdd").onclick=()=>{const nm=prompt("Antibiótico:");if(nm&&nm.trim()){addABGRow(nm.trim(),"");genABG();}};
   renderABGRows([]);}
-function renderABGRows(atbs){const box=$("#abgRows");box.innerHTML="";atbs.forEach(a=>addABGRow(a,""));}
+function renderABGRows(atbs,presets){const box=$("#abgRows");box.innerHTML="";atbs.forEach(a=>addABGRow(a,(presets&&presets[a])||""));}
 function addABGRow(name,selc){const box=$("#abgRows");const div=document.createElement("div");div.className="abgrow";div.dataset.atb=name;
   div.innerHTML='<span class="an">'+name+'</span><div class="sir"><button type="button" data-s="S">S</button><button type="button" data-s="I">I</button><button type="button" data-s="R">R</button></div><button type="button" class="abgx" title="remover">×</button>';
   div.querySelectorAll(".sir button").forEach(b=>b.onclick=()=>{const wasOn=b.classList.contains("on"+b.dataset.s);div.querySelectorAll(".sir button").forEach(x=>x.className="");if(!wasOn){b.className="on on"+b.dataset.s;div.dataset.sir=b.dataset.s;}else{div.dataset.sir="";}genABG();});

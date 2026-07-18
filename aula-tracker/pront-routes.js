@@ -189,7 +189,9 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     try {
       labColetas = (await pool.query(
         `SELECT lc.id, to_char(lc.collected_at,'YYYY-MM-DD') data,
-                (SELECT count(*) FROM lab_results r WHERE r.collection_id=lc.id)::int nex
+                (SELECT count(*) FROM lab_results r WHERE r.collection_id=lc.id)::int nex,
+                (SELECT string_agg(r.exam_name, ' · ' ORDER BY r.sort_index NULLS LAST, r.id)
+                   FROM lab_results r WHERE r.collection_id=lc.id) exames
            FROM lab_collections lc
            JOIN lab_patients lp ON lp.id=lc.patient_id
           WHERE lp.pront_id=$1
@@ -260,8 +262,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           <tbody>${labColetas.map(c => `
             <tr>
               <td>${toBR(c.data)}</td>
-              <td>${c.nex}</td>
-              <td><a href="/lab/admin/coletas/${c.id}">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">laudo PDF</a></td>
+              <td><b>${c.nex} exame${c.nex == 1 ? "" : "s"}</b>${c.exames ? `<div class="mut" style="font-size:.88em;line-height:1.3;margin-top:2px;max-width:44ch">${safe(c.exames)}</div>` : ""}</td>
+              <td style="white-space:nowrap"><a href="/lab/admin/coletas/${c.id}/emissor">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview2" target="_blank">laudo PDF</a></td>
             </tr>`).join("")}</tbody>
         </table>
       </div>` : ""}

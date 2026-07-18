@@ -421,7 +421,7 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
   <div class="grid">
     <div>
       <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><h2>Adicionar exame</h2>
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 id="composerTitle">Adicionar exame</h2>
           <button class="linkish" id="toggleManualExam">digitar exame manualmente</button></div>
         <div class="sub">Escolha do catálogo — método, amostra e VR entram sozinhos.</div>
         <div class="searchwrap" id="searchBox"><input class="search" id="search" placeholder="Buscar exame…" autocomplete="off"><div class="drop" id="drop"></div></div>
@@ -446,7 +446,7 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
           <div class="tbar"><button type="button" class="tbtn b" data-w="*">B</button><button type="button" class="tbtn i" data-w="_">I</button><span class="thint">*negrito* _itálico_ · texto livre</span></div>
           <textarea class="ta" id="fObs" placeholder="observação do exame (opcional)"></textarea>
         </div>
-        <div class="actionbar"><button class="addbtn" id="addBtn" disabled>Adicionar à coleta</button><span class="count" id="addhint" style="color:var(--muted-2)">preencha o resultado</span></div>
+        <div class="actionbar"><button class="addbtn" id="addBtn" disabled>Adicionar à coleta</button><button class="linkish" id="cancelEdit" style="display:none">cancelar edição</button><span class="count" id="addhint" style="color:var(--muted-2)">preencha o resultado</span></div>
       </div>
       <div class="card"><h2>Exames na coleta <span class="count" id="count">· ${nExames}</span></h2><div id="list">${rowsHtml}</div></div>
     </div>
@@ -462,26 +462,11 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
   </div>
 </div>
 
-<div class="backdrop" id="backdrop"><div class="modal">
-  <h3>Editar resultado</h3>
-  <form id="editForm" method="POST">
-    <div class="mfield"><label>Exame</label><input name="exam_name" id="m_nome" required></div>
-    <div class="mrow">
-      <div class="mfield"><label>Tipo de amostra</label><select name="sample_type" id="m_amostra">${sampleOptions}</select></div>
-      <div class="mfield"><label>Método</label><input name="method" id="m_metodo" required></div>
-    </div>
-    <div class="mfield"><label>Valor de referência</label><input name="reference_value" id="m_vr"></div>
-    <div class="mfield"><label>Resultado</label><textarea name="result_value" id="m_result" required></textarea></div>
-    <div class="mfield"><label>Observação</label><input name="observation" id="m_obs" placeholder="opcional"></div>
-    <div class="mactions"><button type="submit" class="save">Salvar</button><button type="button" class="cancel" id="m_cancel">Cancelar</button></div>
-  </form>
-</div></div>
-
 <script>
 const COLLECTION_ID=${id};
 const ABG=${JSON.stringify(ANTIBIOGRAMA)};
 const $=s=>document.querySelector(s);
-let CAT=[],sel=null,resultVal=null,manualMode=false,abgMode=false;
+let CAT=[],sel=null,resultVal=null,manualMode=false,abgMode=false,editingId=null;
 
 fetch('/lab/admin/api/exames-catalogo').then(r=>r.json()).then(d=>{CAT=Array.isArray(d)?d:[];}).catch(()=>{});
 
@@ -568,14 +553,15 @@ function syncAdd(){const nm=examName();const ok=!!(nm&&resultVal);$("#addBtn").d
 
 $("#addBtn").onclick=async()=>{if(!resultVal||!examName())return;$("#addBtn").disabled=true;
   const body=new URLSearchParams();body.set("exam_name",examName());body.set("sample_type",($("#fAmo").value||"").trim()||"—");body.set("method",($("#fMet").value||"").trim()||"—");body.set("result_value",resultVal.value);body.set("reference_value",($("#fVr").value||"").trim());body.set("observation",($("#fObs").value||"").trim());
-  try{const r=await fetch("/lab/admin/coletas/"+COLLECTION_ID+"/resultados",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","X-Requested-With":"XMLHttpRequest"},body});
-    if(!r.ok)throw new Error("falha");location.reload();}catch(err){alert("Erro ao adicionar exame.");$("#addBtn").disabled=false;}};
+  const url=editingId?("/lab/admin/resultados/"+editingId+"/edit"):("/lab/admin/coletas/"+COLLECTION_ID+"/resultados");
+  try{const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","X-Requested-With":"XMLHttpRequest"},body});
+    if(!r.ok)throw new Error("falha");location.reload();}catch(err){alert("Erro ao salvar exame.");$("#addBtn").disabled=false;}};
 
 /* row actions (fetch + reload) */
 $("#list").addEventListener("click",async e=>{
   const b=e.target.closest("button");if(!b)return;
   if(b.dataset.del){const isImg=b.classList.contains("rmimg");const msg=isImg?"Remover imagem?":"Remover exame?";if(!confirm(msg))return;if(isImg){const rid=b.closest(".res")&&b.closest(".res").dataset.id;if(rid)sessionStorage.setItem("openTray",rid);}await postForm(b.dataset.del);location.reload();}
-  else if(b.dataset.dup){const r=await fetch("/lab/admin/resultados/"+b.dataset.dup+"/json");const d=await r.json();prefillDup(d);window.scrollTo({top:0,behavior:"smooth"});}
+  else if(b.dataset.dup){const r=await fetch("/lab/admin/resultados/"+b.dataset.dup+"/json");const d=await r.json();editingId=null;setEditMode(false);loadIntoComposer(d);window.scrollTo({top:0,behavior:"smooth"});}
   else if(b.dataset.edit){openEdit(b.dataset.edit);}
   else if(b.dataset.img){$("#tray"+b.dataset.img).classList.toggle("open");}
   else if(b.dataset.upl){uploadImg(b.dataset.upl);}
@@ -602,18 +588,28 @@ wireTB($("#obsWrap"),$("#fObs"));
 
 async function postForm(action){await fetch(action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:""});}
 
-function prefillDup(d){manualMode=false;$("#manualToggle").classList.remove("on");
-  sel={nome:d.exam_name,metodo:d.method,amostra:d.sample_type,vr:d.reference_value||"",kind:(d.method==="Marcador"?"dosagem":(d.method==="Sorologia"?"reagente":(d.method==="Antígeno"?"detectado":"texto")))};
+function loadIntoComposer(d){manualMode=false;$("#manualToggle").classList.remove("on");
+  const kind=(d.method==="Marcador"?"dosagem":(d.method==="Sorologia"?"reagente":(d.method==="Antígeno"?"detectado":"texto")));
+  sel={nome:d.exam_name,metodo:d.method,amostra:d.sample_type,vr:d.reference_value||"",kind};
   search.value=d.exam_name;set("#fMet",d.method);set("#fAmo",d.sample_type);set("#fVr",d.reference_value||"—");
   $("#fObs").value=d.observation||"";
-  if((d.result_value||"").startsWith("##ABG##")){
-    try{const data=JSON.parse(d.result_value.slice(7));enableABG();
+  const rv=d.result_value||"";
+  if(rv.startsWith("##ABG##")){
+    try{const data=JSON.parse(rv.slice(7));enableABG();
       const opt=[...$("#abgOrg").options].find(o=>o.value===data.org);
       if(opt){$("#abgOrg").value=data.org;}else{$("#abgOrgManual").style.display="block";$("#abgOrgManual").value=data.org;}
       $("#abgRows").innerHTML="";(data.items||[]).forEach(it=>addABGRow(it.a,it.s));genABG();return;
     }catch(e){}
   }
-  buildField(sel);resultVal={value:d.result_value};syncAdd();}
+  if(abgMode)disableABG();
+  const _ti=rv.indexOf("||TC||");const mainV=_ti>=0?rv.slice(0,_ti).trim():rv;
+  buildField(sel);
+  if(kind==="texto"){if($("#txt"))$("#txt").value=mainV;}
+  else if(kind==="dosagem"){if($("#num"))$("#num").value=mainV;}
+  else{const btn=[...document.querySelectorAll("#resField .seg button")].find(b=>b.dataset.v===mainV);if(btn){btn.classList.add("on");if(btn.dataset.r==="1")btn.classList.add("reag");}}
+  resultVal={value:rv};syncAdd();}
+function setEditMode(on){$("#addBtn").textContent=on?"Salvar alterações":"Adicionar à coleta";$("#cancelEdit").style.display=on?"inline":"none";const t=$("#composerTitle");if(t)t.textContent=on?"Editar exame":"Adicionar exame";}
+$("#cancelEdit").onclick=()=>location.reload();
 
 function uploadImg(resultId){const inp=document.createElement("input");inp.type="file";inp.accept="image/*";
   inp.onchange=()=>{const file=inp.files[0];if(!file)return;const rd=new FileReader();
@@ -623,19 +619,7 @@ function uploadImg(resultId){const inp=document.createElement("input");inp.type=
     rd.readAsDataURL(file);};inp.click();}
 
 /* edit modal → POST no endpoint existente, depois reload */
-function openEdit(rid){fetch("/lab/admin/resultados/"+rid+"/json").then(r=>r.json()).then(d=>{
-  $("#editForm").action="/lab/admin/resultados/"+rid+"/edit";
-  $("#m_nome").value=d.exam_name||"";$("#m_metodo").value=d.method||"";$("#m_vr").value=d.reference_value||"";
-  $("#m_result").value=d.result_value||"";$("#m_obs").value=d.observation||"";
-  const selA=$("#m_amostra");
-  if(d.sample_type && ![...selA.options].some(o=>o.value===d.sample_type)){const opt=document.createElement("option");opt.value=d.sample_type;opt.textContent=d.sample_type;selA.insertBefore(opt,selA.firstChild);}
-  [...selA.options].forEach(o=>o.selected=(o.value===d.sample_type));
-  $("#backdrop").classList.add("open");});}
-$("#m_cancel").onclick=()=>$("#backdrop").classList.remove("open");
-$("#backdrop").addEventListener("click",e=>{if(e.target===$("#backdrop"))$("#backdrop").classList.remove("open");});
-$("#editForm").addEventListener("submit",async e=>{e.preventDefault();const f=e.target;
-  const body=new URLSearchParams(new FormData(f));
-  await fetch(f.action,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});location.reload();});
+function openEdit(rid){editingId=rid;fetch("/lab/admin/resultados/"+rid+"/json").then(r=>r.json()).then(d=>{loadIntoComposer(d);setEditMode(true);window.scrollTo({top:0,behavior:"smooth"});});}
 </script>
 </body></html>`;
 }

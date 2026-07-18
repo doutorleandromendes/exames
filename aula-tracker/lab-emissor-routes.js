@@ -17,6 +17,7 @@
 // ============================================================
 import { catalogoParaEmissor } from './exames-catalogo.js';
 import { buildPdfHtmlV2, generateLabPdfV2 } from './lab-pdf-v2.js';
+import { ANTIBIOGRAMA } from './antibiograma-panels.js';
 
 function safe(s) {
   return String(s ?? '')
@@ -44,8 +45,7 @@ function ageFrom(birth) {
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
   return a;
 }
-function resultColorCSS(value, storedColor) {
-  if (storedColor === 'positivo') return '#6e2c3c';
+function resultColorCSS(value, storedColor) {  if (storedColor === 'positivo') return '#6e2c3c';
   if (storedColor === 'negativo') return '#3f6b4c';
   if (storedColor === 'neutro')   return '#8a807c';
   const v = (value || '').toUpperCase();
@@ -62,6 +62,13 @@ function fmt(value) {
     .replace(/SENSÍVEL A:/gi,   '<span style="color:#3f6b4c;font-weight:700">SENSÍVEL A:</span>')
     .replace(/RESISTENTE A:/gi, '<span style="color:#6e2c3c;font-weight:700">RESISTENTE A:</span>')
     .replace(/\r\n|\r|\n/g, '<br>');
+}
+// Tabela compacta de antibiograma para a lista do emissor
+function abgListTable(items) {
+  const C = { S: '#3f6b4c', I: '#8a5a1c', R: '#6e2c3c' };
+  return '<table class="abgtab">' + (items || []).map(it =>
+    `<tr><td>${safe(it.a)}</td><td style="color:${C[it.s] || '#211c1d'};font-weight:700">${safe(it.s)}</td></tr>`
+  ).join('') + '</table>';
 }
 
 // Cópia local do carregador (não importa de lab-routes.js para manter
@@ -190,6 +197,7 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
       const rowsHtml = results.map(r => {
         const tcMatch = r.result_value ? r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/) : null;
         const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
+        const abgData = (r.result_value || '').startsWith('##ABG##') ? (() => { try { return JSON.parse(r.result_value.slice(7)); } catch { return null; } })() : null;
         const color = resultColorCSS(mainValue, r.result_color);
         const rich = /[\r\n*_]/.test(mainValue || '') || (mainValue || '').length > 48;
         const fmtVal = fmt(mainValue);
@@ -220,10 +228,14 @@ export function registerLabEmissorRoutes(app, pool, adminRequired, renderShell) 
             </div>
           </div>`;
         }).join('');
-        const rightCell = rich
+        const rightCell = abgData
+          ? `<div class="rvr">${safe(abgData.org)}</div>`
+          : rich
           ? `<div class="rvr">ref: ${safe(r.reference_value || '—')}</div>`
           : `<div class="rv" style="color:${color}">${fmtVal}</div><div class="rvr">ref: ${safe(r.reference_value || '—')}</div>`;
-        const richBlock = rich
+        const richBlock = abgData
+          ? `<div class="res-full"><span class="rl">Antibiograma — <em style="font-style:italic">${safe(abgData.org)}</em></span>${abgListTable(abgData.items)}</div>`
+          : rich
           ? `<div class="res-full" style="border-color:${color}"><span class="rl">Resultado</span><div class="rt" style="color:${color}">${fmtVal}</div></div>`
           : '';
         return `
@@ -302,6 +314,15 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 .f label .ab{font-size:.54rem;color:var(--safranin);border:1px solid var(--hair);border-radius:4px;padding:0 .28rem}
 .f .val{padding:.55rem .7rem;border:1px solid var(--hair);border-radius:9px;background:var(--slide);font-size:.9rem;min-height:38px;color:var(--ink-soft)}.f .val.empty{color:var(--muted-2);font-style:italic}
 .fin{width:100%;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:9px;background:#fff;font-size:.9rem;min-height:38px;color:var(--ink)}.fin::placeholder{color:var(--muted-2);font-style:italic}
+.abg{display:flex;flex-direction:column;gap:.5rem}
+.abgrows{display:flex;flex-direction:column;gap:.35rem;margin-top:.3rem}
+.abgrow{display:flex;align-items:center;gap:.6rem;padding:.35rem .5rem;border:1px solid var(--hair);border-radius:9px;background:#fff}
+.abgrow .an{flex:1;min-width:0;font-size:.85rem}
+.sir{display:inline-flex;border:1px solid var(--hair);border-radius:7px;overflow:hidden;flex:0 0 auto}
+.sir button{border:none;background:#fff;width:30px;height:28px;font-size:.8rem;font-weight:600;color:var(--muted);border-right:1px solid var(--hair);cursor:pointer}
+.sir button:last-child{border-right:none}
+.sir button.onS{background:#3f6b4c;color:#fff}.sir button.onI{background:#8a5a1c;color:#fff}.sir button.onR{background:var(--safranin);color:#fff}
+.abgx{border:none;background:transparent;color:var(--muted-2);font-size:1rem;padding:0 .2rem;cursor:pointer}.abgx:hover{color:var(--safranin)}
 .reslabel{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:1rem 0 .3rem}
 .seg{display:inline-flex;border:1px solid var(--hair);border-radius:9px;overflow:hidden;background:#fff}
 .seg button{border:none;background:transparent;padding:.5rem .8rem;font-size:.85rem;color:var(--muted);border-right:1px solid var(--hair)}.seg button:last-child{border-right:none}.seg button.on{background:var(--ink);color:var(--slide)}.seg button.on.reag{background:var(--safranin)}
@@ -325,6 +346,9 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 .res-full{margin:0 .3rem .5rem 1.3rem;padding:.55rem .75rem;border-left:2px solid var(--hair);background:var(--slide);border-radius:0 8px 8px 0}
 .res-full .rl{display:block;font-family:var(--mono);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
 .res-full .rt{font-size:.92rem;line-height:1.55;word-break:break-word}
+.abgtab{width:100%;border-collapse:collapse;margin-top:.35rem}
+.abgtab td{padding:.18rem .3rem;border-bottom:1px solid var(--slide-2);font-size:.84rem}
+.abgtab td:last-child{text-align:right;width:36px;font-family:var(--mono)}
 .acts{display:flex;gap:.9rem;padding:0 .3rem .7rem 1.3rem;font-family:var(--mono);font-size:.68rem}.acts button{background:none;border:none;color:var(--muted);padding:0;text-decoration:underline;text-underline-offset:2px}.acts button:hover{color:var(--safranin)}.acts .imgn{color:var(--safranin)}
 .tray{display:none;padding:.5rem .3rem 1rem 1.3rem;flex-direction:column;gap:.6rem}.tray.open{display:flex}
 .imglist{display:flex;flex-direction:column;gap:.6rem}
@@ -392,6 +416,7 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
           <div class="prev" id="tcPrev">VR: Não Reagente – relação T/C &lt; 1,0</div>
         </div>
         <div class="optrow" id="manualToggle"><div class="chk"></div><span>Inserir resultado manual (texto livre)</span></div>
+        <div class="optrow" id="abgToggle"><div class="chk"></div><span>Montar antibiograma (S/I/R por isolado)</span></div>
         <div class="reslabel">Observação <span style="text-transform:none;letter-spacing:0;color:var(--muted-2)">(opcional)</span></div>
         <div id="obsWrap">
           <div class="tbar"><button type="button" class="tbtn b" data-w="*">B</button><button type="button" class="tbtn i" data-w="_">I</button><span class="thint">*negrito* _itálico_ · texto livre</span></div>
@@ -430,8 +455,9 @@ button{font-family:inherit;cursor:pointer}a{color:inherit}
 
 <script>
 const COLLECTION_ID=${id};
+const ABG=${JSON.stringify(ANTIBIOGRAMA)};
 const $=s=>document.querySelector(s);
-let CAT=[],sel=null,resultVal=null,manualMode=false;
+let CAT=[],sel=null,resultVal=null,manualMode=false,abgMode=false;
 
 fetch('/lab/admin/api/exames-catalogo').then(r=>r.json()).then(d=>{CAT=Array.isArray(d)?d:[];}).catch(()=>{});
 
@@ -447,7 +473,10 @@ drop.addEventListener("click",e=>{const o=e.target.closest(".opt[data-n]");if(o)
 $("#toggleManualExam").onclick=()=>{const on=$("#manualExam").style.display==="none";$("#manualExam").style.display=on?"block":"none";$("#searchBox").style.display=on?"none":"block";$("#toggleManualExam").textContent=on?"escolher do catálogo":"digitar exame manualmente";if(on)$("#manualExam").focus();};
 $("#manualExam").addEventListener("input",e=>{const nm=e.target.value.trim();if(nm){sel={nome:nm,metodo:"",amostra:"",vr:"",kind:"texto"};if(!manualMode&&!$("#txt"))buildField(sel);}syncAdd();});
 
-function pick(e){if(!e)return;sel=e;resultVal=null;search.value=e.nome;drop.classList.remove("open");set("#fMet",e.metodo);set("#fAmo",e.amostra);set("#fVr",e.vr);if(!manualMode)buildField(e);syncAdd();}
+function pick(e){if(!e)return;sel=e;resultVal=null;search.value=e.nome;drop.classList.remove("open");set("#fMet",e.metodo);set("#fAmo",e.amostra);set("#fVr",e.vr);
+  if(e.metodo==="Antibiograma"){enableABG();}
+  else{if(abgMode)disableABG();if(!manualMode)buildField(e);}
+  syncAdd();}
 function set(id,v){const el=$(id);if(!el)return;const blank=!v||v==="—"||v==="selecione";if(el.tagName==="INPUT"){el.value=blank?"":v;}else{el.textContent=v||"—";el.classList.toggle("empty",blank);}}
 
 function buildField(e){const host=$("#resField");const kind=e.kind||"texto";
@@ -462,8 +491,48 @@ function buildField(e){const host=$("#resField");const kind=e.kind||"texto";
 function wireTB(host,ta){host.querySelectorAll(".tbtn").forEach(b=>b.onclick=()=>{const w=b.dataset.w,s=ta.selectionStart,en=ta.selectionEnd,v=ta.value;ta.value=v.slice(0,s)+w+v.slice(s,en)+w+v.slice(en);ta.focus();ta.dispatchEvent(new Event("input"));});}
 
 $("#manualToggle").onclick=()=>{manualMode=!manualMode;$("#manualToggle").classList.toggle("on",manualMode);
-  if(manualMode){const host=$("#resField");host.innerHTML='<div class="tbar"><button type="button" class="tbtn b" data-w="*">B</button><button type="button" class="tbtn i" data-w="_">I</button><span class="thint">texto livre</span></div><textarea class="ta" id="txt" placeholder="resultado livre"></textarea>';wireTB(host,$("#txt"));$("#txt").oninput=ev=>{const r=ev.target.value.trim();resultVal=r?{value:r}:null;syncAdd();};}
+  if(manualMode){if(abgMode)disableABG();const host=$("#resField");host.innerHTML='<div class="tbar"><button type="button" class="tbtn b" data-w="*">B</button><button type="button" class="tbtn i" data-w="_">I</button><span class="thint">texto livre</span></div><textarea class="ta" id="txt" placeholder="resultado livre"></textarea>';wireTB(host,$("#txt"));$("#txt").oninput=ev=>{const r=ev.target.value.trim();resultVal=r?{value:r}:null;syncAdd();};}
   else if(sel){buildField(sel);resultVal=null;syncAdd();}};
+
+/* ── Antibiograma (S/I/R por isolado) ── */
+$("#abgToggle").onclick=()=>{abgMode?disableABG():enableABG();};
+function enableABG(){abgMode=true;$("#abgToggle").classList.add("on");manualMode=false;$("#manualToggle").classList.remove("on");
+  if(!($("#fMet").value||"").trim())set("#fMet","Antibiograma");
+  if(!($("#fAmo").value||"").trim())set("#fAmo","Isolado bacteriano / cultura");
+  buildABG();resultVal=null;syncAdd();}
+function disableABG(){abgMode=false;$("#abgToggle").classList.remove("on");
+  if(sel&&sel.metodo!=="Antibiograma")buildField(sel);else $("#resField").innerHTML='<div class="val empty">selecione um exame</div>';
+  resultVal=null;syncAdd();}
+function abgOrgOptions(){const g={};ABG.organisms.forEach(o=>{(g[o.grupo]=g[o.grupo]||[]).push(o);});
+  let h='<option value="">— isolado identificado —</option>';
+  for(const k in g){h+='<optgroup label="'+k+'">'+g[k].map(o=>'<option>'+o.nome+'</option>').join('')+'</optgroup>';}
+  return h+'<option value="__outro">Outro / digitar…</option>';}
+function buildABG(){const host=$("#resField");
+  host.innerHTML='<div class="abg"><select class="fin" id="abgOrg">'+abgOrgOptions()+'</select>'
+    +'<input class="fin" id="abgOrgManual" placeholder="nome do isolado" style="display:none">'
+    +'<div class="abgrows" id="abgRows"></div>'
+    +'<button type="button" class="linkish" id="abgAdd" style="align-self:flex-start">+ adicionar ATB</button></div>';
+  $("#abgOrg").onchange=()=>{const v=$("#abgOrg").value;
+    if(v==="__outro"){$("#abgOrgManual").style.display="block";$("#abgOrgManual").focus();renderABGRows([]);}
+    else{$("#abgOrgManual").style.display="none";const o=ABG.organisms.find(x=>x.nome===v);renderABGRows(o?o.atbs:[]);}
+    genABG();};
+  $("#abgOrgManual").oninput=genABG;
+  $("#abgAdd").onclick=()=>{const nm=prompt("Antibiótico:");if(nm&&nm.trim()){addABGRow(nm.trim(),"");genABG();}};
+  renderABGRows([]);}
+function renderABGRows(atbs){const box=$("#abgRows");box.innerHTML="";atbs.forEach(a=>addABGRow(a,""));}
+function addABGRow(name,selc){const box=$("#abgRows");const div=document.createElement("div");div.className="abgrow";div.dataset.atb=name;
+  div.innerHTML='<span class="an">'+name+'</span><div class="sir"><button type="button" data-s="S">S</button><button type="button" data-s="I">I</button><button type="button" data-s="R">R</button></div><button type="button" class="abgx" title="remover">×</button>';
+  div.querySelectorAll(".sir button").forEach(b=>b.onclick=()=>{const wasOn=b.classList.contains("on"+b.dataset.s);div.querySelectorAll(".sir button").forEach(x=>x.className="");if(!wasOn){b.className="on on"+b.dataset.s;div.dataset.sir=b.dataset.s;}else{div.dataset.sir="";}genABG();});
+  div.querySelector(".abgx").onclick=()=>{div.remove();genABG();};
+  if(selc){const b=div.querySelector('.sir button[data-s="'+selc+'"]');if(b){b.className="on on"+selc;div.dataset.sir=selc;}}
+  box.appendChild(div);}
+function genABG(){const manual=$("#abgOrgManual")&&$("#abgOrgManual").style.display!=="none";
+  const org=((manual?$("#abgOrgManual").value:$("#abgOrg").value)||"").trim();
+  const orgClean=org==="__outro"?"":org;
+  const items=[...document.querySelectorAll("#abgRows .abgrow")].filter(r=>r.dataset.sir).map(r=>({a:r.dataset.atb,s:r.dataset.sir}));
+  resultVal=(orgClean&&items.length)?{value:"##ABG##"+JSON.stringify({org:orgClean,items})}:null;
+  syncAdd();}
+
 
 $("#tcToggle").onclick=()=>{const on=!$("#tcToggle").classList.contains("on");$("#tcToggle").classList.toggle("on",on);$("#tcBox").classList.toggle("open",on);if(on)updTC();};
 function updTC(){const t=$("#tcThr").value||"1,0";set("#fVr","Não Reagente – relação T/C < "+t);$("#tcPrev").textContent="VR: Não Reagente – relação T/C < "+t;}
@@ -509,6 +578,13 @@ function prefillDup(d){manualMode=false;$("#manualToggle").classList.remove("on"
   sel={nome:d.exam_name,metodo:d.method,amostra:d.sample_type,vr:d.reference_value||"",kind:(d.method==="Marcador"?"dosagem":(d.method==="Sorologia"?"reagente":(d.method==="Antígeno"?"detectado":"texto")))};
   search.value=d.exam_name;set("#fMet",d.method);set("#fAmo",d.sample_type);set("#fVr",d.reference_value||"—");
   $("#fObs").value=d.observation||"";
+  if((d.result_value||"").startsWith("##ABG##")){
+    try{const data=JSON.parse(d.result_value.slice(7));enableABG();
+      const opt=[...$("#abgOrg").options].find(o=>o.value===data.org);
+      if(opt){$("#abgOrg").value=data.org;}else{$("#abgOrgManual").style.display="block";$("#abgOrgManual").value=data.org;}
+      $("#abgRows").innerHTML="";(data.items||[]).forEach(it=>addABGRow(it.a,it.s));genABG();return;
+    }catch(e){}
+  }
   buildField(sel);resultVal={value:d.result_value};syncAdd();}
 
 function uploadImg(resultId){const inp=document.createElement("input");inp.type="file";inp.accept="image/*";

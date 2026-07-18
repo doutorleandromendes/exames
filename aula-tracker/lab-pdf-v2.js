@@ -59,6 +59,15 @@ function formatResultText(value) {
     .replace(/RESISTENTE A:/gi, '<span style="color:#6e2c3c;font-weight:700">RESISTENTE A:</span>')
     .replace(/\r\n|\r|\n/g, '<br>');   // quebras de linha por último (após âncoras ^/$)
 }
+// Tabela de antibiograma para o PDF
+function abgPdfTable(items) {
+  const C = { S: '#3f6b4c', I: '#8a5a1c', R: '#6e2c3c' };
+  const N = { S: 'Sensível', I: 'Sensível com exposição otimizada', R: 'Resistente' };
+  return '<table class="abg-tab"><thead><tr><th>Antibiótico</th><th>Interpretação</th></tr></thead><tbody>' +
+    (items || []).map(it =>
+      `<tr><td>${safe(it.a)}</td><td class="sir" style="color:${C[it.s] || '#211c1d'}"><b>${safe(it.s)}</b>${N[it.s] ? ' — ' + N[it.s] : ''}</td></tr>`
+    ).join('') + '</tbody></table>';
+}
 
 // ── Template HTML ───────────────────────────────────────────────
 export function buildPdfHtmlV2({ patient, collection, results, sign }) {
@@ -75,6 +84,7 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
     const tcMatch   = r.result_value ? r.result_value.match(/^([\s\S]*?)\|\|TC\|\|(.+)$/) : null;
     const mainValue = tcMatch ? tcMatch[1].trim() : r.result_value;
     const tcDisplay = tcMatch ? tcMatch[2].trim() : null;
+    const abgData = (r.result_value || '').startsWith('##ABG##') ? (() => { try { return JSON.parse(r.result_value.slice(7)); } catch { return null; } })() : null;
 
     const tcHtml = tcDisplay
       ? `<div class="tcsec"><span class="tl">Relação T/C</span><span class="tv">${safe(tcDisplay)}</span></div>`
@@ -97,6 +107,20 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
            }).join('')}
          </div></div>`
       : '';
+
+    if (abgData) return `
+      <div class="exam">
+        <div class="en">${safe(r.exam_name)}</div>
+        <div class="meta">
+          <span><b>Amostra:</b> ${safe(r.sample_type)}</span>
+          <span><b>Método:</b> Antibiograma</span>
+        </div>
+        <div class="abg-org"><b>Isolado identificado:</b> <em>${safe(abgData.org)}</em></div>
+        ${abgPdfTable(abgData.items)}
+        <div class="abg-leg">Interpretação conforme BrCAST/EUCAST.</div>
+        ${obs}
+        ${imagesHtml}
+      </div>`;
 
     return `
       <div class="exam">
@@ -168,6 +192,13 @@ export function buildPdfHtmlV2({ patient, collection, results, sign }) {
   .tcsec .tv{font-family:var(--mono);font-size:10px;color:var(--ink-soft);font-weight:500}
   .obs{margin-top:5px;font-size:10.5px;color:var(--muted);font-style:italic}
   .stdnote{margin-top:5px;font-size:8.5px;color:var(--muted-2);font-style:italic;line-height:1.4}
+  .abg-org{margin-top:6px;font-size:11px}
+  .abg-tab{width:auto;min-width:60%;border-collapse:collapse;margin-top:6px}
+  .abg-tab th{font-family:var(--mono);font-size:7.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:3px 10px 3px 0;border-bottom:1px solid var(--hair)}
+  .abg-tab th:last-child{text-align:left;padding-left:14px}
+  .abg-tab td{font-size:11px;padding:3px 10px 3px 0;border-bottom:1px solid var(--hair-soft)}
+  .abg-tab td.sir{text-align:left;font-weight:400;white-space:nowrap;padding-left:14px}
+  .abg-leg{margin-top:6px;font-size:8.5px;color:var(--muted-2);font-style:italic;line-height:1.4}
   .imgs{margin-top:7px}
   .imgs .il{font-family:var(--mono);font-size:7.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
   .imgs .grid{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}

@@ -20,6 +20,7 @@ import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADICIONAR (numeradores CVE)
 import { registerNlqRoutes } from './atb-nlq-routes.js';   // ← ADICIONAR (pergunta em PT → SQL, admin, read-only)
+import { registerHistoriaRoutes } from './atb-historia-routes.js';   // ← ADICIONAR (nudge de história narrativa)
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
 import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
@@ -180,6 +181,8 @@ try { registerCveNumeradoresRoutes(app, pool); }
 catch (e) { console.error('ERRO registerCveNumeradoresRoutes', e); }
 try { registerNlqRoutes(app, roPool, { adminRequired }); }
 catch (e) { console.error('ERRO registerNlqRoutes', e); }
+try { registerHistoriaRoutes(app, pool); }
+catch (e) { console.error('ERRO registerHistoriaRoutes', e); }
 try { registerIscRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscRoutes', e); }
 try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }

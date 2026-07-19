@@ -27,7 +27,7 @@
 //   ATB_NLQ_MODEL         — modelo Ollama (default 'qwen2.5-coder:7b').
 // ════════════════════════════════════════════════════════════════════════════
 
-import { GLOSSARIO_ATB, FEWSHOTS_ATB } from './atb-nlq-glossario.js';
+import { GLOSSARIO_ATB, ENUMS_ATB, FEWSHOTS_ATB } from './atb-nlq-glossario.js';
 import { prepararSQL } from './atb-nlq-guard.js';
 
 const OLLAMA_URL       = process.env.ATB_OLLAMA_URL       || '';
@@ -41,11 +41,21 @@ const SQL_TIMEOUT  = '5s';    // statement_timeout por query
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c =>
   ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
 
-// ── Monta o system prompt: glossário + few-shots ─────────────────────────────
+// ── Monta o system prompt: glossário + valores de enum + few-shots ───────────
+function blocoEnums() {
+  const linhas = Object.entries(ENUMS_ATB).map(([col, vals]) =>
+    `- ${col}: ${vals.map(v => `'${v}'`).join(' | ')}`);
+  return '# VALORES VÁLIDOS DE ENUM\n' +
+    'Para estas colunas, use EXATAMENTE um dos valores abaixo (copie o texto literal). ' +
+    'NUNCA invente, traduza ou parafraseie o texto da pergunta para um valor de enum — ' +
+    'mapeie a intenção do usuário para a string exata da lista.\n' +
+    linhas.join('\n');
+}
+
 function systemPrompt() {
   const shots = FEWSHOTS_ATB.map(f =>
     `-- Pergunta: ${f.pergunta}\n${f.sql}`).join('\n\n');
-  return `${GLOSSARIO_ATB}\n\n# EXEMPLOS\n${shots}`;
+  return `${GLOSSARIO_ATB}\n\n${blocoEnums()}\n\n# EXEMPLOS\n${shots}`;
 }
 
 // ── Chama o Ollama (/api/chat), temperatura 0, sem stream ────────────────────

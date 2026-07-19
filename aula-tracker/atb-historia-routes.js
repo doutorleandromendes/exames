@@ -2,88 +2,101 @@
 // ════════════════════════════════════════════════════════════════════════════
 // /atb/api/checar-historia — nudge de história narrativa (fase 1).
 //
-// FILOSOFIA: nunca bloqueia por infra nem por julgamento. Se o Ollama está fora,
-// lento, ou devolve lixo → { disponivel:false } e o formulário envia direto
-// (fail-open no cliente). Só quando o LLM responde "telegráfica" o cliente mostra
-// o modal de acknowledgment (revisar / enviar assim mesmo + motivo).
+// CAMINHO 2: classificação via API externa OpenAI-compatible (DeepInfra por
+// padrão). Escolhido porque nenhum modelo LOCAL serve nesse hardware — o 3B
+// erra o julgamento e o 8B na CPU do PACS PC leva ~30s (sempre fail-open). Um
+// 70B hospedado acerta em <1s por centavos. PHI: o campo História, no corpus
+// deste serviço, não carrega identificadores (verificado ficha a ficha); ainda
+// assim há uma REDE-FINA opcional de mascaramento (ATB_HISTORIA_DEID=1) que
+// remove marcas de identificador se um dia aparecerem — proteção do futuro.
 //
-// LOG COMO RÓTULOS: cada checagem grava uma linha em atb_historia_checagens.
-// Os OVERRIDES ("o modelo disse telegráfica e o humano enviou assim mesmo") são
-// o rótulo de maior sinal — a matéria-prima do conjunto de avaliação/treino
-// futuro. É a fase 0 construindo o dataset enquanto ajuda.
+// FILOSOFIA (inalterada): nunca bloqueia por infra nem por julgamento. API fora,
+// lenta, ou lixo → { disponivel:false } → o formulário envia direto (fail-open).
+// Só quando o modelo responde "telegráfica" o cliente mostra o acknowledgment.
+//
+// LOG COMO RÓTULOS: cada checagem grava em atb_historia_checagens; overrides são
+// o rótulo de ouro pro conjunto de avaliação/treino futuro.
 //
 // Env:
-//   ATB_NARRATIVA_OLLAMA_URL — URL do Ollama da história (default: ATB_OLLAMA_URL).
-//     Permite apontar a história pro PC do PACS (permanente) enquanto o NL→SQL
-//     usa o Mac. Enquanto não setar, cai no ATB_OLLAMA_URL (mesmo host do NL→SQL).
-//   ATB_NARRATIVA_MODEL — modelo (default: 'llama3.2'). Tarefa fácil (prosa vs
-//     telegrama) → modelo pequeno basta e roda rápido mesmo em CPU modesta.
-//   ATB_OLLAMA_CF_ID / ATB_OLLAMA_CF_SECRET — Cloudflare Access (se houver).
+//   ATB_NARRATIVA_API_URL — base OpenAI-compatible.
+//       default 'https://api.deepinfra.com/v1/openai'
+//   ATB_NARRATIVA_API_KEY — token do provedor (SÓ na env, NUNCA no código).
+//   ATB_NARRATIVA_MODEL   — default 'meta-llama/Llama-3.3-70B-Instruct-Turbo'.
+//   ATB_HISTORIA_DEID     — '1' liga a rede-fina de de-id (default desligada).
 //
 // Registro no app.js: registerHistoriaRoutes(app, pool);  (sem gate, igual /fichas)
 // ════════════════════════════════════════════════════════════════════════════
 
 import { montarMensagensNarrativa, parseSaidaNarrativa } from './atb-historia-narrativa.js';
 
-const OLLAMA_URL       = process.env.ATB_NARRATIVA_OLLAMA_URL || process.env.ATB_OLLAMA_URL || '';
-const OLLAMA_CF_ID     = process.env.ATB_OLLAMA_CF_ID     || '';
-const OLLAMA_CF_SECRET = process.env.ATB_OLLAMA_CF_SECRET || '';
-const NARRATIVA_MODEL  = process.env.ATB_NARRATIVA_MODEL || 'llama3.2';
+const API_URL   = (process.env.ATB_NARRATIVA_API_URL || 'https://api.deepinfra.com/v1/openai').replace(/\/$/, '');
+const API_KEY   = process.env.ATB_NARRATIVA_API_KEY || '';
+const MODEL     = process.env.ATB_NARRATIVA_MODEL || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
+const DEID_ON   = process.env.ATB_HISTORIA_DEID === '1';
 
-// Schema de saída — força o Ollama a devolver JSON válido no nível do decodificador
-// (resolve JSON quebrado e tipos errados que modelos pequenos produzem).
-const FORMATO_NARRATIVA = {
-  type: 'object',
-  properties: {
-    narrativa: { type: 'boolean' },
-    aviso: { type: 'string' },
+const CHAT_TIMEOUT = 8000;   // ms — geração da classificação (fail-open acima disso)
+
+// Schema OpenAI (json_schema) — força saída válida no decodificador.
+const RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'narrativa',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { narrativa: { type: 'boolean' }, aviso: { type: 'string' } },
+      required: ['narrativa', 'aviso'],
+    },
   },
-  required: ['narrativa', 'aviso'],
 };
 
-const PING_TIMEOUT = 1500;   // ms — decidir "disponível" rápido
-const CHAT_TIMEOUT = 8000;   // ms — geração da classificação
-
-function headersOllama() {
-  return {
-    'Content-Type': 'application/json',
-    ...(OLLAMA_CF_ID     ? { 'CF-Access-Client-Id':     OLLAMA_CF_ID }     : {}),
-    ...(OLLAMA_CF_SECRET ? { 'CF-Access-Client-Secret': OLLAMA_CF_SECRET } : {}),
-  };
+// ── Rede-fina de de-id (opcional) ────────────────────────────────────────────
+// NÃO é de-identificação robusta — é um guarda-chuva leve para o caso raro de
+// alguém, no futuro, digitar um identificador no texto livre. Mascaramento
+// conservador: prefixos de nome (Sr./Sra./Dr./RN), prontuário/registro com
+// número, e datas. Roda em ~0ms.
+function deidentificar(texto) {
+  let t = String(texto);
+  // "Sr./Sra./Dr./Dra./RN + Nome Próprio" → prefixo + [NOME]
+  t = t.replace(/\b(Sr\.?|Sra\.?|Dr\.?|Dra\.?|RN)\s+[A-ZÀ-Ý][\wÀ-ÿ]+(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][\wÀ-ÿ]+){0,3}/g, '$1 [NOME]');
+  // prontuário/registro/matrícula seguido de número
+  t = t.replace(/\b(prontu[aá]rio|registro|matr[ií]cula|reg\.?|pront\.?)\s*n?[ºo°.:]*\s*\d+/gi, '$1 [NUM]');
+  // datas dd/mm/aaaa ou dd-mm-aaaa
+  t = t.replace(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g, '[DATA]');
+  return t;
 }
 
-async function comTimeout(promiseFn, ms) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try { return await promiseFn(ctrl.signal); }
-  finally { clearTimeout(t); }
-}
-
-// Ollama está de pé e alcançável? (ping curto em /api/tags)
-async function ollamaDisponivel() {
-  if (!OLLAMA_URL) return false;
-  try {
-    const r = await comTimeout((signal) => fetch(`${OLLAMA_URL.replace(/\/$/,'')}/api/tags`,
-      { headers: headersOllama(), signal }), PING_TIMEOUT);
-    return r.ok;
-  } catch { return false; }
-}
-
-// Classifica a história. Retorna { narrativa, aviso } ou null (trata como fail-open).
+// ── Chamada à API (OpenAI-compatible) ────────────────────────────────────────
+// Retorna { narrativa, aviso } ou null (null → fail-open no chamador).
 async function classificar(historia) {
+  if (!API_KEY) return null;                       // sem key → fail-open
+  const texto = DEID_ON ? deidentificar(historia) : historia;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CHAT_TIMEOUT);
   try {
-    const r = await comTimeout((signal) => fetch(`${OLLAMA_URL.replace(/\/$/,'')}/api/chat`, {
-      method: 'POST', headers: headersOllama(), signal,
+    const r = await fetch(`${API_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
+      signal: ctrl.signal,
       body: JSON.stringify({
-        model: NARRATIVA_MODEL, stream: false, format: FORMATO_NARRATIVA,
-        options: { temperature: 0 },
-        messages: montarMensagensNarrativa(historia),
+        model: MODEL,
+        temperature: 0,
+        response_format: RESPONSE_FORMAT,
+        messages: montarMensagensNarrativa(texto),
       }),
-    }), CHAT_TIMEOUT);
-    if (!r.ok) return null;
+    });
+    if (!r.ok) { console.error('[historia] API HTTP', r.status); return null; }
     const data = await r.json();
-    return parseSaidaNarrativa(data?.message?.content || '');
-  } catch { return null; }
+    if (data?.usage?.estimated_cost != null)
+      console.log('[historia] custo_estimado', data.usage.estimated_cost);
+    return parseSaidaNarrativa(data?.choices?.[0]?.message?.content || '');
+  } catch (e) {
+    console.error('[historia] API erro', e.message);
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function garantirTabela(pool) {
@@ -140,11 +153,8 @@ async function ir(){
 
     if (!historia) return res.json({ disponivel: false });   // nada a checar → fail-open
 
-    const up = await ollamaDisponivel();
-    if (!up) return res.json({ disponivel: false });         // infra fora → fail-open
-
     const r = await classificar(historia);
-    if (!r) return res.json({ disponivel: false });          // lixo/timeout → fail-open
+    if (!r) return res.json({ disponivel: false });          // API fora/lixo/timeout → fail-open
 
     // Log (rótulo). Não deixa erro de log travar o fluxo.
     let checagem_id = null;

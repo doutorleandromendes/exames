@@ -23,6 +23,7 @@ import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-r
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
 import { registerConsultaRoutes } from './atb-consulta-routes.js';
 import { ensureHealthcheckTable, startHealthcheckSchedule, registerHealthcheckRoutes } from './atb-healthcheck.js';
+import { ensureIntegridadeTable, startIntegridadeSchedule, registerIntegridadeRoutes } from './atb-integridade.js';
 import { ensureRegrasCheckTable, startRegrasCheckSchedule, registerRegrasCheckRoutes } from './atb-regras-check.js';
 import { registerNomesRoutes } from './atb-nomes-routes.js';
 import { ensureCulturasSchema, registerCulturasRoutes } from './atb-culturas-routes.js';
@@ -109,6 +110,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerConsultaRoutes(app, pool);
   ensureHealthcheckTable(pool).then(() => startHealthcheckSchedule(pool)).catch(e => console.error('[atb] healthcheck:', e.message));
   registerHealthcheckRoutes(app, pool, adminRequired);
+  ensureIntegridadeTable(pool).then(() => startIntegridadeSchedule(pool)).catch(e => console.error('[atb] integridade:', e.message));
+  registerIntegridadeRoutes(app, pool, adminRequired);
   registerFormEditorRoutes(app, pool, adminRequired, renderShell);
   ensureRegrasCheckTable(pool).then(() => startRegrasCheckSchedule(pool)).catch(e => console.error('[atb] regras-check:', e.message));
   registerRegrasCheckRoutes(app, pool, adminRequired);

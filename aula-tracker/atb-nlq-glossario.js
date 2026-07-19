@@ -58,6 +58,8 @@ atb_evolutivos ev — dados evolutivos: ev.ficha_id → f.id (1:1). labs/hemodin
 - tempo_previsto (INTEGER) = "dias de ATB solicitados / previstos" = dias de tratamento planejados. É POR FICHA, não por droga (ver ARMADILHAS).
 - sofa (INT), sofa_renal (INT) — escores já computados.
 - status (TEXT, enum). retrospectiva (BOOL). recomendacao_scih (JSONB) = veredito SCIH.
+- acesso_vascular_neo (JSONB array) = acesso vascular em NEONATO (só faz sentido quando setor='UTI Neo / Infantil'). Valores: 'Cateter umbilical','PICC','Periférico','Flebotomia'. Ex.: PICC neonatal = acesso_vascular_neo @> '["PICC"]'::jsonb. ATENÇÃO: PICC NÃO está em dispositivos_invasivos — mora AQUI.
+- acesso_quimio (TEXT) = tipo de acesso para quimioterapia (contexto oncológico). Valores: 'PICC','Portocath','Permcath/Hickman'. Ex.: acesso_quimio = 'PICC'. É TEXT (igualdade), não array.
 - payload_raw (JSONB) = "extras" que ainda não viraram coluna. Acesso: payload_raw->>'chave'. Ex.: o suporte respiratório do SOFA é payload_raw->>'sofa_suporte' (valores incluem 'VNI ou Ventilação Mecânica (VM)'). ATENÇÃO: essa chave pode não existir em fichas antigas migradas do JotForm — só confie após sondar.
 
 # DERIVADOS COMPUTADOS (não são colunas — calcule com aritmética de data)
@@ -70,6 +72,7 @@ Seja ref = COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)::date
 - "sob VM" é AMBÍGUO. Padrão = IOT (invasiva), coluna dispositivos_invasivos @> '["IOT"]'. A leitura do SOFA (payload_raw->>'sofa_suporte' = 'VNI ou Ventilação Mecânica (VM)') INCLUI VNI (não-invasiva) e só existe no payload_raw. Se a pergunta não distinguir, use IOT e não invente.
 - tempo_previsto é UM valor por ficha, não por droga. Ao estratificar por droga, a MESMA ficha entra em até 3 linhas → somar dias entre drogas dá dupla contagem. Isso é esperado; nunca trate como aditivo entre drogas.
 - foco_infeccao é NULL em profilaxia cirúrgica — filtrar foco já exclui profilaxia.
+- ACESSO VASCULAR: "PICC", "cateter umbilical", "flebotomia", "acesso vascular" em NEONATO → coluna acesso_vascular_neo (JSONB), NÃO dispositivos_invasivos. dispositivos_invasivos só tem 'AVP','CVC','IOT','SVD','CDL (Shilley)','PAi' — se pedirem PICC, NUNCA troque por CVC nem force em dispositivos_invasivos; use acesso_vascular_neo (ou acesso_quimio se o contexto for quimioterapia). Não aproxime um dispositivo pedido por outro parecido.
 `;
 
 // Few-shots: exemplos reais validados (âncoras de acerto). O endpoint pode

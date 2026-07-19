@@ -86,7 +86,12 @@ async function classificar(historia) {
         messages: montarMensagensNarrativa(texto),
       }),
     });
-    if (!r.ok) { console.error('[historia] API HTTP', r.status); return null; }
+    if (!r.ok) {
+      const corpo = await r.text().catch(() => '');
+      console.error('[historia] API HTTP', r.status, '| url:', `${API_URL}/chat/completions`,
+        '| model:', MODEL, '| body:', corpo.slice(0, 300));
+      return null;
+    }
     const data = await r.json();
     if (data?.usage?.estimated_cost != null)
       console.log('[historia] custo_estimado', data.usage.estimated_cost);

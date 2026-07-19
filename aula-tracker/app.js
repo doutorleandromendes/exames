@@ -20,6 +20,7 @@ import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADICIONAR (numeradores CVE)
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
+import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
 import { registerIscImportRoutes } from './isc-import-routes.js';  // ← ADICIONAR (importador de mapa cirúrgico)
 import { runProntMigrations } from './pront-db.js';
@@ -129,9 +130,11 @@ runAulasMigrations(migratorPool).catch(e=>console.error('migration error', e));
 
 runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
 // ISC depende de atb_instituicoes (FK): encadeia depois das migrações do ATB.
+// PAV também depende de atb_instituicoes e de users: encadeia depois do ISC.
 runAtbMigrations(migratorPool)                                                        // ← ADICIONAR
   .then(() => runIscMigrations(migratorPool))
-  .catch(e => console.error('atb/isc migration error', e));
+  .then(() => runPavMigrations(migratorPool))
+  .catch(e => console.error('atb/isc/pav migration error', e));
 runProntMigrations(migratorPool)
   .then(() => runAgendaMigrations(migratorPool))   // agenda depende de pront_pacientes
   .catch(e => console.error('pront/agenda migration error', e));

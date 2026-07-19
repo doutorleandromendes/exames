@@ -31,6 +31,9 @@ export const ENUMS_ATB = {
   iras: ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact',
          'HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC',
          'CDI','Onco_Bact','Sem dados','Descartado','Repetida'],
+  // veredito/parecer do SCIH (vive em atb_fichas.recomendacao_scih, JSONB array). Filtre com @>.
+  recomendacao_scih: ['Sim','Não','Com ajustes (especificados abaixo)','ATB não controlado',
+                      'Suspenso','Ficha Repetida','Audit_post'],
 };
 
 export const GLOSSARIO_ATB = `
@@ -65,7 +68,7 @@ atb_evolutivos ev — dados evolutivos: ev.ficha_id → f.id (1:1). labs/hemodin
 - atb_solicitado (JSONB array, ATÉ 3 drogas por ficha, enum). Uma droga presente = @> jsonb_build_array('Meropenem').
 - tempo_previsto (INTEGER) = "dias de ATB solicitados / previstos" = dias de tratamento planejados. É POR FICHA, não por droga (ver ARMADILHAS).
 - sofa (INT), sofa_renal (INT) — escores já computados.
-- status (TEXT, enum). retrospectiva (BOOL). recomendacao_scih (JSONB) = veredito SCIH.
+- status (TEXT, enum). retrospectiva (BOOL). recomendacao_scih (JSONB array) = PARECER / VEREDITO do SCIH sobre a solicitação. Filtre com @>: recomendacao_scih @> '["Valor"]'::jsonb. "parecer"/"veredito"/"recomendação do SCIH"/"opinião do SCIH" = esta coluna. MAPA DE VALORES (sinônimos → valor exato): "parecer Não"/"negativo"/"contrário"/"desfavorável"/"não recomendado"/"contraindicado"/"negado" → 'Não'; "parecer Sim"/"favorável"/"aprovado"/"recomendado"/"liberado"/"positivo" → 'Sim'; "com ajustes"/"ajustado"/"com ressalvas" → 'Com ajustes (especificados abaixo)'; "suspenso"/"suspensão" → 'Suspenso'; "ATB não controlado"/"não controlado" → 'ATB não controlado'; "ficha repetida"/"repetida" → 'Ficha Repetida'. Ex.: "parecer Não" = recomendacao_scih @> '["Não"]'::jsonb.
 - acesso_vascular_neo (JSONB array) = acesso vascular em NEONATO (só faz sentido quando setor='UTI Neo / Infantil'). Valores: 'Cateter umbilical','PICC','Periférico','Flebotomia'. Ex.: PICC neonatal = acesso_vascular_neo @> '["PICC"]'::jsonb. ATENÇÃO: PICC NÃO está em dispositivos_invasivos — mora AQUI.
 - acesso_quimio (TEXT) = tipo de acesso para quimioterapia (contexto oncológico). Valores: 'PICC','Portocath','Permcath/Hickman'. Ex.: acesso_quimio = 'PICC'. É TEXT (igualdade), não array.
 - peso_nascimento (NUMERIC) = peso ao NASCIMENTO em GRAMAS (só ficha neonatal, setor='UTI Neo / Infantil'). "menos de 1500g"/"<1500 gramas"/"muito baixo peso" = peso_nascimento < 1500. É PESO em gramas — NUNCA interprete "g"/"gramas" como dias, idade ou intervalo de data.
@@ -129,6 +132,17 @@ JOIN atb_avaliacoes av ON av.ficha_id = f.id
 WHERE i.sigla = 'HUSF' AND f.deletado_em IS NULL
   AND av.iras = 'IPCSClin'
   AND f.peso_nascimento < 1500
+  AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= '2026-01-01'
+  AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) < '2027-01-01'`,
+  },
+  {
+    pergunta: 'Quantas fichas de pacientes com sepse tiveram parecer Não em 2026?',
+    sql: `SELECT COUNT(*) AS n_fichas
+FROM atb_fichas f
+JOIN atb_instituicoes i ON i.id = f.instituicao_id
+WHERE i.sigla = 'HUSF' AND f.deletado_em IS NULL
+  AND f.sepse = TRUE
+  AND f.recomendacao_scih @> '["Não"]'::jsonb
   AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= '2026-01-01'
   AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) < '2027-01-01'`,
   },

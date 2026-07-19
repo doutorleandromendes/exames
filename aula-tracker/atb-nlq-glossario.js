@@ -27,6 +27,10 @@ export const ENUMS_ATB = {
                    'Amicacina','Gentamicina','NÃO PADRONIZADO'],
   dispositivos_invasivos: ['AVP','CVC','IOT','SVD','CDL (Shilley)','PAi'],
   status: ['pendente','em_avaliacao','avaliado','arquivado'],
+  // iras = classificação de IRAS (vive em atb_avaliacoes.iras, TEXT). Precisa de JOIN atb_avaliacoes.
+  iras: ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS','(HD)Bact',
+         'HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC',
+         'CDI','Onco_Bact','Sem dados','Descartado','Repetida'],
 };
 
 export const GLOSSARIO_ATB = `
@@ -39,11 +43,15 @@ Você converte perguntas em português sobre stewardship de antimicrobianos em U
 - Data da ficha = SEMPRE a expressão canônica: COALESCE(f.data_referencia, f.jotform_created_at, f.created_at). (data_referencia só é preenchida em ficha retrospectiva.) Use-a em qualquer filtro/ordenação por data.
 - Arrays JSONB: teste pertinência com @> jsonb_build_array('Valor'). Nunca use IN para arrays.
 - Sempre inclua LIMIT quando a pergunta pedir linhas (não agregados).
+- NÃO CONFABULE: se você NÃO conseguir mapear com confiança um termo, sigla ou unidade da pergunta a uma coluna/valor deste glossário, NÃO invente um filtro plausível. Em vez disso, gere EXATAMENTE este SQL (e nada mais): SELECT 'Não reconheci: <termo>. Especifique ou reformule.' AS aviso; — é muito melhor avisar que não entendeu do que retornar um número errado.
+- UNIDADES: "g"/"gramas" = peso (peso_nascimento). "kg" = peso adulto (se houver campo). "dias"/"d" = tempo. NUNCA converta uma unidade em outra (ex.: gramas viram dias/idade) — se não houver coluna para a unidade pedida, aplique a regra NÃO CONFABULE.
+- "em <ano>" (ex.: "em 2026") = ano civil completo: COALESCE(...) >= 'ANO-01-01' AND COALESCE(...) < '(ANO+1)-01-01'. "nos últimos N meses" = COALESCE(...) >= now() - interval 'N months'.
 
 # TABELAS
 atb_fichas f — a ficha de solicitação de ATB (uma por solicitação). Tabela central.
 atb_instituicoes i — id, sigla ('HUSF','SCMI'), nome. Junte por f.instituicao_id = i.id.
 atb_avaliacoes av — avaliação SCIH: av.ficha_id → f.id (1:1). Campos: iras, etiol_iras, micro, desfecho_iras, desfecho_data, saps3.
+  * av.iras = classificação de IRAS (infecção relacionada à assistência). Para filtrar por IRAS, faça JOIN atb_avaliacoes av ON av.ficha_id = f.id e filtre av.iras (ver valores no bloco de ENUM). MAPA DE LINGUAGEM: "IPCS Clínica"/"IPCS_Clin"/"IPCS clínico" = 'IPCSClin'; "IPCS Lab"/"IPCS laboratorial" = 'IPCSLab'; "PAV" = 'PAV'; "ITU (IRAS)" = 'ITU'; "ISC (IRAS)" = 'ISC'. NÃO confunda av.iras (classificação de vigilância) com f.foco_infeccao (foco clínico da solicitação) — são campos e tabelas diferentes.
 atb_evolutivos ev — dados evolutivos: ev.ficha_id → f.id (1:1). labs/hemodinamica/ventilatorio (JSONB).
 
 # COLUNAS DE atb_fichas (as que importam pra análise)
@@ -60,6 +68,7 @@ atb_evolutivos ev — dados evolutivos: ev.ficha_id → f.id (1:1). labs/hemodin
 - status (TEXT, enum). retrospectiva (BOOL). recomendacao_scih (JSONB) = veredito SCIH.
 - acesso_vascular_neo (JSONB array) = acesso vascular em NEONATO (só faz sentido quando setor='UTI Neo / Infantil'). Valores: 'Cateter umbilical','PICC','Periférico','Flebotomia'. Ex.: PICC neonatal = acesso_vascular_neo @> '["PICC"]'::jsonb. ATENÇÃO: PICC NÃO está em dispositivos_invasivos — mora AQUI.
 - acesso_quimio (TEXT) = tipo de acesso para quimioterapia (contexto oncológico). Valores: 'PICC','Portocath','Permcath/Hickman'. Ex.: acesso_quimio = 'PICC'. É TEXT (igualdade), não array.
+- peso_nascimento (NUMERIC) = peso ao NASCIMENTO em GRAMAS (só ficha neonatal, setor='UTI Neo / Infantil'). "menos de 1500g"/"<1500 gramas"/"muito baixo peso" = peso_nascimento < 1500. É PESO em gramas — NUNCA interprete "g"/"gramas" como dias, idade ou intervalo de data.
 - payload_raw (JSONB) = "extras" que ainda não viraram coluna. Acesso: payload_raw->>'chave'. Ex.: o suporte respiratório do SOFA é payload_raw->>'sofa_suporte' (valores incluem 'VNI ou Ventilação Mecânica (VM)'). ATENÇÃO: essa chave pode não existir em fichas antigas migradas do JotForm — só confie após sondar.
 
 # DERIVADOS COMPUTADOS (não são colunas — calcule com aritmética de data)
@@ -72,7 +81,8 @@ Seja ref = COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)::date
 - "sob VM" é AMBÍGUO. Padrão = IOT (invasiva), coluna dispositivos_invasivos @> '["IOT"]'. A leitura do SOFA (payload_raw->>'sofa_suporte' = 'VNI ou Ventilação Mecânica (VM)') INCLUI VNI (não-invasiva) e só existe no payload_raw. Se a pergunta não distinguir, use IOT e não invente.
 - tempo_previsto é UM valor por ficha, não por droga. Ao estratificar por droga, a MESMA ficha entra em até 3 linhas → somar dias entre drogas dá dupla contagem. Isso é esperado; nunca trate como aditivo entre drogas.
 - foco_infeccao é NULL em profilaxia cirúrgica — filtrar foco já exclui profilaxia.
-- ACESSO VASCULAR: "PICC", "cateter umbilical", "flebotomia", "acesso vascular" em NEONATO → coluna acesso_vascular_neo (JSONB), NÃO dispositivos_invasivos. dispositivos_invasivos só tem 'AVP','CVC','IOT','SVD','CDL (Shilley)','PAi' — se pedirem PICC, NUNCA troque por CVC nem force em dispositivos_invasivos; use acesso_vascular_neo (ou acesso_quimio se o contexto for quimioterapia). Não aproxime um dispositivo pedido por outro parecido.
+- ACESSO VASCULAR EM NEONATO (setor='UTI Neo / Infantil'): SEMPRE está em acesso_vascular_neo (campo obrigatório na ficha neonatal). dispositivos_invasivos (lista adulto: AVP/CVC/IOT/SVD/CDL/PAi) é opcional em neonato e costuma ficar VAZIO — NUNCA filtre dispositivos_invasivos para perguntas de acesso vascular em neonato. Mapeamento adulto→neonato: "AVP"/"acesso periférico"/"venoso periférico" → 'Periférico'; "PICC" → 'PICC'; "cateter umbilical" → 'Cateter umbilical'; "flebotomia" → 'Flebotomia'. Ex.: neonato em AVP = acesso_vascular_neo @> '["Periférico"]'::jsonb (NÃO dispositivos_invasivos @> '["AVP"]'). Fora de neonato, acesso periférico adulto continua sendo dispositivos_invasivos @> '["AVP"]'.
+- ACESSO VASCULAR (geral): "PICC" nunca é dispositivos_invasivos. Em neonato → acesso_vascular_neo; em quimioterapia → acesso_quimio. dispositivos_invasivos só tem 'AVP','CVC','IOT','SVD','CDL (Shilley)','PAi' — nunca aproxime um dispositivo pedido por outro parecido (ex.: NUNCA troque PICC por CVC).
 `;
 
 // Few-shots: exemplos reais validados (âncoras de acerto). O endpoint pode
@@ -109,5 +119,17 @@ SELECT d.droga, COUNT(c.id) AS n_fichas,
 FROM drogas d
 LEFT JOIN coorte c ON c.atb_solicitado @> jsonb_build_array(d.droga)
 GROUP BY d.droga ORDER BY dias_atb_total DESC`,
+  },
+  {
+    pergunta: 'Quantas IPCS clínica (IPCS_Clin) em bebês com menos de 1500g ao nascimento tivemos no HUSF em 2026?',
+    sql: `SELECT COUNT(*) AS n
+FROM atb_fichas f
+JOIN atb_instituicoes i ON i.id = f.instituicao_id
+JOIN atb_avaliacoes av ON av.ficha_id = f.id
+WHERE i.sigla = 'HUSF' AND f.deletado_em IS NULL
+  AND av.iras = 'IPCSClin'
+  AND f.peso_nascimento < 1500
+  AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= '2026-01-01'
+  AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) < '2027-01-01'`,
   },
 ];

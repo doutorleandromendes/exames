@@ -20,22 +20,29 @@
 //
 // Env vars:
 //   DATABASE_URL_RO       — conn string do role read-only (ver receita no chat).
-//   ATB_OLLAMA_URL        — URL do Ollama exposto (ex.: https://ollama.lcmendes.med.br).
-//   ATB_OLLAMA_CF_ID      — Cloudflare Access service token (Client Id).
-//   ATB_OLLAMA_CF_SECRET  — Cloudflare Access service token (Client Secret).
-//   ATB_OLLAMA_TOKEN      — (opcional) header custom x-nlq-token, se preferir a Access.
-//   ATB_NLQ_MODEL         — modelo Ollama (default 'qwen2.5-coder:7b').
+//   ── Transporte primário: API OpenAI-compatible (DeepInfra) ──
+//   ATB_NLQ_API_URL       — base (default 'https://api.deepinfra.com/v1/openai').
+//   ATB_NLQ_API_KEY       — token do provedor (SÓ na env). Se setada, usa a API.
+//   ATB_NLQ_MODEL         — modelo. Com API: default 'meta-llama/Llama-3.3-70B-Instruct-Turbo'.
+//       ⚠ Se você tinha ATB_NLQ_MODEL='qwen2.5-coder:7b' (era do Ollama), APAGUE ou troque —
+//         senão o DeepInfra dá 404 model_not_found.
+//   ── Fallback: Ollama local (usado só se ATB_NLQ_API_KEY estiver vazia) ──
+//   ATB_OLLAMA_URL / ATB_OLLAMA_CF_ID / ATB_OLLAMA_CF_SECRET / ATB_OLLAMA_TOKEN.
 // ════════════════════════════════════════════════════════════════════════════
 
 import { GLOSSARIO_ATB, ENUMS_ATB, FEWSHOTS_ATB } from './atb-nlq-glossario.js';
 import { prepararSQL } from './atb-nlq-guard.js';
 
+// Transporte primário: API OpenAI-compatible (DeepInfra). Fallback: Ollama local.
+const NLQ_API_URL  = (process.env.ATB_NLQ_API_URL || 'https://api.deepinfra.com/v1/openai').replace(/\/$/, '');
+const NLQ_API_KEY  = process.env.ATB_NLQ_API_KEY || '';
+const NLQ_MODEL    = process.env.ATB_NLQ_MODEL || (NLQ_API_KEY ? 'meta-llama/Llama-3.3-70B-Instruct-Turbo' : 'qwen2.5-coder:7b');
+// Fallback Ollama (usado só quando NLQ_API_KEY está vazia):
 const OLLAMA_URL       = process.env.ATB_OLLAMA_URL       || '';
-const OLLAMA_TOKEN     = process.env.ATB_OLLAMA_TOKEN     || '';   // header custom opcional
-const OLLAMA_CF_ID     = process.env.ATB_OLLAMA_CF_ID     || '';   // Cloudflare Access: service token id
-const OLLAMA_CF_SECRET = process.env.ATB_OLLAMA_CF_SECRET || '';   // Cloudflare Access: service token secret
-const NLQ_MODEL        = process.env.ATB_NLQ_MODEL        || 'qwen2.5-coder:7b';
-const NLQ_TIMEOUT  = 45000;   // ms — geração pode demorar em modelo local
+const OLLAMA_TOKEN     = process.env.ATB_OLLAMA_TOKEN     || '';
+const OLLAMA_CF_ID     = process.env.ATB_OLLAMA_CF_ID     || '';
+const OLLAMA_CF_SECRET = process.env.ATB_OLLAMA_CF_SECRET || '';
+const NLQ_TIMEOUT  = 45000;   // ms — teto (DeepInfra responde em segundos; folga p/ fallback local)
 const SQL_TIMEOUT  = '5s';    // statement_timeout por query
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c =>
@@ -58,30 +65,42 @@ function systemPrompt() {
   return `${GLOSSARIO_ATB}\n\n${blocoEnums()}\n\n# EXEMPLOS\n${shots}`;
 }
 
-// ── Chama o Ollama (/api/chat), temperatura 0, sem stream ────────────────────
+// ── Gera o SQL: DeepInfra (OpenAI-compatible) se houver key; senão Ollama ─────
 async function gerarSQL(pergunta) {
-  if (!OLLAMA_URL) throw new Error('ATB_OLLAMA_URL não configurada.');
+  const messages = [
+    { role: 'system', content: systemPrompt() },
+    { role: 'user',   content: pergunta },
+  ];
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), NLQ_TIMEOUT);
   try {
+    if (NLQ_API_KEY) {
+      // Transporte primário: API OpenAI-compatible (DeepInfra). Sem response_format:
+      // a saída é SQL cru; o guard (prepararSQL) remove cercas de markdown.
+      const resp = await fetch(`${NLQ_API_URL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${NLQ_API_KEY}` },
+        body: JSON.stringify({ model: NLQ_MODEL, temperature: 0, messages }),
+        signal: ctrl.signal,
+      });
+      if (!resp.ok) {
+        const corpo = await resp.text().catch(() => '');
+        throw new Error(`API HTTP ${resp.status} (model:${NLQ_MODEL}) ${corpo.slice(0, 200)}`);
+      }
+      const data = await resp.json();
+      return (data?.choices?.[0]?.message?.content || '').trim();
+    }
+    // Fallback: Ollama local (formato nativo /api/chat).
+    if (!OLLAMA_URL) throw new Error('Configure ATB_NLQ_API_KEY (DeepInfra) ou ATB_OLLAMA_URL.');
     const resp = await fetch(`${OLLAMA_URL.replace(/\/$/,'')}/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // Cloudflare Access (política Service Auth): identifica o app no túnel.
         ...(OLLAMA_CF_ID     ? { 'CF-Access-Client-Id':     OLLAMA_CF_ID }     : {}),
         ...(OLLAMA_CF_SECRET ? { 'CF-Access-Client-Secret': OLLAMA_CF_SECRET } : {}),
         ...(OLLAMA_TOKEN     ? { 'x-nlq-token':             OLLAMA_TOKEN }     : {}),
       },
-      body: JSON.stringify({
-        model: NLQ_MODEL,
-        stream: false,
-        options: { temperature: 0 },
-        messages: [
-          { role: 'system', content: systemPrompt() },
-          { role: 'user',   content: pergunta },
-        ],
-      }),
+      body: JSON.stringify({ model: NLQ_MODEL, stream: false, options: { temperature: 0 }, messages }),
       signal: ctrl.signal,
     });
     if (!resp.ok) throw new Error(`Ollama HTTP ${resp.status}`);

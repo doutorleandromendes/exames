@@ -19,6 +19,7 @@ import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADICIONAR (numeradores CVE)
+import { registerNlqRoutes } from './atb-nlq-routes.js';   // ← ADICIONAR (pergunta em PT → SQL, admin, read-only)
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
 import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
@@ -110,6 +111,14 @@ const migratorPool = new Pool({
   connectionString: DATABASE_URL_UNPOOLED || DATABASE_URL,
   ssl: __sslConfig
 });
+// Pool read-only dedicado ao NL→SQL (role atb_nlq_ro via DATABASE_URL_RO).
+// Fallback para o pool normal enquanto a RO não estiver setada — a rota roda
+// cada query em START TRANSACTION READ ONLY + statement_timeout, então não
+// escreve mesmo nesse fallback; configure DATABASE_URL_RO assim que der.
+const roPool = new Pool({
+  connectionString: process.env.DATABASE_URL_RO || SUPABASE_POOLER_URL || DATABASE_URL,
+  ssl: __sslConfig
+});
 // ====== HTML helpers / Auth / Utils (extraídos) ======
 // safe/renderShell -> ui-shell.js | middlewares -> auth-middlewares.js
 // normalizeDateStr/fmtDTLocal -> aulas-utils.js | R2 -> aulas-storage.js
@@ -169,6 +178,8 @@ try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerCveNumeradoresRoutes(app, pool); }
 catch (e) { console.error('ERRO registerCveNumeradoresRoutes', e); }
+try { registerNlqRoutes(app, roPool, { adminRequired }); }
+catch (e) { console.error('ERRO registerNlqRoutes', e); }
 try { registerIscRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscRoutes', e); }
 try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }

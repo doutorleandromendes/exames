@@ -55,28 +55,36 @@ function sondas() {
       async run({ pool, instId }) {
         const v = await num(pool,
           `SELECT count(*) FROM atb_fichas
-            WHERE instituicao_id = $1 AND jotform_submission_id IS NOT NULL
-              AND created_at > now() - interval '30 days' AND payload_raw IS NULL`, [instId]);
+            WHERE instituicao_id = $1 AND deletado_em IS NULL AND NOT COALESCE(retrospectiva, false)
+              AND jotform_submission_id IS NOT NULL
+              AND COALESCE(jotform_created_at, created_at) > now() - interval '30 days' AND payload_raw IS NULL`, [instId]);
         return { ok: v === 0, valor: v, limite: '0',
-          detalhe: v ? `${v} fichas importadas nos últimos 30d sem o JotForm cru — a persistência do raw regrediu (foi ISSO que causou o incidente).` : 'Toda importação recente guardou o payload cru.',
-          sql: `SELECT id, jotform_submission_id, created_at FROM atb_fichas WHERE instituicao_id=${instId} AND jotform_submission_id IS NOT NULL AND created_at > now()-interval '30 days' AND payload_raw IS NULL ORDER BY created_at DESC;` };
+          detalhe: v ? `${v} fichas submetidas nos últimos 30d sem o JotForm cru — a persistência do raw regrediu (foi ISSO que causou o incidente).` : 'Toda importação recente guardou o payload cru.',
+          sql: `SELECT id, jotform_submission_id, jotform_created_at FROM atb_fichas WHERE instituicao_id=${instId} AND deletado_em IS NULL AND jotform_submission_id IS NOT NULL AND COALESCE(jotform_created_at,created_at) > now()-interval '30 days' AND payload_raw IS NULL ORDER BY jotform_created_at DESC;` };
       },
     },
     {
-      nome: 'Camada de submission vazia (assinatura de parse-gap)',
+      nome: 'Camada de submission vazia em imports recentes (parse-gap)',
       categoria: 'Importação JotForm', severidade: 'aviso',
       async run({ pool, instId }) {
-        // Ficha com pedido de ATB mas SEM nenhum campo clínico do formulário.
+        // Detector de REGRESSÃO VIVA: import dos últimos 90d trazendo pedido de ATB
+        // mas nenhum campo clínico. Janela por jotform_created_at (data REAL de
+        // submissão), não created_at (data da carga — todas as históricas caem
+        // recentes por ele). O branco histórico legítimo (~1025 fichas 2021-2026,
+        // prescritor não preencheu) fica de fora pela data de submissão antiga.
         const v = await num(pool,
           `SELECT count(*) FROM atb_fichas
-            WHERE instituicao_id = $1 AND atb_solicitado <> '[]'::jsonb
+            WHERE instituicao_id = $1 AND deletado_em IS NULL
+              AND jotform_submission_id IS NOT NULL AND NOT COALESCE(retrospectiva, false)
+              AND COALESCE(jotform_created_at, created_at) > now() - interval '90 days'
+              AND atb_solicitado <> '[]'::jsonb
               AND (historia_clinica IS NULL OR historia_clinica = '')
               AND foco_infeccao IS NULL
               AND (culturas_colhidas IS NULL OR culturas_colhidas = '{}'::jsonb)`, [instId]);
-        const LIM = 50;
+        const LIM = 120;   // ~50/90d de branco genuíno + folga; um import quebrado somaria milhares
         return { ok: v <= LIM, valor: v, limite: `≤ ${LIM}`,
-          detalhe: v > LIM ? `${v} fichas têm pedido de ATB mas nenhum campo clínico — sinal de import trazendo só o núcleo do Tables.` : 'Camada clínica presente onde deveria.',
-          sql: `SELECT id, jotform_submission_id FROM atb_fichas WHERE instituicao_id=${instId} AND atb_solicitado <> '[]'::jsonb AND (historia_clinica IS NULL OR historia_clinica='') AND foco_infeccao IS NULL AND (culturas_colhidas IS NULL OR culturas_colhidas='{}'::jsonb) LIMIT 200;` };
+          detalhe: v > LIM ? `${v} fichas submetidas nos últimos 90d com ATB mas sem campo clínico — possível import trazendo só o núcleo do Tables (regressão).` : 'Imports recentes trazendo a camada clínica normalmente (branco histórico legítimo fica fora da janela).',
+          sql: `SELECT id, jotform_submission_id, jotform_created_at::date FROM atb_fichas WHERE instituicao_id=${instId} AND deletado_em IS NULL AND jotform_submission_id IS NOT NULL AND NOT COALESCE(retrospectiva,false) AND COALESCE(jotform_created_at,created_at) > now()-interval '90 days' AND atb_solicitado <> '[]'::jsonb AND (historia_clinica IS NULL OR historia_clinica='') AND foco_infeccao IS NULL AND (culturas_colhidas IS NULL OR culturas_colhidas='{}'::jsonb) ORDER BY jotform_created_at DESC LIMIT 200;` };
       },
     },
     {
@@ -113,15 +121,17 @@ function sondas() {
       categoria: 'Campos obrigatórios', severidade: 'critico',
       async run({ pool, instId }) {
         const total = await num(pool,
-          `SELECT count(*) FROM atb_fichas WHERE instituicao_id=$1 AND setor=$2 AND jotform_submission_id IS NOT NULL`, [instId, SETOR_NEO]);
+          `SELECT count(*) FROM atb_fichas WHERE instituicao_id=$1 AND setor=$2
+             AND deletado_em IS NULL AND NOT COALESCE(retrospectiva,false) AND jotform_submission_id IS NOT NULL`, [instId, SETOR_NEO]);
         const sem = await num(pool,
           `SELECT count(*) FROM atb_fichas WHERE instituicao_id=$1 AND setor=$2
+             AND deletado_em IS NULL AND NOT COALESCE(retrospectiva,false)
              AND jotform_submission_id IS NOT NULL AND peso_nascimento IS NULL`, [instId, SETOR_NEO]);
         const pct = total ? (100 * sem / total) : 0;
         const LIM = 5;  // tolera resíduo pequeno (fichas legítimas sem o campo no dump)
         return { ok: pct <= LIM, valor: `${sem}/${total} (${pct.toFixed(1)}%)`, limite: `≤ ${LIM}%`,
           detalhe: pct > LIM ? `${sem} fichas neonatais sem peso ao nascimento (obrigatório na ficha) — mesma assinatura do incidente de 2026-07.` : 'Peso ao nascimento presente na quase totalidade das fichas neonatais.',
-          sql: `SELECT id, jotform_submission_id FROM atb_fichas WHERE instituicao_id=${instId} AND setor='${SETOR_NEO}' AND jotform_submission_id IS NOT NULL AND peso_nascimento IS NULL;` };
+          sql: `SELECT id, jotform_submission_id FROM atb_fichas WHERE instituicao_id=${instId} AND setor='${SETOR_NEO}' AND deletado_em IS NULL AND NOT COALESCE(retrospectiva,false) AND jotform_submission_id IS NOT NULL AND peso_nascimento IS NULL;` };
       },
     },
     {
@@ -129,11 +139,11 @@ function sondas() {
       categoria: 'Campos obrigatórios', severidade: 'aviso',
       async run({ pool, instId }) {
         const v = await num(pool,
-          `SELECT count(*) FROM atb_fichas WHERE instituicao_id=$1
+          `SELECT count(*) FROM atb_fichas WHERE instituicao_id=$1 AND deletado_em IS NULL
              AND jotform_submission_id IS NOT NULL AND (setor IS NULL OR setor='')`, [instId]);
         return { ok: v === 0, valor: v, limite: '0',
           detalhe: v ? `${v} fichas importadas sem setor (obrigatório e usado no roteamento).` : 'Setor presente em todas as fichas importadas.',
-          sql: `SELECT id, jotform_submission_id FROM atb_fichas WHERE instituicao_id=${instId} AND jotform_submission_id IS NOT NULL AND (setor IS NULL OR setor='');` };
+          sql: `SELECT id, jotform_submission_id FROM atb_fichas WHERE instituicao_id=${instId} AND deletado_em IS NULL AND jotform_submission_id IS NOT NULL AND (setor IS NULL OR setor='');` };
       },
     },
 

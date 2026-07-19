@@ -34,7 +34,9 @@ const API_KEY   = process.env.ATB_NARRATIVA_API_KEY || '';
 const MODEL     = process.env.ATB_NARRATIVA_MODEL || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
 const DEID_ON   = process.env.ATB_HISTORIA_DEID === '1';
 
-const CHAT_TIMEOUT = 8000;   // ms — geração da classificação (fail-open acima disso)
+const CHAT_TIMEOUT = 20000;  // ms — geração da classificação (fail-open acima disso).
+                             // Folga p/ picos de latência do provedor externo; no
+                             // form (Fase C) segue fail-open — acima disso, envia direto.
 
 // Schema OpenAI (json_schema) — força saída válida no decodificador.
 const RESPONSE_FORMAT = {

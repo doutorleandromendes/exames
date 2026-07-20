@@ -163,6 +163,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   app.get('/isc/admin/importar', scihRequired, async (req, res) => {
     try {
       const { sigla, instId } = await resolveInst(req);
+      const admin = ehMedico(req);
       const { rows: perfis } = await pool.query(
         `SELECT id, nome FROM isc_import_perfis WHERE ($1::int IS NULL OR instituicao_id = $1) ORDER BY nome`, [instId]);
       const { rows: lotes } = await pool.query(
@@ -208,8 +209,10 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
             <textarea name="texto" id="tx" rows="10" placeholder="Cole o mapa cirúrgico (a primeira linha deve ser o cabeçalho)" style="font-family:ui-monospace,Menlo,monospace;font-size:12px"></textarea>
             <div style="display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap">
               <div><label class="l">Perfil de mapeamento</label>
-                <select name="perfil_id" style="min-width:220px"><option value="">Adivinhar pelas colunas</option>
-                  ${perfis.map(p => `<option value="${p.id}">${safe(p.nome)}</option>`).join('')}</select></div>
+                <select name="perfil_id" style="min-width:220px" ${admin ? '' : 'required'}>
+                  ${admin ? '<option value="">Adivinhar pelas colunas</option>' : (perfis.length === 1 ? '' : '<option value="">— escolha —</option>')}
+                  ${perfis.map((p, k) => `<option value="${p.id}" ${!admin && perfis.length === 1 ? 'selected' : ''}>${safe(p.nome)}</option>`).join('')}</select>
+                ${admin ? '' : '<div class="sub" style="margin-top:3px">O administrador configurou o mapeamento das colunas.</div>'}</div>
               <button class="btn" type="submit" style="margin-top:16px">Ler e mapear →</button>
             </div>
           </div>
@@ -266,16 +269,24 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <a href="/isc/admin/importar">← Voltar</a></div>`));
       }
 
-      // Mapeamento: o que o operador mandou > perfil salvo > palpite.
+      // Mapeamento. Para o ADMIN: o que ele mandou na tela > perfil > palpite.
+      // Para a colaboradora (não-admin): mapa_json do browser é IGNORADO — o
+      // mapeamento é ato de configuração, dela vem só o arquivo. Só entra perfil
+      // salvo (que o admin montou) ou, na falta, o palpite. Esconder o editor na
+      // tela não bastaria: um POST forjado passaria. A guarda é aqui.
+      const podeMapear = ehMedico(req);
       let mapa = null;
-      if (b.mapa_json) { try { mapa = JSON.parse(b.mapa_json); } catch { /* cai no palpite */ } }
+      let mapaOrigem = 'palpite';
+      if (podeMapear && b.mapa_json) {
+        try { mapa = JSON.parse(b.mapa_json); mapaOrigem = 'editor'; } catch { /* cai no perfil/palpite */ }
+      }
       if (!mapa && b.perfil_id) {
         const { rows } = await pool.query(
-          `SELECT mapeamento FROM isc_import_perfis WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`,
+          `SELECT nome, mapeamento FROM isc_import_perfis WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`,
           [Number(b.perfil_id), instId]);
-        if (rows[0]) mapa = rows[0].mapeamento;
+        if (rows[0]) { mapa = rows[0].mapeamento; mapaOrigem = `perfil "${rows[0].nome}"`; }
       }
-      if (!mapa) mapa = adivinhaMapeamento(header, linhas);
+      if (!mapa) { mapa = adivinhaMapeamento(header, linhas); mapaOrigem = 'palpite automático'; }
 
       const equipes = await equipesDe(instId);
       const existentes = await fichasExistentes(instId);
@@ -285,11 +296,14 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       const opts = i => `<option value="">— ignorar —</option>` + CAMPOS_IMPORTAVEIS.map(c =>
         `<option value="${c.key}" ${mapa[i] === c.key ? 'selected' : ''}>${safe(c.label)}${c.obrigatorio ? ' *' : ''}</option>`).join('');
 
+      const rotuloCampo = k => (CAMPOS_IMPORTAVEIS.find(c => c.key === k) || {}).label || k;
       const mapaUI = norm.colunasUteis.map(i => { const h = header[i]; return `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #f0f1f3">
           <div style="font-size:12px"><b>${safe(h || '(coluna ' + (i + 1) + ')')}</b>
             <div class="sub">ex.: ${safe(String(linhas[0]?.[i] ?? '').slice(0, 30) || '—')}</div></div>
-          <select class="mp" data-i="${i}">${opts(i)}</select>
+          ${podeMapear
+            ? `<select class="mp" data-i="${i}">${opts(i)}</select>`
+            : `<div style="font-size:12px;color:${mapa[i] ? '#202124' : '#9aa0a6'}">${mapa[i] ? safe(rotuloCampo(mapa[i])) : '— não usada —'}</div>`}
         </div>`; }).join('');
 
       const PILL = { nova: ['#e6f4ea', '#1e7e34', 'nova'], duplicada: ['#f1f3f4', '#80868b', 'já existe'],
@@ -339,8 +353,11 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           </p>
         </div>
         <div class="card2"><h2>Mapeamento das colunas</h2>
-          <p class="sub" style="margin-top:-8px">* obrigatório. Mudou algo? Clique em <b>Recalcular</b> para atualizar a prévia.</p>
+          ${podeMapear
+            ? `<p class="sub" style="margin-top:-8px">* obrigatório. Mudou algo? Clique em <b>Recalcular</b> para atualizar a prévia.</p>`
+            : `<p class="sub" style="margin-top:-8px">Definido pelo administrador (${safe(mapaOrigem)}). Se as colunas não baterem, avise o administrador do SCIH.</p>`}
           <div style="max-height:280px;overflow:auto">${mapaUI}</div>
+          ${podeMapear ? `
           <form method="post" action="/isc/admin/importar/previa" id="fr" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input type="hidden" name="inst" value="${safe(sigla || '')}">
             <input type="hidden" name="texto" value="${safe(texto)}">
@@ -356,7 +373,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
             <button class="btn btn-sec" type="submit">Recalcular prévia</button>
             <input name="perfil_nome" placeholder="Salvar mapeamento como…" style="max-width:230px">
             <button class="btn btn-sec" type="submit" name="salvar_perfil" value="1">Salvar perfil</button>
-          </form>
+          </form>` : ''}
         </div>
 
         <div class="card2"><h2>Linhas</h2>
@@ -367,14 +384,14 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           ${itens.length > 300 ? `<p class="sub">Mostrando as 300 primeiras de ${itens.length}. Todas serão processadas.</p>` : ''}
         </div>
 
-        <form method="post" action="/isc/admin/importar/gravar" onsubmit="document.getElementById('mj2').value=window.mapaAtual()">
+        <form method="post" action="/isc/admin/importar/gravar" ${podeMapear ? `onsubmit="document.getElementById('mj2').value=window.mapaAtual()"` : ''}>
           <input type="hidden" name="inst" value="${safe(sigla || '')}">
           <input type="hidden" name="texto" value="${safe(texto)}">
           <input type="hidden" name="delim" value="${safe(delim)}">
           <input type="hidden" name="arquivo_nome" value="${safe(b.arquivo_nome || '')}">
           <input type="hidden" name="modo" value="${safe(modo)}">
           <input type="hidden" name="sem_triagem" value="${b.sem_triagem === '1' ? '1' : ''}">
-          <input type="hidden" name="mapa_json" id="mj2">
+          ${podeMapear ? '<input type="hidden" name="mapa_json" id="mj2">' : `<input type="hidden" name="perfil_id" value="${safe(b.perfil_id || '')}">`}
           <button class="btn" ${(resumo.novas + (resumo.complementa || 0)) === 0 ? 'disabled style="opacity:.5"' : ''} type="submit">
             ${[resumo.novas ? `Criar ${resumo.novas} ficha(s)` : '', resumo.complementa ? `complementar ${resumo.complementa}` : ''].filter(Boolean).join(' · ') || 'Nada a fazer'}
           </button>
@@ -383,17 +400,17 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           ${resumo.complementa ? '<p class="sub" style="margin-top:8px">Complementar só <b>preenche campo vazio</b> — nunca sobrescreve o que já está na ficha, nem toca na classificação.</p>' : ''}
         </form>
 
-        <script>
+        ${podeMapear ? `<script>
           window.mapaAtual = function(){
             var o={}; document.querySelectorAll('.mp').forEach(function(s){ if(s.value) o[s.dataset.i]=s.value; });
             return JSON.stringify(o);
           };
           document.getElementById('fr').addEventListener('submit',function(){ document.getElementById('mj').value=window.mapaAtual(); });
-        </script>
+        </script>` : ''}
       </div>${CSS}`;
 
       // Salvar perfil (o próprio submit da prévia traz o nome).
-      if (b.salvar_perfil && String(b.perfil_nome || '').trim()) {
+      if (podeMapear && b.salvar_perfil && String(b.perfil_nome || '').trim()) {
         await pool.query(
           `INSERT INTO isc_import_perfis (instituicao_id, nome, mapeamento, delim)
            VALUES ($1,$2,$3,$4)
@@ -415,8 +432,22 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       const modo = ['plano', 'relatorio'].includes(b.modo) ? b.modo : 'auto';
       const norm = normalizaAoA(ent.aoa, modo);
       const linhas = norm.linhas;
-      let mapa = {};
-      try { mapa = JSON.parse(b.mapa_json || '{}'); } catch { mapa = adivinhaMapeamento(norm.rotulos, norm.linhas); }
+
+      // MESMA guarda do passo da prévia: o mapa da colaboradora vem do PERFIL,
+      // nunca do browser. Reconstruir aqui — e não confiar no que o form enviou
+      // — é o que impede um POST forjado de gravar com mapeamento arbitrário.
+      const podeMapear = ehMedico(req);
+      let mapa = null;
+      if (podeMapear && b.mapa_json) {
+        try { mapa = JSON.parse(b.mapa_json); } catch { mapa = null; }
+      }
+      if (!mapa && b.perfil_id) {
+        const { rows } = await pool.query(
+          `SELECT mapeamento FROM isc_import_perfis WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`,
+          [Number(b.perfil_id), instId]);
+        if (rows[0]) mapa = rows[0].mapeamento;
+      }
+      if (!mapa) mapa = adivinhaMapeamento(norm.rotulos, norm.linhas);
 
       const equipes = await equipesDe(instId);
       const existentes = await fichasExistentes(instId);

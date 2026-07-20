@@ -24,6 +24,7 @@ import { registerHistoriaRoutes } from './atb-historia-routes.js';   // ← ADIC
 import { registerFormTesteRoutes } from './atb-form-teste-routes.js';   // ← ADICIONAR (dry-run do form, admin)
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
 import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
+import { registerPavRoutes } from './pav-routes.js';    // ← ADICIONAR (form/grid de PAV)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
 import { registerIscImportRoutes } from './isc-import-routes.js';  // ← ADICIONAR (importador de mapa cirúrgico)
 import { runProntMigrations } from './pront-db.js';
@@ -134,6 +135,7 @@ const {
   medicoRequired,
   agendaRequired,
   secretariaRequired,
+  pavRequired,
 } = createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell });
 
 // ====== Migrações do domínio Aulas (aulas-db.js) ======
@@ -190,6 +192,8 @@ try { registerIscRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscRoutes', e); }
 try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscImportRoutes', e); }
+try { registerPavRoutes(app, pool, pavRequired, renderShell); }
+catch (e) { console.error('ERRO registerPavRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }

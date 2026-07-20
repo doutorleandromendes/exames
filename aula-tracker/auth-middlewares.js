@@ -147,6 +147,31 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     }catch{ return res.redirect('/'); }
   };
 
+  // PAV (bundle de prevenção de PAV): exige login com flag pav (fisio/enf) ou
+  // super_admin; adm é break-glass. A CATEGORIA (fisio × enf) e o CONSELHO vêm
+  // no req.user — as rotas usam categoria_pav p/ decidir itens e alcance de salão
+  // (fisio: dois salões; enf: o da sessão). Mesma disciplina de vínculo de
+  // instituição do scihRequired (super_admin e adm cruzam tudo).
+  const pavRequired = async (req,res,next)=>{
+    const adm = isAdmin(req);
+    const uid = req.cookies?.uid;
+    if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    try{
+      const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,pav,categoria_pav,conselho,instituicao FROM users WHERE id=$1',[uid]);
+      const user = rows[0];
+      if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+      const exp = parseISO(user.expires_at);
+      if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+      req.user = user;
+      if(user.pav || user.super_admin || adm){
+        if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
+          return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
+        return next();
+      }
+      return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao bundle de PAV</h1><p class="mut">Sua conta não tem permissão para esta área. Fale com a coordenação.</p><a href="/inicio">Início</a></div>`));
+    }catch{ return res.redirect('/'); }
+  };
+
   return {
     isAdmin,
     adminRequired,
@@ -157,5 +182,6 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     medicoRequired,
     agendaRequired,
     secretariaRequired,
+    pavRequired,
   };
 }

@@ -139,9 +139,12 @@
       taProps.onBlur = function (ev) { p.historiaHook.onBlur(ev.target.value); };
     }
     var _hh = p.historiaHook, _avisoBox = null;
+    // Texto FIXO, controlado por nós — o modelo decide só narrativa sim/não; a
+    // mensagem exibida nunca vem do modelo (evita saída livre imprevisível na ficha).
+    var AVISO_HISTORIA = 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro.';
     if (_hh) {
       if (_hh.checando) _avisoBox = e('div', { style: { marginTop: '6px', fontSize: '12.5px', color: '#5f6368' } }, 'verificando história…');
-      else if (_hh.aviso) _avisoBox = e('div', { style: { marginTop: '8px', padding: '9px 11px', background: '#fef7e0', border: '1px solid #f0d58a', borderRadius: '8px', fontSize: '13px', color: '#7a5b00', lineHeight: 1.45 } }, (_hh.aviso.aviso || 'A história parece telegráfica — descreva o quadro em texto corrido.'));
+      else if (_hh.aviso) _avisoBox = e('div', { style: { marginTop: '8px', padding: '9px 11px', background: '#fef7e0', border: '1px solid #f0d58a', borderRadius: '8px', fontSize: '13px', color: '#7a5b00', lineHeight: 1.45 } }, AVISO_HISTORIA);
     }
     if (f.bloquearColar) {
       var bloqueia = function (ev) {
@@ -1040,7 +1043,7 @@
       return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
         e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
           e('h3', { style: { margin: '0 0 8px', fontSize: '17px' } }, 'Complete a história clínica'),
-          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, (nudge && nudge.aviso) || 'A história parece telegráfica. Descreva o quadro em texto corrido.'),
+          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro.'),
           e('textarea', { value: motivo, placeholder: 'Se for enviar assim mesmo, diga o porquê (opcional)', onChange: function (ev) { setMotivo(ev.target.value); }, style: { width: '100%', minHeight: '58px', font: 'inherit', padding: '9px', border: '1px solid #dadce0', borderRadius: '8px', boxSizing: 'border-box' } }),
           e('div', { style: { display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '14px' } },
             e('button', { onClick: function () { postFicha(nudge && nudge.checagem_id); }, style: { padding: '9px 14px', border: '1px solid #dadce0', borderRadius: '8px', background: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Enviar assim mesmo'),

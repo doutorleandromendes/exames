@@ -2,7 +2,7 @@
 // Rodar: node harness-pav-core.mjs
 import {
   extraiRegistro, turnoVigente, diaDoTurno, saloesDoContexto, podeEscrever,
-  leitosVisiveis, itensDaCategoria, podeTransferir, relacaoPF, piorDoDia, serieVentilatoria,
+  leitosVisiveis, itensDaCategoria, podeTransferir, efeitoEncerramento, relacaoPF, piorDoDia, serieVentilatoria,
   vmDiaEpisodio, conformidadeItem, adesaoBundle,
   REGISTRO, REGRAS_DEFAULT, SUBGLOTICA_VIA_DEFAULT,
 } from './pav-core.js';
@@ -120,6 +120,17 @@ t('super-admin faz transferência retroativa',
   podeTransferir({ data: '2026-07-10', turno: 'M', salao_de: 'UTIAB', salao_para: 'UTIC' }, su, at(17, 15)).retroativo);
 t('super-admin transferência no vigente NÃO é retroativa',
   !podeTransferir({ data: '2026-07-17', turno: 'T', salao_de: 'UTIAB', salao_para: 'UTIC' }, su, at(17, 15)).retroativo);
+
+console.log('\n── efeitoEncerramento: dois níveis ──');
+eq('enf registra extubação → pendente', efeitoEncerramento({ categoria_pav: 'enf' }, 'registrar').estado_novo, 'extubacao_pendente');
+eq('enf NÃO encerra direto', efeitoEncerramento({ categoria_pav: 'enf' }, 'registrar').encerra, false);
+eq('fisio registra extubação → encerrado direto', efeitoEncerramento({ categoria_pav: 'fisio' }, 'registrar').estado_novo, 'encerrado');
+eq('fisio encerra direto', efeitoEncerramento({ categoria_pav: 'fisio' }, 'registrar').encerra, true);
+eq('SCIH encerra direto', efeitoEncerramento({ scih: true }, 'registrar').estado_novo, 'encerrado');
+eq('super-admin encerra direto', efeitoEncerramento({ super_admin: true }, 'registrar').estado_novo, 'encerrado');
+eq('fisio confirma pendência → encerrado', efeitoEncerramento({ categoria_pav: 'fisio' }, 'confirmar').estado_novo, 'encerrado');
+eq('enf NÃO confirma pendência', efeitoEncerramento({ categoria_pav: 'enf' }, 'confirmar').estado_novo, null);
+eq('motivo do bloqueio da enf ao confirmar', efeitoEncerramento({ categoria_pav: 'enf' }, 'confirmar').motivo, 'confirmação é ato de fisio/SCIH');
 
 console.log('\n═══ PARÂMETROS → ATB ═══');
 

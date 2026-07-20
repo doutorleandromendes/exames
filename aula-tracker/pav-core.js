@@ -63,6 +63,44 @@ export const SALOES = [
 //   enf    → o salão vem da SESSÃO (login único, seleção por sessão), não da conta
 export const SALOES_FISIO = SALOES.map(s => s[0]);
 
+// ── Estados do episódio (encerramento em dois níveis) ─────────────────────
+// 'ativo'              → em VM, na lista
+// 'extubacao_pendente' → enf registrou extubação (preencheu tudo); AINDA na
+//                        lista, aguarda confirmação de fisio/SCIH no período seguinte
+// 'encerrado'          → fisio/SCIH confirmaram; fora da lista, VM-dia fechado
+export const ESTADOS_EPISODIO = ['ativo', 'extubacao_pendente', 'encerrado'];
+export const ESTADO_NA_LISTA = new Set(['ativo', 'extubacao_pendente']); // população ativa
+
+export const DESFECHOS = [
+  ['extubacao_programada',  'Extubação programada'],
+  ['extubacao_acidental',   'Extubação acidental / autoextubação'],
+  ['obito',                 'Óbito'],
+  ['tqt',                   'Traqueostomia'],
+  ['transferencia_externa', 'Transferência externa'],
+  ['reintubacao',           'Reintubação (novo episódio)'],
+];
+
+// Decide o efeito de um pedido de encerramento, conforme QUEM pede.
+// A enfermagem só PROPÕE (vira 'extubacao_pendente', preenchendo tudo); fisio,
+// SCIH e super-admin ENCERRAM direto ('encerrado'). Confirmar uma pendência é
+// sempre encerramento (ato de fisio/SCIH). Função pura → testável.
+//   ctx: { categoria_pav, super_admin, scih }
+//   acao: 'registrar' (marcar extubação) | 'confirmar' (revisar pendência)
+// Devolve { estado_novo, encerra, motivo }.
+export function efeitoEncerramento(ctx, acao = 'registrar') {
+  const revisor = !!(ctx?.super_admin || ctx?.scih || ctx?.categoria_pav === 'fisio');
+
+  if (acao === 'confirmar') {
+    if (!revisor) return { estado_novo: null, encerra: false, motivo: 'confirmação é ato de fisio/SCIH' };
+    return { estado_novo: 'encerrado', encerra: true, motivo: null };
+  }
+  // acao === 'registrar' (marcar extubação)
+  if (revisor) return { estado_novo: 'encerrado', encerra: true, motivo: null };
+  if (ctx?.categoria_pav === 'enf') return { estado_novo: 'extubacao_pendente', encerra: false, motivo: null };
+  return { estado_novo: null, encerra: false, motivo: 'sem permissão para encerrar' };
+}
+
+
 // ══════════════════════════════════════════════════════════════════════════
 //  CATÁLOGO DE REGISTRO  (o que o formulário coleta — FATO, nunca julgamento)
 // ══════════════════════════════════════════════════════════════════════════

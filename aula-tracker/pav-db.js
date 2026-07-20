@@ -84,6 +84,38 @@ export async function runPavMigrations(pool) {
   await pool.query(`CREATE INDEX IF NOT EXISTS pav_fichas_ativo_idx  ON pav_fichas (instituicao_id, ativo, salao)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS pav_fichas_pront_idx  ON pav_fichas (instituicao_id, prontuario)`);
 
+  // ── Encerramento em DOIS NÍVEIS (aditivo; não altera o CREATE acima) ──────
+  // O booleano `ativo` sozinho não expressa o fluxo: a enfermagem REGISTRA a
+  // extubação (preenche tudo), mas o episódio fica PENDENTE de confirmação por
+  // fisio/SCIH no período seguinte — continua na lista. Fisio/SCIH encerram
+  // direto. Daí um estado tri-valorado:
+  //   'ativo'              → em VM, na lista
+  //   'extubacao_pendente' → enf registrou extubação; AINDA na lista, aguarda revisão
+  //   'encerrado'          → fisio/SCIH confirmaram; fora da lista, VM-dia fechado
+  // `ativo` (booleano) é mantido em sincronia p/ não quebrar índices/queries que
+  // já rodam: ativo = (estado <> 'encerrado'). Assim a população da lista =
+  // ativo=true cobre 'ativo' E 'extubacao_pendente', como o fluxo exige.
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS estado TEXT`);
+  await pool.query(`
+    UPDATE pav_fichas
+       SET estado = CASE WHEN ativo THEN 'ativo' ELSE 'encerrado' END
+     WHERE estado IS NULL`);
+  await pool.query(`ALTER TABLE pav_fichas ALTER COLUMN estado SET DEFAULT 'ativo'`);
+
+  // Autoria da extubação registrada pela enf (o "quem/quando" do 1º nível), que
+  // o revisor herda ao confirmar. data_extubacao/desfecho já existem no CREATE.
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS extub_registrada_por      INTEGER REFERENCES users(id)`);
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS extub_registrada_por_nome TEXT`);
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS extub_registrada_em       TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS extub_confirmada_por      INTEGER REFERENCES users(id)`);
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS extub_confirmada_por_nome TEXT`);
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS extub_confirmada_em       TIMESTAMPTZ`);
+  // Autoria da abertura da ficha (fato: intubação pode ser em qualquer horário;
+  // cadastro pode cair no turno seguinte — registrado_em ≠ data_intubacao).
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS aberta_por      INTEGER REFERENCES users(id)`);
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS aberta_por_nome TEXT`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS pav_fichas_estado_idx ON pav_fichas (instituicao_id, estado, salao)`);
+
   // ── Checks: 1 por (ficha × data × turno × categoria) ──────────────────────
   // Chave única garante a anotação UMA vez por turno. A categoria entra na chave
   // porque, na sobreposição teórica de bordas, fisio e enf poderiam tocar o mesmo

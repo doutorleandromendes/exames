@@ -21,8 +21,8 @@
 
 import {
   turnoVigente, podeEscrever, itensDaCategoria, leitosVisiveis, saloesDoContexto,
-  extraiRegistro, relacaoPF, REGISTRO, SALOES, SECRECAO_QUANTIDADE, SECRECAO_ASPECTO,
-  SUBGLOTICA_VIA, SUBGLOTICA_VIA_DEFAULT, CATEGORIAS_PAV,
+  extraiRegistro, relacaoPF, efeitoEncerramento, REGISTRO, SALOES, SECRECAO_QUANTIDADE,
+  SECRECAO_ASPECTO, SUBGLOTICA_VIA, SUBGLOTICA_VIA_DEFAULT, CATEGORIAS_PAV, DESFECHOS,
 } from './pav-core.js';
 
 function safe(s) {
@@ -94,7 +94,8 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
 
       const { rows: fichas } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.leito, f.salao,
-               f.data_intubacao, f.numero_tubo, f.rima_labial,
+               f.data_intubacao, f.numero_tubo, f.rima_labial, f.estado,
+               f.data_extubacao, f.desfecho, f.extub_registrada_por_nome,
                i.sigla AS instituicao
           FROM pav_fichas f
           LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
@@ -126,6 +127,134 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
   });
   app.get('/pav/trocar-salao', pavRequired, (req, res) => {
     res.clearCookie('pav_salao'); res.redirect('/pav/m');
+  });
+
+  // ── ABERTURA DE EPISÓDIO ──────────────────────────────────────────────────
+  // Qualquer profissional PAV abre, a QUALQUER hora (paciente vai a VM em
+  // qualquer horário) — SEM trava de turno. Alcance de salão respeitado. A data
+  // de intubação é FATO digitado (pode ser algumas horas atrás); o cadastro pode
+  // cair no turno seguinte. Só o salão precisa estar no alcance do contexto.
+  app.post('/pav/api/abrir', pavRequired, async (req, res) => {
+    try {
+      const adm = req.cookies?.adm === '1';
+      const ctx = contextoDe(req, adm);
+      const b = req.body || {};
+
+      const salao = String(b.salao || '').trim();
+      if (!SALAO_LABEL[salao]) return res.status(400).json({ erro: 'salão inválido' });
+      if (!saloesDoContexto(ctx).includes(salao))
+        return res.status(403).json({ erro: 'salão fora do seu alcance' });
+
+      const nome = String(b.paciente_nome || '').trim();
+      if (!nome) return res.status(400).json({ erro: 'nome do paciente é obrigatório' });
+      const dataIntub = String(b.data_intubacao || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dataIntub)) return res.status(400).json({ erro: 'data de intubação inválida' });
+
+      // Instituição: pelo tenant do portal (ou a única, se não travado).
+      let instId = null;
+      if (req.atbTenant) {
+        const { rows } = await pool.query(`SELECT id FROM atb_instituicoes WHERE sigla=$1`, [req.atbTenant]);
+        instId = rows[0]?.id || null;
+      } else {
+        const { rows } = await pool.query(`SELECT id FROM atb_instituicoes ORDER BY id LIMIT 1`);
+        instId = rows[0]?.id || null;
+      }
+
+      const { rows } = await pool.query(`
+        INSERT INTO pav_fichas
+          (instituicao_id, paciente_nome, prontuario, salao, leito,
+           data_intubacao, numero_tubo, rima_labial, ativo, estado,
+           aberta_por, aberta_por_nome)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,'ativo',$9,$10)
+        RETURNING id`,
+        [instId, nome.slice(0,200), String(b.prontuario||'').trim().slice(0,60) || null,
+         salao, String(b.leito||'').trim().slice(0,20) || null, dataIntub,
+         String(b.numero_tubo||'').trim().slice(0,20) || null,
+         String(b.rima_labial||'').trim().slice(0,20) || null,
+         req.user?.id || null, req.user?.full_name || null]);
+
+      res.json({ ok: true, id: rows[0].id });
+    } catch (e) {
+      console.error('ERRO POST /pav/api/abrir', e);
+      res.status(500).json({ erro: e.message });
+    }
+  });
+
+  // ── ENCERRAMENTO (dois níveis) ────────────────────────────────────────────
+  // acao 'registrar': marca a extubação (data + desfecho). Fisio/SCIH/super →
+  //   encerra direto. Enf → vira 'extubacao_pendente' (fica na lista, aguarda revisão).
+  // acao 'confirmar': fisio/SCIH confirmam uma pendência da enf → 'encerrado'
+  //   (herda data/desfecho já preenchidos, podendo corrigir).
+  app.post('/pav/api/encerrar/:fichaId', pavRequired, async (req, res) => {
+    try {
+      const adm = req.cookies?.adm === '1';
+      const ctx = { ...contextoDe(req, adm), scih: !!(req.user?.scih) };
+      const b = req.body || {};
+      const fichaId = parseInt(req.params.fichaId, 10);
+      if (!Number.isFinite(fichaId)) return res.status(400).json({ erro: 'ficha inválida' });
+
+      const { rows } = await pool.query(
+        `SELECT f.id, f.salao, f.estado, f.data_extubacao, f.desfecho, i.sigla
+           FROM pav_fichas f LEFT JOIN atb_instituicoes i ON i.id=f.instituicao_id
+          WHERE f.id=$1`, [fichaId]);
+      const ficha = rows[0];
+      if (!ficha) return res.status(404).json({ erro: 'episódio não encontrado' });
+      if (req.atbTenant && ficha.sigla && ficha.sigla !== req.atbTenant && !ctx.super_admin)
+        return res.status(403).json({ erro: 'episódio de outra unidade' });
+      if (!saloesDoContexto(ctx).includes(ficha.salao) && !ctx.super_admin)
+        return res.status(403).json({ erro: 'salão fora do seu alcance' });
+      if (ficha.estado === 'encerrado') return res.status(409).json({ erro: 'episódio já encerrado' });
+
+      const acao = (b.acao === 'confirmar') ? 'confirmar' : 'registrar';
+      const ef = efeitoEncerramento(ctx, acao);
+      if (!ef.estado_novo) return res.status(403).json({ erro: ef.motivo || 'sem permissão' });
+
+      const nome = req.user?.full_name || null;
+
+      if (acao === 'confirmar') {
+        // Herda data/desfecho da pendência; permite correção se vier no corpo.
+        const dataExtub = /^\d{4}-\d{2}-\d{2}$/.test(String(b.data_extubacao||'')) ? b.data_extubacao : ficha.data_extubacao;
+        const desfecho = DESFECHOS.some(d => d[0] === b.desfecho) ? b.desfecho : ficha.desfecho;
+        await pool.query(`
+          UPDATE pav_fichas SET estado='encerrado', ativo=false,
+            data_extubacao=$2, desfecho=$3,
+            extub_confirmada_por=$4, extub_confirmada_por_nome=$5, extub_confirmada_em=now(),
+            updated_at=now()
+          WHERE id=$1`, [ficha.id, dataExtub, desfecho, req.user?.id || null, nome]);
+        return res.json({ ok: true, estado: 'encerrado' });
+      }
+
+      // acao 'registrar': exige data + desfecho.
+      const dataExtub = String(b.data_extubacao||'').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dataExtub)) return res.status(400).json({ erro: 'data de extubação inválida' });
+      const desfecho = DESFECHOS.some(d => d[0] === b.desfecho) ? b.desfecho : null;
+      if (!desfecho) return res.status(400).json({ erro: 'desfecho inválido' });
+
+      if (ef.encerra) {
+        // Fisio/SCIH/super: encerra direto.
+        await pool.query(`
+          UPDATE pav_fichas SET estado='encerrado', ativo=false,
+            data_extubacao=$2, desfecho=$3,
+            extub_registrada_por=$4, extub_registrada_por_nome=$5, extub_registrada_em=now(),
+            extub_confirmada_por=$4, extub_confirmada_por_nome=$5, extub_confirmada_em=now(),
+            updated_at=now()
+          WHERE id=$1`, [ficha.id, dataExtub, desfecho, req.user?.id || null, nome]);
+        return res.json({ ok: true, estado: 'encerrado' });
+      }
+
+      // Enf: registra extubação, vira pendente (continua na lista).
+      await pool.query(`
+        UPDATE pav_fichas SET estado='extubacao_pendente',
+          data_extubacao=$2, desfecho=$3,
+          extub_registrada_por=$4, extub_registrada_por_nome=$5, extub_registrada_em=now(),
+          updated_at=now()
+        WHERE id=$1`, [ficha.id, dataExtub, desfecho, req.user?.id || null,
+          (contextoDe(req, adm).categoria_pav === 'enf') ? (String(b.identificacao||'').trim().slice(0,200) || nome) : nome]);
+      res.json({ ok: true, estado: 'extubacao_pendente' });
+    } catch (e) {
+      console.error('ERRO POST /pav/api/encerrar', e);
+      res.status(500).json({ erro: e.message });
+    }
   });
 
   // ── GRAVAÇÃO DO REGISTRO DO TURNO ─────────────────────────────────────────
@@ -224,19 +353,25 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
 
     // Aviso quando a categoria do usuário não bate com o turno vigente.
     const turnoDaOutra = vig && ctx.categoria_pav && vig.categoria !== ctx.categoria_pav && !ctx.super_admin;
+    // Pode PREENCHER check? (só no turno vigente da própria categoria, ou super)
+    const podeCheck = ctx.super_admin || (vig && (!ctx.categoria_pav || vig.categoria === ctx.categoria_pav));
 
     const salaoInfo = cat === 'enf' && ctx.salao_sessao
       ? `<a class="full" href="/pav/trocar-salao">${safe(SALAO_LABEL[ctx.salao_sessao] || ctx.salao_sessao)} ⇄</a>` : '';
 
-    let corpo;
-    if (semTurno) {
-      corpo = `<div class="aviso">Nenhum turno vigente agora. O registro só é possível durante o turno cronológico da sua categoria.</div>`;
-    } else if (turnoDaOutra) {
-      corpo = `<div class="aviso">O turno vigente (${safe(TURNO_LABEL[vig.categoria] || vig.categoria)}) é da ${safe(vig.categoria)}. Sua categoria (${safe(catLabel)}) não registra agora.</div>`;
-    } else if (!fichas.length) {
-      corpo = `<div class="aviso">Nenhum paciente em ventilação mecânica ${cat === 'enf' && ctx.salao_sessao ? 'neste salão' : 'nos seus salões'} no momento.</div>`;
+    // Aviso de contexto (não bloqueia a lista nem o botão de abrir).
+    let aviso = '';
+    if (semTurno) aviso = `<div class="aviso">Fora de turno: você pode abrir/encerrar fichas, mas o preenchimento do bundle só é possível no turno cronológico da sua categoria.</div>`;
+    else if (turnoDaOutra) aviso = `<div class="aviso">O turno vigente é da ${safe(vig.categoria)}. Você pode abrir/encerrar fichas; o preenchimento do bundle é da categoria vigente.</div>`;
+
+    // Salões que o usuário pode escolher ao abrir uma ficha.
+    const saloesUsuario = saloesDoContexto(ctx);
+
+    let lista;
+    if (!fichas.length) {
+      lista = `<div class="aviso">Nenhum paciente em ventilação mecânica ${cat === 'enf' && ctx.salao_sessao ? 'neste salão' : 'nos seus salões'} no momento. Use “+ paciente em VM” para abrir uma ficha.</div>`;
     } else {
-      corpo = fichas.map(f => card(f, itens, feitos.has(f.id), cat, dPlus)).join('');
+      lista = fichas.map(f => card(f, itens, feitos.has(f.id), cat, dPlus, podeCheck, ctx)).join('');
     }
 
     return `${HEAD(sigla, 'Plantão')}
@@ -247,14 +382,20 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
   </div>
   <div class="l2"><span class="turno">${safe(turnoTxt)}</span><span class="cat">${safe(catLabel)}</span></div>
 </div>
-<div class="wrap">${corpo}</div>
+<div class="wrap">
+  <button class="novo" type="button" onclick="abrirNovo()">+ paciente em VM</button>
+  ${aviso}
+  ${lista}
+</div>
 ${SHEET(itens, cat)}
+${SHEET_NOVO(saloesUsuario)}
+${SHEET_ENCERRAR()}
 ${FOOT()}
 ${SCRIPT()}`;
   }
 
   // Card de um leito.
-  function card(f, itens, feito, cat, dPlus) {
+  function card(f, itens, feito, cat, dPlus, podeCheck, ctx) {
     const nome = safe(f.paciente_nome || f.paciente_nome_raw || 'Paciente');
     const dp = dPlus(f.data_intubacao);
     const sub = [
@@ -263,14 +404,41 @@ ${SCRIPT()}`;
       f.numero_tubo ? 'TOT ' + safe(f.numero_tubo) : '',
       f.rima_labial ? 'rima ' + safe(f.rima_labial) : '',
     ].filter(Boolean).join(' · ');
-    return `<div class="fcard ${feito ? 'done' : ''}" data-ficha="${f.id}" data-nome="${nome}" data-sub="${safe(sub)}">
+
+    const pendente = f.estado === 'extubacao_pendente';
+    // Quem pode CONFIRMAR uma pendência: fisio, SCIH, super-admin.
+    const podeConfirmar = ctx.super_admin || ctx.categoria_pav === 'fisio' || ctx.scih;
+
+    // Botão de bundle só quando pode preencher check (turno vigente da categoria).
+    const btnBundle = podeCheck && !pendente
+      ? `<button class="abrir" type="button" onclick="abrir(${f.id})">${feito ? 'Revisar turno' : 'Registrar turno'}</button>`
+      : '';
+
+    let bloco = '';
+    if (pendente) {
+      const dtx = f.data_extubacao ? String(f.data_extubacao).slice(0,10).split('-').reverse().join('/') : '';
+      const desf = (DESFECHOS.find(d => d[0] === f.desfecho) || [null, f.desfecho || ''])[1];
+      bloco = `<div class="pend">
+        <div class="pend-tit">⏳ Extubação registrada${f.extub_registrada_por_nome ? ' por ' + safe(f.extub_registrada_por_nome) : ''}</div>
+        <div class="pend-sub">${safe(dtx)}${desf ? ' · ' + safe(desf) : ''} — aguarda confirmação</div>
+        ${podeConfirmar ? `<button class="confirmar" type="button" onclick="confirmar(${f.id})">Confirmar encerramento</button>` : '<div class="pend-nota">Confirmação por fisioterapia ou SCIH.</div>'}
+      </div>`;
+    }
+
+    const btnEncerrar = !pendente
+      ? `<button class="encerrar" type="button" onclick="abrirEncerrar(${f.id}, '${nome.replace(/'/g,"\\'")}')">Registrar extubação</button>`
+      : '';
+
+    return `<div class="fcard ${feito ? 'done' : ''} ${pendente ? 'pendente' : ''}" data-ficha="${f.id}" data-nome="${nome}" data-sub="${safe(sub)}">
       <div class="fc-head">
         <span class="nome">${nome}</span>
         ${dp ? `<span class="dp">${dp}</span>` : ''}
-        ${feito ? '<span class="badge-ok">✓ turno</span>' : ''}
+        ${feito && !pendente ? '<span class="badge-ok">✓ turno</span>' : ''}
       </div>
       <div class="sub">${sub || '—'}</div>
-      <button class="abrir" type="button" onclick="abrir(${f.id})">${feito ? 'Revisar turno' : 'Registrar turno'}</button>
+      ${bloco}
+      ${btnBundle}
+      ${btnEncerrar}
     </div>`;
   }
 
@@ -338,6 +506,51 @@ ${SCRIPT()}`;
 </div>`;
   }
 
+  // Sheet de ABERTURA de ficha (novo paciente em VM).
+  function SHEET_NOVO(saloesUsuario) {
+    const opcSalao = saloesUsuario.map(k => `<option value="${safe(k)}">${safe(SALAO_LABEL[k] || k)}</option>`).join('');
+    const hojeStr = new Date().toISOString().slice(0,10);
+    return `<div class="sheet-bg" id="bg-novo" onclick="fecharNovo()"></div>
+<div class="sheet" id="sheet-novo">
+  <div class="sh-head"><b>Novo paciente em VM</b><button class="x" onclick="fecharNovo()">✕</button></div>
+  <div class="sh-body">
+    <div class="row"><label>Nome do paciente *</label><input name="n_nome" autocomplete="name"></div>
+    <div class="grid2">
+      <div class="row"><label>Prontuário</label><input name="n_prontuario" inputmode="numeric"></div>
+      <div class="row"><label>Leito</label><input name="n_leito"></div>
+    </div>
+    <div class="grid2">
+      <div class="row"><label>Salão *</label><select name="n_salao">${opcSalao}</select></div>
+      <div class="row"><label>Data de intubação *</label><input type="date" name="n_data_intubacao" value="${hojeStr}"></div>
+    </div>
+    <div class="grid2">
+      <div class="row"><label>Nº do tubo/TQT</label><input name="n_numero_tubo"></div>
+      <div class="row"><label>Rima labial</label><input name="n_rima_labial"></div>
+    </div>
+  </div>
+  <div class="sh-foot"><span id="novo-msg" class="mut"></span>
+    <button class="salvar" id="btn-novo" onclick="salvarNovo()">Abrir ficha</button></div>
+</div>`;
+  }
+
+  // Sheet de ENCERRAMENTO (registrar extubação: data + desfecho).
+  function SHEET_ENCERRAR() {
+    const opcDesf = DESFECHOS.map(([k,l]) => `<option value="${safe(k)}">${safe(l)}</option>`).join('');
+    const hojeStr = new Date().toISOString().slice(0,10);
+    return `<div class="sheet-bg" id="bg-enc" onclick="fecharEncerrar()"></div>
+<div class="sheet" id="sheet-enc">
+  <div class="sh-head"><b>Registrar extubação</b><span id="enc-nome" class="mut"></span><button class="x" onclick="fecharEncerrar()">✕</button></div>
+  <div class="sh-body">
+    <div class="row"><label>Data de extubação *</label><input type="date" name="e_data" value="${hojeStr}"></div>
+    <div class="row"><label>Desfecho *</label><select name="e_desfecho"><option value="">—</option>${opcDesf}</select></div>
+    <div class="row" id="enc-id-row" style="display:none"><label>Identificação (nome · COREN)</label><input name="e_identificacao" placeholder="Seu nome e COREN"></div>
+    <div class="enc-nota mut">Fisioterapia e SCIH encerram direto. Enfermagem registra e a ficha aguarda confirmação de fisio/SCIH no período seguinte.</div>
+  </div>
+  <div class="sh-foot"><span id="enc-msg" class="mut"></span>
+    <button class="salvar" id="btn-enc" onclick="salvarEncerrar()">Registrar</button></div>
+</div>`;
+  }
+
   // ── HTML shell (mobile PWA, paleta verde-clínico p/ distinguir do ATB azul) ──
   function HEAD(sigla, titulo) {
     return `<!doctype html><html lang="pt-BR"><head>
@@ -398,6 +611,15 @@ ${SCRIPT()}`;
   .sh-foot{display:flex;align-items:center;gap:10px;padding:12px 16px calc(12px + var(--sab));border-top:1px solid var(--line);background:#fff}
   .sh-foot .salvar{margin-left:auto;font:inherit;font-size:15px;font-weight:700;padding:11px 22px;border:0;border-radius:10px;background:var(--pri);color:#fff;cursor:pointer}
   .sh-foot .salvar:disabled{opacity:.5}
+  .novo{width:100%;font:inherit;font-size:15px;font-weight:600;padding:13px;border:1.5px dashed var(--pri);border-radius:12px;background:#fff;color:var(--pri);cursor:pointer;margin:2px 0 12px}
+  .fcard.pendente{border-color:#f0d8b0;background:#fffaf2}
+  .fcard .encerrar{width:100%;font:inherit;font-size:13px;padding:9px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--mut);cursor:pointer;margin-top:7px}
+  .pend{background:#fef3e2;border:1px solid #f0d8b0;border-radius:10px;padding:10px 12px;margin:0 0 8px}
+  .pend-tit{font-size:13px;font-weight:600;color:var(--warn)}
+  .pend-sub{font-size:12px;color:var(--warn);margin:2px 0 0;opacity:.85}
+  .pend-nota{font-size:12px;color:var(--mut);margin-top:6px}
+  .pend .confirmar{width:100%;font:inherit;font-size:14px;font-weight:600;padding:9px;border:0;border-radius:9px;background:var(--pri);color:#fff;cursor:pointer;margin-top:8px}
+  .enc-nota{font-size:12px;line-height:1.4;margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
 </style></head><body>`;
   }
   function FOOT() { return `</body></html>`; }
@@ -456,6 +678,57 @@ function salvar(){
       fechar();
     })
     .catch(function(){ msg.textContent='Falha de conexão'; btn.disabled=false; });
+}
+
+// ── Abrir nova ficha ──
+function abrirNovo(){
+  document.querySelectorAll('#sheet-novo input').forEach(function(el){ if(el.type!=='date') el.value=''; });
+  document.getElementById('novo-msg').textContent='';
+  document.getElementById('bg-novo').classList.add('on');
+  document.getElementById('sheet-novo').classList.add('on');
+}
+function fecharNovo(){ document.getElementById('bg-novo').classList.remove('on'); document.getElementById('sheet-novo').classList.remove('on'); }
+function salvarNovo(){
+  var btn=document.getElementById('btn-novo'); btn.disabled=true;
+  var msg=document.getElementById('novo-msg'); msg.textContent='Abrindo…';
+  var g=function(n){var e=document.querySelector('#sheet-novo [name='+n+']');return e?e.value.trim():'';};
+  var data={ paciente_nome:g('n_nome'), prontuario:g('n_prontuario'), leito:g('n_leito'),
+    salao:g('n_salao'), data_intubacao:g('n_data_intubacao'), numero_tubo:g('n_numero_tubo'), rima_labial:g('n_rima_labial') };
+  fetch('/pav/api/abrir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+    .then(function(x){ if(!x.ok){ msg.textContent=x.j.erro||'Erro'; btn.disabled=false; return; } location.reload(); })
+    .catch(function(){ msg.textContent='Falha de conexão'; btn.disabled=false; });
+}
+
+// ── Registrar extubação (encerrar) ──
+var encAtual=null;
+function abrirEncerrar(id,nome){
+  encAtual=id;
+  document.getElementById('enc-nome').textContent=nome||'';
+  document.getElementById('enc-msg').textContent='';
+  document.getElementById('bg-enc').classList.add('on');
+  document.getElementById('sheet-enc').classList.add('on');
+}
+function fecharEncerrar(){ document.getElementById('bg-enc').classList.remove('on'); document.getElementById('sheet-enc').classList.remove('on'); encAtual=null; }
+function salvarEncerrar(){
+  if(!encAtual) return;
+  var btn=document.getElementById('btn-enc'); btn.disabled=true;
+  var msg=document.getElementById('enc-msg'); msg.textContent='Registrando…';
+  var g=function(n){var e=document.querySelector('#sheet-enc [name='+n+']');return e?e.value.trim():'';};
+  var data={ acao:'registrar', data_extubacao:g('e_data'), desfecho:g('e_desfecho'), identificacao:g('e_identificacao') };
+  fetch('/pav/api/encerrar/'+encAtual,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+    .then(function(x){ if(!x.ok){ msg.textContent=x.j.erro||'Erro'; btn.disabled=false; return; } location.reload(); })
+    .catch(function(){ msg.textContent='Falha de conexão'; btn.disabled=false; });
+}
+
+// ── Confirmar pendência (fisio/SCIH) ──
+function confirmar(id){
+  if(!confirm('Confirmar o encerramento deste episódio? A ficha sairá da lista e o VM-dia será fechado.')) return;
+  fetch('/pav/api/encerrar/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'confirmar'})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+    .then(function(x){ if(!x.ok){ alert(x.j.erro||'Erro'); return; } location.reload(); })
+    .catch(function(){ alert('Falha de conexão'); });
 }
 </script>`;
   }

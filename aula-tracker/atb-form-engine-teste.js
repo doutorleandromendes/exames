@@ -847,7 +847,18 @@
     var motivoSt = useState(''), motivo = motivoSt[0], setMotivo = motivoSt[1];
     var hCacheRef = React.useRef({});    // { texto -> {narrativa, aviso, checagem_id} }
     var hUltimoRef = React.useRef('');   // último texto disparado (anti-corrida)
-    var MODO_DENTE = false;              // C.2 observação: submit NÃO trava. Ligar em C.4.
+    // Regra de história narrativa (obrigatoriedade condicional). Lida do schema:
+    // campo historia_clinica → narrativaCond (mesmo motor avaliaCond das outras regras).
+    // Fallback de TESTE só p/ o dry-run — remover quando o editor regras-form gravar a regra real.
+    var NARRATIVA_COND_TESTE = { all: [ { campo: 'setor', op: 'in', valor: ['UTI', 'UTI C'] } ] };
+    function regraNarrativa() {
+      var campo = null;
+      ((schema && schema.secoes) || []).forEach(function (s) {
+        (s.campos || []).forEach(function (c) { if (c.key === 'historia_clinica') campo = c; });
+      });
+      if (campo && campo.narrativaCond) return campo.narrativaCond;
+      return NARRATIVA_COND_TESTE;
+    }
 
     var inst = window.ATB_INSTITUICAO || 'HUSF';
     var PREVIEW = new URLSearchParams(window.location.search).get('preview') === '1';
@@ -997,21 +1008,14 @@
         .catch(function () { setHistoriaChecando(false); setHistoriaAviso(null); });
     }
 
-    // POST real da ficha. Opcionalmente registra override (motivo) — só no modo dente.
-    function postFicha(overrideId) {
+    // postFicha(tag): tag = true (narrativa verificada) | null (não verificada:
+    // regra não se aplica OU fail-open de infra). false nunca chega aqui (bloqueia antes).
+    function postFicha(tagNarrativa) {
       setNudge(null);
-      if (overrideId) {
-        try {
-          fetch('/atb/api/checar-historia/override', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ checagem_id: overrideId, motivo: motivo })
-          }).catch(function () {});
-        } catch (e0) {}
-      }
       setEnviando(true);
       fetch('/atb/api/fichas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instituicao: inst, dados: valores })
+        body: JSON.stringify({ instituicao: inst, dados: valores, historia_narrativa: (tagNarrativa === undefined ? null : tagNarrativa) })
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
@@ -1029,24 +1033,43 @@
         if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
-      // MODO OBSERVAÇÃO (C.2): o blur já informou; o submit NÃO trava. Envia direto.
-      if (!MODO_DENTE) return postFicha();
-      // MODO DENTE (C.4): usa o veredito que o blur já colocou no cache (instantâneo).
+      var cond = regraNarrativa();
       var t = String(valores['historia_clinica'] || '').trim();
-      var r = hCacheRef.current[t];
-      if (r && r.narrativa === false) { setMotivo(''); setNudge(r); return; }   // acknowledgment
-      postFicha();
+      // Regra NÃO se aplica a esta ficha → envia (tag null = não avaliada por regra).
+      if (!cond || !avaliaCond(cond, valores)) return postFicha(null);
+      // Regra se aplica: história PRECISA ser narrativa.
+      var r = (t.length >= 15) ? hCacheRef.current[t] : null;
+      if (r && r.narrativa === true)  return postFicha(true);       // já verificada ✓
+      if (r && r.narrativa === false) { setNudge(true); return; }   // BLOQUEIA (obrigatoriedade)
+      // Sem veredito no cache → checa sincronicamente antes de decidir.
+      setHistoriaChecando(true);
+      var ctrl = new AbortController();
+      var to = setTimeout(function () { ctrl.abort(); }, 20000);
+      fetch('/atb/api/checar-historia', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ historia: t, inst: inst }), signal: ctrl.signal
+      })
+        .then(function (r2) { return r2.json(); })
+        .then(function (d) {
+          clearTimeout(to); setHistoriaChecando(false);
+          if (d && d.disponivel) {
+            hCacheRef.current[t] = { narrativa: d.narrativa, aviso: d.aviso, checagem_id: d.checagem_id };
+            if (d.narrativa === false) { setHistoriaAviso(hCacheRef.current[t]); setNudge(true); }  // BLOQUEIA
+            else postFicha(true);                                                                    // ✓
+          } else {
+            postFicha(null);   // API fora/timeout → envia com tag "não verificada"
+          }
+        })
+        .catch(function () { clearTimeout(to); setHistoriaChecando(false); postFicha(null); });      // fail-open
     }
 
-    // Modal de acknowledgment (só modo dente). Não bloqueia: revisar OU enviar assim mesmo.
+    // Modal de BLOQUEIO (obrigatoriedade). Sem "enviar assim mesmo" — só revisar.
     function modalNudge() {
       return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
         e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
           e('h3', { style: { margin: '0 0 8px', fontSize: '17px' } }, 'Complete a história clínica'),
-          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro.'),
-          e('textarea', { value: motivo, placeholder: 'Se for enviar assim mesmo, diga o porquê (opcional)', onChange: function (ev) { setMotivo(ev.target.value); }, style: { width: '100%', minHeight: '58px', font: 'inherit', padding: '9px', border: '1px solid #dadce0', borderRadius: '8px', boxSizing: 'border-box' } }),
-          e('div', { style: { display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '14px' } },
-            e('button', { onClick: function () { postFicha(nudge && nudge.checagem_id); }, style: { padding: '9px 14px', border: '1px solid #dadce0', borderRadius: '8px', background: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Enviar assim mesmo'),
+          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro antes de enviar.'),
+          e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '14px' } },
             e('button', { onClick: function () { setNudge(null); var el = document.getElementById('campo-historia'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Revisar história')
           )
         )

@@ -140,6 +140,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <div class="hub">
           ${card('/atb/admin/adesao', '📈', 'Adesão aos pareceres')}
           ${card(VIG + '/atb_dots.html', '💊', 'Consumo de ATB (DOTs)', true)}
+          ${card('/atb/admin/pergunta', '💬', 'Pergunta ao banco (SQL)')}
         </div>
 
         <div class="sec">Vigilância — relatórios HUSF</div>

@@ -32,11 +32,11 @@ export function schemaPosologiaEstruturada(def) {
       if (jaEstruturada) continue;
       campo.colunas = [
         { key: 'droga', label: 'Droga', type: 'text', readonly: true },
-        { key: 'dose_valor', label: 'Dose', type: 'number', step: 'any', min: 0, placeholder: '4,5' },
+        { key: 'dose_valor', label: 'Dose', type: 'number', step: 'any', min: 0 },
         { key: 'dose_unidade', label: 'Unid.', type: 'select', options: ['mg', 'g', 'UI', 'amp', 'mg/kg'] },
         { key: 'freq_tipo', label: 'Frequência', type: 'select',
           options: [{ v: 'cada', l: 'A cada X horas' }, { v: 'unica', l: 'Dose única' }, { v: 'hd', l: 'Após cada HD' }] },
-        { key: 'freq_horas', label: 'A cada (h)', type: 'number', min: 1, max: 168, step: 1, placeholder: '8',
+        { key: 'freq_horas', label: 'A cada (h)', type: 'number', min: 1, max: 168, step: 1,
           mostrarSe: { campo: 'freq_tipo', valor: 'cada' } },
       ];
       mudou = true;

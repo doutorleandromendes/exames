@@ -28,7 +28,7 @@ import {
   CHECKLIST, RECOMENDACOES, MOTIVOS_INSUCESSO, CANAIS, ISC_TIPOS,
   ISC_CLASSIFICACOES, ISC_CRITERIOS, POTENCIAL_CONTAMINACAO, STATUS_VIGILANCIA,
   PLACEHOLDERS, recomputarEstado, normalizaTelefone, formataTelefone,
-  linkWhatsApp, renderTemplate, toISODate, dataBR, addDays, diffDias, hojeISO,
+  linkWhatsApp, renderTemplate, toISODate, dataBR, addDays, diffDias, hojeISO, JANELA_IDENTIDADE,
   boolDe, enumDe, extraiRespostas, janelasDe, contatoTemAlerta,
 } from './isc-core.js';
 
@@ -467,6 +467,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       const cfg = await configDe(instId);
       const zapInst = cfg.whatsapp_business || null;
 
+      const tplIdent = tpls.find(t => Number(t.janela) === JANELA_IDENTIDADE) || null;
       const hoje = hojeISO();
       const aEnviar = rows.filter(f => !f.enviado_em).length;
       const jaEnviadas = rows.length - aEnviar;
@@ -481,9 +482,22 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           dias_pos_op: dpo, equipe: f.equipe_nome, cirurgiao: f.cirurgiao, hospital,
         }) : '(sem template para esta janela — cadastre em Mensagens)';
         const atraso = diffDias(toISODate(f.proximo_contato_em), hoje);
-        const wa = f.telefone ? linkWhatsApp(f.telefone, corpo) : null;
         const tent = f.tentativas_falhas || 0;
         const enviada = !!f.enviado_em;
+
+        // Passo 0: enquanto a identidade não é confirmada, o card fala em CONFIRMAR
+        // IDENTIDADE, não em busca ativa. A mensagem clínica não pode sair antes —
+        // senão o primeiro texto já revela a cirurgia para um número não confirmado
+        // (ainda mais com DDD presumido).
+        const identPendente = f.identidade_status !== 'confirmada' && f.identidade_status !== 'negada';
+        const identNegada = f.identidade_status === 'negada';
+        const corpoIdent = tplIdent ? renderTemplate(tplIdent.corpo, {
+          paciente_nome: f.paciente_nome, paciente_iniciais: f.paciente_iniciais, hospital,
+        }) : 'Olá! Sou da equipe do ' + hospital + '. Este é um número de contato de ' +
+             ((f.paciente_nome || '').trim().split(/\s+/)[0] || 'paciente') + '?';
+        // O que o botão "Abrir WhatsApp" leva: identidade primeiro, clínica depois.
+        const corpoEnvio = identPendente ? corpoIdent : corpo;
+        const wa = f.telefone ? linkWhatsApp(f.telefone, corpoEnvio) : null;
 
         return `<div class="card2"${enviada ? ' style="opacity:.62"' : ''}>
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
@@ -493,19 +507,29 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
               ${tent > 0 ? `<span class="pill" style="background:#fff4e5;color:#b06000;margin-left:6px">${tent} tentativa${tent > 1 ? 's' : ''} sem sucesso</span>` : ''}
               ${f.telefone_presumido ? `<span class="pill" style="background:#fdecea;color:#c0392b;margin-left:6px" title="O DDD foi deduzido da cidade no import. Confirme o número antes de enviar: mensagem para o número errado revela a cirurgia a terceiros.">⚠ DDD presumido — confira</span>` : ''}
               ${enviada ? `<span class="pill" style="background:#e6f4ea;color:#1e7e34;margin-left:6px">✓ enviada ${dataBR(f.enviado_em)}${f.enviado_por ? ' por ' + safe(f.enviado_por) : ''} · aguardando resposta</span>` : ''}
+              ${identPendente ? `<span class="pill" style="background:#fef7e0;color:#b06000;margin-left:6px" title="Antes de qualquer pergunta sobre a cirurgia, confirme que o número é do paciente.">🔒 confirmar identidade primeiro</span>` : ''}
+              ${identNegada ? `<span class="pill" style="background:#fdecea;color:#c0392b;margin-left:6px">✗ identidade negada — número não é do paciente</span>` : ''}
+              ${f.identidade_status === 'confirmada' ? `<span class="pill" style="background:#e6f4ea;color:#1e7e34;margin-left:6px" title="Identidade confirmada${f.identidade_por ? ' por ' + safe(f.identidade_por) : ''}${f.identidade_em ? ' em ' + dataBR(f.identidade_em) : ''}">✓ identidade confirmada</span>` : ''}
               <div class="sub" style="margin-top:4px">${safe(f.procedimento || '')} · ${safe(f.equipe_nome || '')} · cirurgia ${dataBR(f.data_cirurgia)} (${dpo} DPO) · ${f.telefone ? safe(formataTelefone(f.telefone)) : '<span style="color:#c0392b">sem telefone</span>'}</div>
             </div>
-            <div style="display:flex;gap:8px;align-items:center">
-              ${wa ? `<a class="btn" style="text-decoration:none;background:${enviada ? '#8bcfa4' : '#25D366'}" href="${wa}" target="_blank" rel="noopener">${enviada ? 'Reabrir conversa' : 'Abrir WhatsApp'}</a>` : ''}
-              ${enviada
-                ? `<form method="post" action="/isc/admin/envio/desmarcar" style="display:inline">
-                     <input type="hidden" name="inst" value="${safe(sigla || '')}">
-                     <input type="hidden" name="ficha_id" value="${f.id}"><input type="hidden" name="janela" value="${dias}">
-                     <button class="btn btn-sec" title="Marquei sem querer / não cheguei a enviar">Desmarcar</button></form>`
-                : (wa ? `<form method="post" action="/isc/admin/envio/marcar" style="display:inline">
-                     <input type="hidden" name="inst" value="${safe(sigla || '')}">
-                     <input type="hidden" name="ficha_id" value="${f.id}"><input type="hidden" name="janela" value="${dias}">
-                     <button class="btn btn-sec" title="Sai da fila de envio e passa a aguardar resposta">Já enviei</button></form>` : '')}
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              ${wa ? `<a class="btn" style="text-decoration:none;background:${(enviada && !identPendente) ? '#8bcfa4' : '#25D366'}" href="${wa}" target="_blank" rel="noopener">${identPendente ? 'Abrir WhatsApp · confirmar identidade' : (enviada ? 'Reabrir conversa' : 'Abrir WhatsApp')}</a>` : ''}
+              ${identPendente
+                ? `${wa ? `<form method="post" action="/isc/admin/ficha/${f.id}/identidade" style="display:inline">
+                       <input type="hidden" name="inst" value="${safe(sigla || '')}"><input type="hidden" name="status" value="confirmada">
+                       <button class="btn btn-sec" style="border-color:#2bb673;color:#1e7e34" title="O paciente confirmou que o número é dele">✓ Confirmou identidade</button></form>
+                     <form method="post" action="/isc/admin/ficha/${f.id}/identidade" style="display:inline">
+                       <input type="hidden" name="inst" value="${safe(sigla || '')}"><input type="hidden" name="status" value="negada">
+                       <button class="btn btn-sec" style="border-color:#e0a3a3;color:#c0392b" title="Não é o número do paciente">✗ Não é o paciente</button></form>` : ''}`
+                : `${enviada
+                    ? `<form method="post" action="/isc/admin/envio/desmarcar" style="display:inline">
+                         <input type="hidden" name="inst" value="${safe(sigla || '')}">
+                         <input type="hidden" name="ficha_id" value="${f.id}"><input type="hidden" name="janela" value="${dias}">
+                         <button class="btn btn-sec" title="Marquei sem querer / não cheguei a enviar">Desmarcar</button></form>`
+                    : (wa ? `<form method="post" action="/isc/admin/envio/marcar" style="display:inline">
+                         <input type="hidden" name="inst" value="${safe(sigla || '')}">
+                         <input type="hidden" name="ficha_id" value="${f.id}"><input type="hidden" name="janela" value="${dias}">
+                         <button class="btn btn-sec" title="Sai da fila de envio e passa a aguardar resposta">Já enviei</button></form>` : '')}`}
               <a class="btn btn-sec" style="text-decoration:none" href="/isc/admin/ficha/${f.id}#contato">Registrar resposta</a>
             </div>
           </div>
@@ -951,12 +975,13 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         `SELECT * FROM isc_msg_templates WHERE ($1::int IS NULL OR instituicao_id = $1) ORDER BY ordem, id`, [instId]);
 
       const cards = rows.map(t => `
-        <div class="card2">
+        <div class="card2"${Number(t.janela) === JANELA_IDENTIDADE ? ' style="border-left:3px solid #b06000"' : ''}>
+          ${Number(t.janela) === JANELA_IDENTIDADE ? `<p class="sub" style="margin:0 0 10px"><b>🔒 Passo 0 — confirmação de identidade.</b> É a PRIMEIRA mensagem, antes de qualquer pergunta clínica. Use <code>{{primeiro_nome}}</code> (não o nome completo — para o paciente confirmar, não qualquer um). Janela <b>-1</b> é reservada; não mude.</p>` : ''}
           <form method="post" action="/isc/admin/templates">
             <input type="hidden" name="id" value="${t.id}">
             <div class="ff" style="margin-bottom:10px">
               <div><label class="l">Nome</label><input name="nome" value="${safe(t.nome)}"></div>
-              <div><label class="l">Janela (dias · vazio = avulso)</label><input name="janela" type="number" value="${t.janela ?? ''}"></div>
+              <div><label class="l">Janela (dias · -1 = identidade · vazio = avulso)</label><input name="janela" type="number" value="${t.janela ?? ''}"></div>
               <div><label class="l">Ordem</label><input name="ordem" type="number" value="${t.ordem ?? 100}"></div>
               <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" name="ativo" value="1" ${t.ativo ? 'checked' : ''}> Ativo</label></div>
             </div>
@@ -1023,6 +1048,35 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     } catch (e) { erro(res, e); }
   });
 
+  // ── Passo 0: identidade ─────────────────────────────────────────────────
+  // Registra que a colaboradora confirmou (ou não) que o número é do paciente.
+  // Vale por PACIENTE (a ficha): confirmou uma vez, as janelas clínicas liberam.
+  // Identidade negada é registrada, mas a decisão do que fazer com a ficha fica
+  // com a colaboradora (número novo, encerrar, etc.) — por isso não mexe no
+  // status de vigilância aqui.
+  app.post('/isc/admin/ficha/:id/identidade', scihRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      const id = Number(req.params.id);
+      const status = ['confirmada', 'negada', 'pendente'].includes(req.body?.status) ? req.body.status : null;
+      if (!status) return res.status(400).send('Status inválido');
+      const dados = await carregarFicha(id, instId);
+      if (!dados) return res.status(404).send('Ficha não encontrada');
+      await pool.query(
+        `UPDATE isc_fichas
+            SET identidade_status = $2,
+                identidade_em = CASE WHEN $2 = 'pendente' THEN NULL ELSE now() END,
+                identidade_por = CASE WHEN $2 = 'pendente' THEN NULL ELSE $3 END,
+                updated_at = now()
+          WHERE id = $1 AND ($4::int IS NULL OR instituicao_id = $4)`,
+        [id, status, (req.user && req.user.full_name) || null, instId]);
+      const back = req.get('referer') && /\/ficha\//.test(req.get('referer'))
+        ? `/isc/admin/ficha/${id}?${new URLSearchParams({ inst: sigla || '' })}`
+        : `/isc/admin/agenda?${new URLSearchParams({ ...req.query, inst: sigla || '' })}`;
+      res.redirect(back);
+    } catch (e) { erro(res, e); }
+  });
+
   // ── Marcar envio ────────────────────────────────────────────────────────
   // O sistema NÃO envia: ela dispara no WhatsApp e volta aqui para dizer que
   // enviou. Sem este passo a agenda não distingue "mandei, esperando resposta"
@@ -1041,6 +1095,19 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       const dados = await carregarFicha(id, instId);
       if (!dados) return res.status(404).send('Ficha não encontrada');
       const { ficha: f, equipe } = dados;
+
+      // Portão do passo 0: marcar como enviada uma mensagem clínica (janela ≥ 0)
+      // exige identidade confirmada. Sem isso a colaboradora poderia "Já enviei"
+      // a busca ativa antes de saber se o número é do paciente. O passo 0 em si
+      // (janela -1) passa sempre — é ele que confirma.
+      if (janela >= 0 && f.identidade_status !== 'confirmada') {
+        return res.status(409).send(renderShell('Confirmar identidade primeiro', `<div class="card">
+          <h1>Confirme a identidade antes</h1>
+          <p class="mut">Esta ficha ainda não teve a identidade confirmada. Envie a mensagem de
+          confirmação (passo 0) e, quando o paciente responder que o número é dele, use
+          <b>✓ Confirmou identidade</b> na agenda. Só então a busca ativa pode ser enviada.</p>
+          <a href="/isc/admin/agenda">← Voltar à agenda</a></div>`));
+      }
 
       // Snapshot do que foi enviado: o template pode mudar depois, e aí não se
       // saberia mais o que o paciente recebeu.

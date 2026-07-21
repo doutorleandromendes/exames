@@ -12,6 +12,10 @@
 // ── Checklist canônico ────────────────────────────────────────────────────
 // tipo: 'sim_nao' | 'multi' | 'texto'
 // alerta: valores que, se marcados, acendem o sinal de suspeita na ficha.
+// Passo 0: confirmação de identidade. Não é janela clínica (não vira contato de
+// busca ativa) — é o portão que libera as demais. janela = -1 no template/fila.
+export const JANELA_IDENTIDADE = -1;
+
 export const CHECKLIST = [
   { key: 'alta',             label: 'Já teve alta?',                                              tipo: 'sim_nao' },
   { key: 'dreno',            label: 'Usou ou está usando dreno?',                                 tipo: 'sim_nao' },

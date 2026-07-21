@@ -149,6 +149,12 @@ export async function runIscMigrations(pool) {
     ['isc_criterios', `JSONB DEFAULT '[]'`],
     // DDD deduzido da cidade no import — a agenda pede confirmação antes do envio.
     ['telefone_presumido', 'BOOLEAN DEFAULT false'],
+    // Passo 0: confirmação de identidade antes de qualquer mensagem clínica.
+    // pendente = ainda não perguntou/confirmou · confirmada = é o paciente ·
+    // negada = número é de outra pessoa. Vale por PACIENTE (a ficha).
+    ['identidade_status', `TEXT DEFAULT 'pendente'`],
+    ['identidade_em', 'TIMESTAMPTZ'],
+    ['identidade_por', 'TEXT'],
     // Nº da cirurgia no Tasy (col A do Relação das Cirurgias). Único e estável
     // por cirurgia — melhor chave de deduplicação que atendimento+data, que
     // quebra quando a cirurgia é remarcada.
@@ -233,6 +239,9 @@ export async function runIscMigrations(pool) {
     SELECT i.id, v.janela, v.nome, v.corpo, v.ordem
       FROM atb_instituicoes i
       CROSS JOIN (VALUES
+        (-1, 'Passo 0 · Confirmação de identidade',
+         E'Olá! Bom dia. Sou da equipe do Hospital Universitário São Francisco (HUSF).\\n\\nEste é um número de contato de {{primeiro_nome}}?\\n\\nPor questões de segurança e privacidade dos seus dados, precisamos confirmar essa informação antes de prosseguir com a conversa.',
+         5),
         (NULL::int, 'Apresentação (1º contato)',
          E'Olá, {{primeiro_nome}}! Aqui é da Comissão de Controle de Infecção do {{hospital}}.\\n\\nEstamos acompanhando a recuperação de quem passou por cirurgia aqui conosco. São só algumas perguntas rápidas sobre como está a sua recuperação — leva menos de 2 minutos e ajuda muito no seu cuidado.\\n\\nPodemos conversar agora?',
          10),

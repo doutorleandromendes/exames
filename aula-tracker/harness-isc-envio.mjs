@@ -33,6 +33,11 @@ const mk = (nome, at, tel) => pool.query(
 const f1 = await mk('MARIA SILVA', 'A1', '5511911111111');
 const f2 = await mk('JOANA SOUZA', 'A2', '5511922222222');
 const f3 = await mk('SEM FONE', 'A3', null);
+// Este harness testa o fluxo de ENVIO clínico, que é o passo DEPOIS da
+// identidade. Confirma o passo 0 no seed — a confirmação em si tem harness
+// próprio (harness-isc-identidade).
+await pool.query(`UPDATE isc_fichas SET identidade_status='confirmada', identidade_em=now(), identidade_por='seed'
+                   WHERE id = ANY($1)`, [[f1, f2, f3]]);
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));

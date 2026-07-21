@@ -69,10 +69,18 @@ export function aplicarIntervencao(conteudo, interv, opts = {}) {
   const problemas = validarIntervencao(interv);
   if (problemas.length) throw new IntervencaoErro(`intervenção "${interv && interv.nome || '?'}" inválida`, { problemas });
 
-  // 1) pré-checa TODAS as âncoras contra o original (atomicidade)
+  // 1) classifica cada transformação (idempotência): checa o "vira" PRIMEIRO.
+  //    - vira já presente  → 'promovida' (a mudança já está no alvo): no-op, NÃO é erro.
+  //    - vira ausente + âncora casa 1x → 'aplicar'.
+  //    - vira ausente + âncora ausente/ambígua → 'falha' (re-ancore) — guarda barulhento.
+  //    Distinguir "já promovida" de "quebrada" é o que torna o pipeline sustentável:
+  //    intervenções promovidas se auto-neutralizam em vez de exigir remoção manual.
   const relatorio = interv.transformacoes.map((t, i) => {
-    const c = checarTransformacao(conteudo, t.ancora);
-    return { i, nota: t.nota || null, ...c };
+    const cVira = checarTransformacao(conteudo, t.vira);
+    if (cVira.ocorrencias >= 1) return { i, nota: t.nota || null, estado: 'promovida', ok: true };
+    const cAnc = checarTransformacao(conteudo, t.ancora);
+    if (cAnc.ok) return { i, nota: t.nota || null, estado: 'aplicar', ok: true, ocorrencias: 1 };
+    return { i, nota: t.nota || null, estado: 'falha', ok: false, ocorrencias: cAnc.ocorrencias, motivo: cAnc.motivo };
   });
   const falhas = relatorio.filter((r) => !r.ok);
   if (falhas.length) {
@@ -80,11 +88,15 @@ export function aplicarIntervencao(conteudo, interv, opts = {}) {
       `intervenção "${interv.nome}": ${falhas.length} âncora(s) não aplicável(is) em ${interv.alvo}`,
       { alvo: interv.alvo, falhas, relatorio });
   }
-  if (opts.dry) return { ok: true, dry: true, alvo: interv.alvo, transformacoes: relatorio.length };
+  const pendentes = relatorio.filter((r) => r.estado === 'aplicar').length;
+  const promovidas = relatorio.filter((r) => r.estado === 'promovida').length;
+  if (opts.dry) return { ok: true, dry: true, alvo: interv.alvo, transformacoes: relatorio.length, pendentes, promovidas };
 
-  // 2) aplica em sequência (cada âncora já garantida única no original)
+  // 2) aplica só as PENDENTES, na ordem (as promovidas são no-op)
   let out = conteudo;
-  for (const t of interv.transformacoes) {
+  for (let k = 0; k < interv.transformacoes.length; k++) {
+    if (relatorio[k].estado !== 'aplicar') continue;   // promovida → pula
+    const t = interv.transformacoes[k];
     // re-checa contra o estado corrente: uma "vira" anterior não pode ter criado
     // uma 2ª cópia da âncora seguinte (paranoia barata que pega intervenção mal-escrita)
     const c = checarTransformacao(out, t.ancora);
@@ -93,7 +105,7 @@ export function aplicarIntervencao(conteudo, interv, opts = {}) {
       { alvo: interv.alvo, motivo: c.motivo });
     out = out.replace(t.ancora, t.vira);   // replace literal: 1ª (e única) ocorrência
   }
-  return { ok: true, alvo: interv.alvo, conteudo: out, transformacoes: interv.transformacoes.length };
+  return { ok: true, alvo: interv.alvo, conteudo: out, transformacoes: interv.transformacoes.length, pendentes, promovidas };
 }
 
 // ── Reverter: aplica a intervenção "ao contrário" (vira ⇄ ancora) ────────────

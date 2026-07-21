@@ -296,21 +296,32 @@
               return e('div', { key: droga + i, className: 'cartao' },
                 e('div', { className: 'cartao-cab' },
                   e('span', { className: 'cartao-tag' }, droga)),
-                f.colunas.map(function (c) {
-                  if (c.readonly) return null;
-                  return e('div', { key: c.key, className: 'mini-campo' },
-                    e('span', { className: 'mini' }, c.label),
-                    e('input', {
-                      type: 'text', value: row[c.key] || '', placeholder: c.placeholder || '',
-                      onChange: function (ev) {
-                        var nv = linhas.slice();
-                        nv[i] = Object.assign({}, nv[i], { droga: droga });
-                        nv[i][c.key] = ev.target.value;
-                        p.set(f.key, nv);
-                      }
-                    })
-                  );
-                })
+                e('div', { className: 'poso-linha',
+                    style: { display: 'flex', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap' } },
+                  f.colunas.map(function (c) {
+                    if (c.readonly) return null;
+                    if (!_celulaVisivel(c, row)) return null;
+                    var onCell = function (v) {
+                      var nv = linhas.slice();
+                      nv[i] = Object.assign({}, nv[i], { droga: droga });
+                      nv[i][c.key] = v;
+                      p.set(f.key, nv);
+                    };
+                    if (c.key === 'freq_horas') {
+                      return e('div', { key: c.key, className: 'mini-campo poso-horas',
+                          style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: 0, paddingBottom: '1px' } },
+                        e('div', { style: { width: '56px' } }, _celulaMatriz(c, row, onCell)),
+                        e('span', { className: 'poso-sufixo', style: { fontSize: '13px', color: '#5f6b7a' } }, 'h'));
+                    }
+                    var larg = c.key === 'dose_valor' ? '76px'
+                             : c.key === 'dose_unidade' ? '88px'
+                             : c.key === 'freq_tipo' ? '150px' : 'auto';
+                    return e('div', { key: c.key, className: 'mini-campo',
+                        style: { width: larg, marginBottom: 0 } },
+                      e('span', { className: 'mini' }, c.label),
+                      _celulaMatriz(c, row, onCell));
+                  })
+                )
               );
             }),
         f.hint ? e('div', { className: 'dica' }, f.hint) : null
@@ -339,29 +350,55 @@
     );
   }
 
+  function _celulaVisivel(c, row) {
+    if (!c || !c.mostrarSe) return true;
+    return row[c.mostrarSe.campo] === c.mostrarSe.valor;
+  }
+  function _celulaMatriz(c, row, onChange) {
+    var val = row[c.key];
+    if (c.type === 'select') {
+      return e('div', { className: 'sel-wrap' },
+        e('select', {
+          value: val == null ? '' : val,
+          onChange: function (ev) { onChange(ev.target.value); }
+        },
+          e('option', { value: '' }, '\u2014'),
+          (c.options || []).map(function (o) {
+            var v = (o && typeof o === 'object') ? o.v : o;
+            var l = (o && typeof o === 'object') ? o.l : o;
+            return e('option', { key: v, value: v }, l);
+          })),
+        e('span', { className: 'seta' }, '\u25bc'));
+    }
+    if (c.type === 'number') {
+      return e('input', {
+        type: 'text', inputMode: 'decimal', style: { maxWidth: '110px' },
+        value: (val === null || val === undefined) ? '' : String(val),
+        placeholder: c.placeholder || '',
+        onChange: function (ev) { onChange(ev.target.value); },
+        onBlur: function (ev) {
+          var t = String(ev.target.value == null ? '' : ev.target.value).trim().replace(',', '.');
+          if (t === '') return onChange('');
+          var n = Number(t);
+          if (!isNaN(n) && isFinite(n)) onChange(n);
+        }
+      });
+    }
+    return e('input', {
+      type: 'text',
+      value: val == null ? '' : val, placeholder: c.placeholder || '',
+      onChange: function (ev) { onChange(ev.target.value); }
+    });
+  }
+
   function renderColunasMatriz(f, row, i, setLinha) {
     var datas = f.colunas.filter(function (c) { return c.type === 'date'; });
     var outras = f.colunas.filter(function (c) { return c.type !== 'date'; });
     function campoCol(c) {
-      if (c.type === 'select') {
-        return e('div', { key: c.key, className: 'mini-campo' },
-          e('span', { className: 'mini' }, c.label),
-          e('div', { className: 'sel-wrap' },
-            e('select', {
-              value: row[c.key] || '',
-              onChange: function (ev) { setLinha(i, c.key, ev.target.value); }
-            },
-              e('option', { value: '' }, '—'),
-              (c.options || []).map(function (o) { return e('option', { key: o, value: o }, o); })),
-            e('span', { className: 'seta' }, '▼'))
-        );
-      }
+      if (!_celulaVisivel(c, row)) return null;
       return e('div', { key: c.key, className: 'mini-campo' },
         e('span', { className: 'mini' }, c.label),
-        e('input', {
-          type: 'text', value: row[c.key] || '', placeholder: c.placeholder || '',
-          onChange: function (ev) { setLinha(i, c.key, ev.target.value); }
-        })
+        _celulaMatriz(c, row, function (v) { setLinha(i, c.key, v); })
       );
     }
     var blocos = [];
@@ -711,7 +748,11 @@
       pos[idx] = Object.assign({}, pos[idx], {
         droga: 'Vancomicina',
         dose: res.doseTxt,
-        intervalo: res.intervalo.aplica || res.intervalo.label
+        intervalo: res.intervalo.aplica || res.intervalo.label,
+        dose_valor: res.doseMg || '',
+        dose_unidade: res.doseMg ? 'mg' : '',
+        freq_tipo: res.intervalo.horas ? 'cada' : (res.intervalo.aplica === 'ap\u00f3s cada HD' ? 'hd' : ''),
+        freq_horas: res.intervalo.horas || ''
       });
       p.set('posologia', pos);
       setAplicado(true);

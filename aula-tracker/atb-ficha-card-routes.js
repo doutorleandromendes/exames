@@ -29,6 +29,7 @@
 import { buscarCulturasDaFicha, culturasTemMR, renderCulturasCard } from './atb-culturas-routes.js';
 import { buscarHemoDaFicha, renderHemoCard } from './atb-hemocultura-routes.js';
 import { buscarMdrDaFicha, mdrTemAlerta } from './atb-mdr-routes.js';
+import { textoPosologia } from './atb-posologia-normalizar-routes.js';
 import { buscarNomePacs, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 
 function _safe(s) {
@@ -73,10 +74,9 @@ function _posologia(p, s) {
   const a = _arr(p);
   if (!a.length) return '';
   const linhas = a.map(r => {
-    if (!r || typeof r !== 'object') return '';   // linha vazia/removida vem como null no jsonb
-    const d = r.droga || r.Droga || '', dose = r.dose || r.Dose || '', iv = r.intervalo || r.Intervalo || '';
-    if (!d && !dose && !iv) return '';
-    return `<div class="fc-pos"><b>${s(d)}</b> ${s(dose)}${iv ? ' · ' + s(iv) : ''}</div>`;
+    const t = textoPosologia(r);
+    if (!t || (!t.droga && !t.dose && !t.freq)) return '';
+    return `<div class="fc-pos"><b>${s(t.droga)}</b> ${s(t.dose)}${t.freq ? ' · ' + s(t.freq) : ''}</div>`;
   }).filter(Boolean).join('');
   return linhas;
 }

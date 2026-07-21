@@ -11,6 +11,8 @@
 //  Filtram por instituição HUSF por padrão (?inst=H2 para o outro hospital).
 // ════════════════════════════════════════════════════════════════════════════
 
+import { textoPosologia } from './atb-posologia-normalizar-routes.js';
+
 // — helper: monta a tabela HTML de posologia no formato que buildParecer espera —
 function _posologiaHtml(posologia) {
   let arr = posologia;
@@ -18,10 +20,11 @@ function _posologiaHtml(posologia) {
   if (!Array.isArray(arr) || !arr.length) return '—';
   let rows = '';
   arr.forEach((row, i) => {
-    if (!row || typeof row !== 'object') return;   // linha vazia/removida vem como null no jsonb
-    const droga     = row.droga     || row.Droga     || '';
-    const dose      = row.dose      || row.Dose      || '';
-    const intervalo = row.intervalo || row.Intervalo || '';
+    const _t = textoPosologia(row);
+    if (!_t) return;
+    const droga     = _t.droga;
+    const dose      = _t.dose;
+    const intervalo = _t.freq;
     if (!droga && !dose && !intervalo) return;
     rows += `<tr>
       <td style="padding:4px 6px;border:1px solid #ddd;font-weight:bold;background:#f3f3f3;">${i + 1}</td>

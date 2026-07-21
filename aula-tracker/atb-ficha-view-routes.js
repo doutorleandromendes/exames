@@ -24,6 +24,7 @@
 import { getFormSchema } from './atb-form-schema.js';
 import { buscarCulturasDaFicha, renderCulturasComplemento } from './atb-culturas-routes.js';
 import { COLUNA_DE } from './atb-field-registry.js';
+import { textoPosologia } from './atb-posologia-normalizar-routes.js';
 
 const DIAS = ['D-3', 'D-2', 'D-1', 'D0', 'D+1', 'D+2', 'D+3'];
 const EXAMES = {
@@ -147,6 +148,16 @@ function _fmtCel(v, type, s) {
   return (v != null && String(v).trim() !== '') ? s(v) : '—';
 }
 // matriz (array de linhas) → tabela; '' se nada preenchido
+function blocoPosologia(dados, s) {
+  const linhas = Array.isArray(dados) ? dados : [];
+  const corpo = linhas.map((r) => textoPosologia(r)).filter((t) => t && (t.droga || t.dose || t.freq));
+  if (!corpo.length) return '';
+  const body = corpo.map((t) =>
+    `<tr><th class="rot">${s(t.droga)}</th><td>${s(t.dose)}</td><td>${s(t.freq)}</td></tr>`).join('');
+  return `<div class="bloco"><h3>Posologia</h3><div class="serie-scroll"><table class="mtab">` +
+    `<thead><tr><th>ATB</th><th>Dose</th><th>Frequ\u00eancia</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+
 function tabelaMatriz(titulo, def, dados, s) {
   if (!def || !Array.isArray(def.colunas) || !def.colunas.length) return '';
   const linhas = Array.isArray(dados) ? dados : [];
@@ -246,7 +257,7 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '', ext
     ['Tempo previsto', f.tempo_previsto != null ? s(f.tempo_previsto) + ' dias' : null],
     ['Associação com oxacilina', _bool(f.oxacilina_associacao)],
   ], s));
-  secoes.push(tabelaMatriz('Posologia', matrizes.posologia, f.posologia, s));
+  secoes.push(blocoPosologia(f.posologia, s));
 
   secoes.push(extrasHTML || '');
   secoes.push(bloco('Prescritor', [

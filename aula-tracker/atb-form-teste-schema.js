@@ -125,8 +125,8 @@ export function registerFormTesteSchemaRoutes(app, pool, adminRequired) {
         </div>
 
         <div class="card">
-          <h2>3 · Promover <span class="nota">(em breve — Passo 3)</span></h2>
-          <p class="nota">Quando a mudança estiver aprovada, o transportador gera o arquivo de produção (produção + intervenção) para você baixar e comitar. Ainda não construído.</p>
+          <h2>3 · Promover</h2>
+          <p class="nota">Quando a mudança estiver aprovada, o transportador gera o arquivo de produção para você baixar e comitar, e promove o schema do HUSF.</p><p><a href="/atb/admin/form-transportador">→ Abrir o transportador</a></p>
         </div>`));
     } catch (e) {
       console.error('[atb] painel form-teste:', e.message);

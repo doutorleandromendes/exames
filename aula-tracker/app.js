@@ -22,6 +22,7 @@ import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADI
 import { registerNlqRoutes } from './atb-nlq-routes.js';   // ← ADICIONAR (pergunta em PT → SQL, admin, read-only)
 import { registerHistoriaRoutes } from './atb-historia-routes.js';   // ← ADICIONAR (nudge de história narrativa)
 import { registerFormTesteRoutes } from './atb-form-teste-routes.js';   // ← ADICIONAR (dry-run do form, admin)
+import { registerFormTransportadorRoutes } from './atb-form-transportador.js';   // ← ADICIONAR (promoção teste→produção)
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
 import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
 import { registerPavRoutes } from './pav-routes.js';    // ← ADICIONAR (form/grid de PAV)
@@ -188,6 +189,8 @@ try { registerHistoriaRoutes(app, pool); }
 catch (e) { console.error('ERRO registerHistoriaRoutes', e); }
 try { registerFormTesteRoutes(app, pool, adminRequired); }
 catch (e) { console.error('ERRO registerFormTesteRoutes', e); }
+try { registerFormTransportadorRoutes(app, pool, adminRequired); }
+catch (e) { console.error('ERRO registerFormTransportadorRoutes', e); }
 try { registerIscRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscRoutes', e); }
 try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }

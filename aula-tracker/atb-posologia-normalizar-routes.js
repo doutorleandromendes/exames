@@ -128,6 +128,20 @@ export function normalizarLinha(row) {
   };
 }
 
+export function textoPosologia(row) {
+  if (!row || typeof row !== 'object') return null;
+  const temEstrut = row.dose_valor !== undefined && row.dose_valor !== null && row.dose_valor !== '';
+  const dose = temEstrut
+    ? String(row.dose_valor).replace('.', ',') + (row.dose_unidade ? ' ' + row.dose_unidade : '')
+    : String(row.dose || row.Dose || '');
+  let freq;
+  if (row.freq_tipo === 'cada' && row.freq_horas) freq = row.freq_horas + '/' + row.freq_horas + 'h';
+  else if (row.freq_tipo === 'unica') freq = 'dose \u00fanica';
+  else if (row.freq_tipo === 'hd') freq = 'ap\u00f3s cada HD';
+  else freq = String(row.intervalo || row.Intervalo || '');
+  return { droga: String(row.droga || row.Droga || ''), dose, freq };
+}
+
 export function registerPosologiaNormalizarRoutes(app, pool, adminRequired) {
   const soSuper = [adminRequired, (req, res, next) => {
     if (req.user?.super_admin || req.cookies?.adm === '1') return next();

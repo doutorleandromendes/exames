@@ -127,7 +127,18 @@ export function tenantLock(pool) {
     if (!req.path || !req.path.startsWith('/atb')) return next();
 
     // (1) força o seletor de instituição em TODA rota /atb que o leia.
-    if (req.query && typeof req.query === 'object') req.query.inst = tenant;
+    // EXCEÇÃO ÚNICA: o schema do ambiente de teste do formulário. O tenant pode
+    // pedir '<TENANT>_TESTE' — e SÓ ele — no GET /atb/api/form-schema. Não abre
+    // janela cross-tenant (o SCMI não alcança HUSF_TESTE; alcançaria SCMI_TESTE)
+    // e schema é DEFINIÇÃO de formulário, sem dados de pacientes. Qualquer outro
+    // valor/rota continua forçado ao tenant, como antes.
+    if (req.query && typeof req.query === 'object') {
+      const pedido = typeof req.query.inst === 'string' ? sanitizeSigla(req.query.inst) : '';
+      const schemaTesteDoTenant = pedido === tenant + '_TESTE' &&
+        req.method === 'GET' && req.path === '/atb/api/form-schema';
+      if (!schemaTesteDoTenant) req.query.inst = tenant;
+      else req.query.inst = pedido;   // normalizado (sanitizado/uppercase)
+    }
 
     // (2) força a instituição no submit público (anti-spoofing). Só no endpoint
     //     de submissão própria — NUNCA no webhook do JotForm (/atb/webhook).

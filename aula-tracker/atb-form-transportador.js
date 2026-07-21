@@ -25,29 +25,16 @@ import { fileURLToPath } from 'url';
 import { aplicarPilha, descreverIntervencao, validarIntervencao, checarTransformacao } from './atb-intervencoes.js';
 import { getFormSchema, saveFormSchema } from './atb-form-schema.js';
 import { schemaPosologiaEstruturada } from './atb-form-teste-schema.js';
+import { listarIntervencoes } from './atb-intervencoes-registry.js';
 import { page, esc } from './atb-regras-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIR_INTERV = path.join(__dirname, 'intervencoes');
 const ENGINE_PROD = path.join(__dirname, 'atb-form-engine.js');
 
-// Carrega todas as intervenções do diretório, ordenando por dependência simples
-// (quem tem dependeDe vem depois). Suficiente para a pilha atual.
+// Intervenções vêm do registry EMBUTIDO (código), já na ordem correta — não de
+// arquivos em disco: o Render é efêmero e o GitHub web UI achata subpastas.
 function carregarIntervencoes() {
-  let arquivos = [];
-  try { arquivos = fs.readdirSync(DIR_INTERV).filter((f) => f.endsWith('.json')); } catch { /* sem dir */ }
-  const lista = arquivos.map((nome) => {
-    const interv = JSON.parse(fs.readFileSync(path.join(DIR_INTERV, nome), 'utf8'));
-    interv._arquivo = nome;
-    return interv;
-  });
-  // ordenação topológica leve: sem dependeDe primeiro, depois os que dependem
-  lista.sort((a, b) => {
-    const ad = (a.dependeDe || []).length, bd = (b.dependeDe || []).length;
-    if (ad !== bd) return ad - bd;
-    return a.nome.localeCompare(b.nome);
-  });
-  return lista;
+  return listarIntervencoes().map((i) => ({ ...i, _arquivo: i._nome + '.json' }));
 }
 
 // Estado de cada intervenção contra o engine de produção ATUAL: aplicável?

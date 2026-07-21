@@ -1,0 +1,15 @@
+{
+  "nome": "posologia-layout-inline",
+  "alvo": "atb-form-engine.js",
+  "descricao": "Layout: as células da posologia em UMA LINHA (dose · unid · frequência · Nh), com o campo de horas como sufixo. Puramente visual — não muda modelo, schema nem o que grava. Depende de posologia-estruturada (ancora no bloco que ela produz).",
+  "dependeDe": [
+    "posologia-estruturada"
+  ],
+  "transformacoes": [
+    {
+      "ancora": "                f.colunas.map(function (c) {\n                  if (c.readonly) return null;\n                  if (!_celulaVisivel(c, row)) return null;\n                  return e('div', { key: c.key, className: 'mini-campo' },\n                    e('span', { className: 'mini' }, c.label),\n                    _celulaMatriz(c, row, function (v) {\n                      var nv = linhas.slice();\n                      nv[i] = Object.assign({}, nv[i], { droga: droga });\n                      nv[i][c.key] = v;\n                      p.set(f.key, nv);\n                    })\n                  );\n                })",
+      "vira": "                e('div', { className: 'poso-linha',\n                    style: { display: 'flex', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap' } },\n                  f.colunas.map(function (c) {\n                    if (c.readonly) return null;\n                    if (!_celulaVisivel(c, row)) return null;\n                    var onCell = function (v) {\n                      var nv = linhas.slice();\n                      nv[i] = Object.assign({}, nv[i], { droga: droga });\n                      nv[i][c.key] = v;\n                      p.set(f.key, nv);\n                    };\n                    // freq_horas: campo estreito + sufixo \"h\", sem rótulo empilhado\n                    if (c.key === 'freq_horas') {\n                      return e('div', { key: c.key, className: 'mini-campo poso-horas',\n                          style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: 0, paddingBottom: '1px' } },\n                        e('div', { style: { width: '56px' } }, _celulaMatriz(c, row, onCell)),\n                        e('span', { className: 'poso-sufixo', style: { fontSize: '13px', color: '#5f6b7a' } }, 'h'));\n                    }\n                    // largura por coluna: dose e unidade estreitos; frequência ao conteúdo\n                    var larg = c.key === 'dose_valor' ? '76px'\n                             : c.key === 'dose_unidade' ? '88px'\n                             : c.key === 'freq_tipo' ? '150px' : 'auto';\n                    return e('div', { key: c.key, className: 'mini-campo',\n                        style: { width: larg, marginBottom: 0 } },\n                      e('span', { className: 'mini' }, c.label),\n                      _celulaMatriz(c, row, onCell));\n                  })\n                )",
+      "nota": "células em flex-row; freq_horas vira sufixo 'h'"
+    }
+  ]
+}

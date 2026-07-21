@@ -1,13 +1,12 @@
 {
   "nome": "form-teste-schema-override",
   "alvo": "atb-form-engine.js",
-  "descricao": "Ambiente de teste: separa a instituição do SCHEMA (ATB_SCHEMA_INST) da instituição do SUBMIT (ATB_INSTITUICAO). Só existe no engine de teste — assim o formulário de teste carrega o schema HUSF_TESTE mas grava a ficha como HUSF (nome ZZ_TESTE), sem exigir HUSF_TESTE em atb_instituicoes.",
-  "tambemToca": ["atb-form-teste-routes.js (injeta window.ATB_SCHEMA_INST)"],
+  "descricao": "Ambiente de teste: schema vem de ATB_SCHEMA_INST; submit segue ATB_INSTITUICAO.",
   "transformacoes": [
     {
       "ancora": "      fetch('/atb/api/form-schema?inst=' + encodeURIComponent(inst))",
       "vira": "      fetch('/atb/api/form-schema?inst=' + encodeURIComponent(window.ATB_SCHEMA_INST || inst))",
-      "nota": "schema vem de ATB_SCHEMA_INST (teste) quando presente; submit segue usando inst"
+      "nota": "schema por ATB_SCHEMA_INST no teste"
     }
   ]
 }

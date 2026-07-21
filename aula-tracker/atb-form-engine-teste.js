@@ -296,19 +296,34 @@
               return e('div', { key: droga + i, className: 'cartao' },
                 e('div', { className: 'cartao-cab' },
                   e('span', { className: 'cartao-tag' }, droga)),
-                f.colunas.map(function (c) {
-                  if (c.readonly) return null;
-                  if (!_celulaVisivel(c, row)) return null;
-                  return e('div', { key: c.key, className: 'mini-campo' },
-                    e('span', { className: 'mini' }, c.label),
-                    _celulaMatriz(c, row, function (v) {
+                e('div', { className: 'poso-linha',
+                    style: { display: 'flex', alignItems: 'flex-end', gap: '12px', flexWrap: 'wrap' } },
+                  f.colunas.map(function (c) {
+                    if (c.readonly) return null;
+                    if (!_celulaVisivel(c, row)) return null;
+                    var onCell = function (v) {
                       var nv = linhas.slice();
                       nv[i] = Object.assign({}, nv[i], { droga: droga });
                       nv[i][c.key] = v;
                       p.set(f.key, nv);
-                    })
-                  );
-                })
+                    };
+                    // freq_horas: campo estreito + sufixo "h", sem rótulo empilhado
+                    if (c.key === 'freq_horas') {
+                      return e('div', { key: c.key, className: 'mini-campo poso-horas',
+                          style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: 0, paddingBottom: '1px' } },
+                        e('div', { style: { width: '56px' } }, _celulaMatriz(c, row, onCell)),
+                        e('span', { className: 'poso-sufixo', style: { fontSize: '13px', color: '#5f6b7a' } }, 'h'));
+                    }
+                    // largura por coluna: dose e unidade estreitos; frequência ao conteúdo
+                    var larg = c.key === 'dose_valor' ? '76px'
+                             : c.key === 'dose_unidade' ? '88px'
+                             : c.key === 'freq_tipo' ? '150px' : 'auto';
+                    return e('div', { key: c.key, className: 'mini-campo',
+                        style: { width: larg, marginBottom: 0 } },
+                      e('span', { className: 'mini' }, c.label),
+                      _celulaMatriz(c, row, onCell));
+                  })
+                )
               );
             }),
         f.hint ? e('div', { className: 'dica' }, f.hint) : null
@@ -337,7 +352,6 @@
     );
   }
 
-  // [posologia-estruturada] Célula de matriz — renderizador ÚNICO dos dois modos.
   function _celulaVisivel(c, row) {
     if (!c || !c.mostrarSe) return true;
     return row[c.mostrarSe.campo] === c.mostrarSe.valor;

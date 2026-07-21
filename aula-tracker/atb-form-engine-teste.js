@@ -134,18 +134,6 @@
       placeholder: f.placeholder || '',
       onChange: function (ev) { p.set(f.key, ev.target.value); }
     };
-    if (p.historiaHook) {
-      taProps.id = 'campo-historia';
-      taProps.onBlur = function (ev) { p.historiaHook.onBlur(ev.target.value); };
-    }
-    var _hh = p.historiaHook, _avisoBox = null;
-    // Texto FIXO, controlado por nós — o modelo decide só narrativa sim/não; a
-    // mensagem exibida nunca vem do modelo (evita saída livre imprevisível na ficha).
-    var AVISO_HISTORIA = 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro.';
-    if (_hh) {
-      if (_hh.checando) _avisoBox = e('div', { style: { marginTop: '6px', fontSize: '12.5px', color: '#5f6368' } }, 'verificando história…');
-      else if (_hh.aviso) _avisoBox = e('div', { style: { marginTop: '8px', padding: '9px 11px', background: '#fef7e0', border: '1px solid #f0d58a', borderRadius: '8px', fontSize: '13px', color: '#7a5b00', lineHeight: 1.45 } }, AVISO_HISTORIA);
-    }
     if (f.bloquearColar) {
       var bloqueia = function (ev) {
         ev.preventDefault();
@@ -161,7 +149,6 @@
     return e('div', { className: 'campo' },
       e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('textarea', taProps),
-      _avisoBox,
       f.bloquearColar ? e('div', { className: 'dica' },
         'Para garantir o registro real, este campo não aceita colar — digite a história clínica.') : null,
       p.erro ? e('div', { className: 'erro-msg' }, p.erro) : null,
@@ -311,16 +298,14 @@
                   e('span', { className: 'cartao-tag' }, droga)),
                 f.colunas.map(function (c) {
                   if (c.readonly) return null;
+                  if (!_celulaVisivel(c, row)) return null;
                   return e('div', { key: c.key, className: 'mini-campo' },
                     e('span', { className: 'mini' }, c.label),
-                    e('input', {
-                      type: 'text', value: row[c.key] || '', placeholder: c.placeholder || '',
-                      onChange: function (ev) {
-                        var nv = linhas.slice();
-                        nv[i] = Object.assign({}, nv[i], { droga: droga });
-                        nv[i][c.key] = ev.target.value;
-                        p.set(f.key, nv);
-                      }
+                    _celulaMatriz(c, row, function (v) {
+                      var nv = linhas.slice();
+                      nv[i] = Object.assign({}, nv[i], { droga: droga });
+                      nv[i][c.key] = v;
+                      p.set(f.key, nv);
                     })
                   );
                 })
@@ -352,29 +337,57 @@
     );
   }
 
+  // [posologia-estruturada] Célula de matriz — renderizador ÚNICO dos dois modos.
+  // Tipo desconhecido cai em text: aditivo, nenhuma matriz existente muda.
+  function _celulaVisivel(c, row) {
+    if (!c || !c.mostrarSe) return true;
+    return row[c.mostrarSe.campo] === c.mostrarSe.valor;
+  }
+  function _celulaMatriz(c, row, onChange) {
+    var val = row[c.key];
+    if (c.type === 'select') {
+      return e('div', { className: 'sel-wrap' },
+        e('select', {
+          value: val == null ? '' : val,
+          onChange: function (ev) { onChange(ev.target.value); }
+        },
+          e('option', { value: '' }, '\u2014'),
+          (c.options || []).map(function (o) {
+            var v = (o && typeof o === 'object') ? o.v : o;
+            var l = (o && typeof o === 'object') ? o.l : o;
+            return e('option', { key: v, value: v }, l);
+          })),
+        e('span', { className: 'seta' }, '\u25bc'));
+    }
+    if (c.type === 'number') {
+      return e('input', {
+        type: 'text', inputMode: 'decimal', style: { maxWidth: '110px' },
+        value: (val === null || val === undefined) ? '' : String(val),
+        placeholder: c.placeholder || '',
+        onChange: function (ev) { onChange(ev.target.value); },
+        onBlur: function (ev) {
+          var t = String(ev.target.value == null ? '' : ev.target.value).trim().replace(',', '.');
+          if (t === '') return onChange('');
+          var n = Number(t);
+          if (!isNaN(n) && isFinite(n)) onChange(n);
+        }
+      });
+    }
+    return e('input', {
+      type: 'text',
+      value: val == null ? '' : val, placeholder: c.placeholder || '',
+      onChange: function (ev) { onChange(ev.target.value); }
+    });
+  }
+
   function renderColunasMatriz(f, row, i, setLinha) {
     var datas = f.colunas.filter(function (c) { return c.type === 'date'; });
     var outras = f.colunas.filter(function (c) { return c.type !== 'date'; });
     function campoCol(c) {
-      if (c.type === 'select') {
-        return e('div', { key: c.key, className: 'mini-campo' },
-          e('span', { className: 'mini' }, c.label),
-          e('div', { className: 'sel-wrap' },
-            e('select', {
-              value: row[c.key] || '',
-              onChange: function (ev) { setLinha(i, c.key, ev.target.value); }
-            },
-              e('option', { value: '' }, '—'),
-              (c.options || []).map(function (o) { return e('option', { key: o, value: o }, o); })),
-            e('span', { className: 'seta' }, '▼'))
-        );
-      }
+      if (!_celulaVisivel(c, row)) return null;
       return e('div', { key: c.key, className: 'mini-campo' },
         e('span', { className: 'mini' }, c.label),
-        e('input', {
-          type: 'text', value: row[c.key] || '', placeholder: c.placeholder || '',
-          onChange: function (ev) { setLinha(i, c.key, ev.target.value); }
-        })
+        _celulaMatriz(c, row, function (v) { setLinha(i, c.key, v); })
       );
     }
     var blocos = [];
@@ -724,7 +737,11 @@
       pos[idx] = Object.assign({}, pos[idx], {
         droga: 'Vancomicina',
         dose: res.doseTxt,
-        intervalo: res.intervalo.aplica || res.intervalo.label
+        intervalo: res.intervalo.aplica || res.intervalo.label,
+        dose_valor: res.doseMg || '',
+        dose_unidade: res.doseMg ? 'mg' : '',
+        freq_tipo: res.intervalo.horas ? 'cada' : (res.intervalo.aplica === 'ap\u00f3s cada HD' ? 'hd' : ''),
+        freq_horas: res.intervalo.horas || ''
       });
       p.set('posologia', pos);
       setAplicado(true);
@@ -840,25 +857,6 @@
     var crmState = useState({ status: '', nome: '' }), crm = crmState[0], setCrm = crmState[1];
     var okState = useState(false), enviado = okState[0], setEnviado = okState[1];
     var sendState = useState(false), enviando = sendState[0], setEnviando = sendState[1];
-    // ── Fase C: nudge de história narrativa (blur assíncrono) ──
-    var avisoSt = useState(null), historiaAviso = avisoSt[0], setHistoriaAviso = avisoSt[1];
-    var hChecSt = useState(false), historiaChecando = hChecSt[0], setHistoriaChecando = hChecSt[1];
-    var nudgeSt = useState(null), nudge = nudgeSt[0], setNudge = nudgeSt[1];         // modal (só modo dente)
-    var motivoSt = useState(''), motivo = motivoSt[0], setMotivo = motivoSt[1];
-    var hCacheRef = React.useRef({});    // { texto -> {narrativa, aviso, checagem_id} }
-    var hUltimoRef = React.useRef('');   // último texto disparado (anti-corrida)
-    // Regra de história narrativa (obrigatoriedade condicional). Lida do schema:
-    // campo historia_clinica → narrativaCond (mesmo motor avaliaCond das outras regras).
-    // Fallback de TESTE só p/ o dry-run — remover quando o editor regras-form gravar a regra real.
-    var NARRATIVA_COND_TESTE = { all: [ { campo: 'setor', op: 'in', valor: ['UTI', 'UTI C'] } ] };
-    function regraNarrativa() {
-      var campo = null;
-      ((schema && schema.secoes) || []).forEach(function (s) {
-        (s.campos || []).forEach(function (c) { if (c.key === 'historia_clinica') campo = c; });
-      });
-      if (campo && campo.narrativaCond) return campo.narrativaCond;
-      return NARRATIVA_COND_TESTE;
-    }
 
     var inst = window.ATB_INSTITUICAO || 'HUSF';
     var PREVIEW = new URLSearchParams(window.location.search).get('preview') === '1';
@@ -983,39 +981,17 @@
       return Object.keys(novos).length === 0;
     }
 
-    // Checa a história via /atb/api/checar-historia. Cache por texto + anti-corrida.
-    // Fail-open: qualquer indisponibilidade → silêncio (nenhum aviso).
-    function checarHistoria(texto) {
-      var t = String(texto || '').trim();
-      if (t.length < 15) { setHistoriaAviso(null); return; }        // curto → validação normal cuida
-      var cache = hCacheRef.current;
-      if (cache[t]) { setHistoriaAviso(cache[t].narrativa === false ? cache[t] : null); return; }
-      hUltimoRef.current = t;
-      setHistoriaChecando(true);
-      fetch('/atb/api/checar-historia', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ historia: t, inst: inst })
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          setHistoriaChecando(false);
-          if (hUltimoRef.current !== t) return;                     // resposta velha → descarta
-          if (d && d.disponivel) {
-            cache[t] = { narrativa: d.narrativa, aviso: d.aviso, checagem_id: d.checagem_id };
-            setHistoriaAviso(d.narrativa === false ? cache[t] : null);
-          } else { setHistoriaAviso(null); }                        // indisponível → fail-open
-        })
-        .catch(function () { setHistoriaChecando(false); setHistoriaAviso(null); });
-    }
-
-    // postFicha(tag): tag = true (narrativa verificada) | null (não verificada:
-    // regra não se aplica OU fail-open de infra). false nunca chega aqui (bloqueia antes).
-    function postFicha(tagNarrativa) {
-      setNudge(null);
+    function enviar() {
+      if (PREVIEW) { alert('Modo pré-visualização — o envio está desabilitado.'); return; }
+      if (!validar()) {
+        var primeiro = document.querySelector('.erro, .erro-msg');
+        if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
       setEnviando(true);
       fetch('/atb/api/fichas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instituicao: inst, dados: valores, historia_narrativa: (tagNarrativa === undefined ? null : tagNarrativa) })
+        body: JSON.stringify({ instituicao: inst, dados: valores })
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
@@ -1024,56 +1000,6 @@
           else alert('Erro ao enviar: ' + (res.d.error || res.d.erro || 'tente novamente'));
         })
         .catch(function (err) { setEnviando(false); alert('Erro de conexão: ' + err.message); });
-    }
-
-    function enviar() {
-      if (PREVIEW) { alert('Modo pré-visualização — o envio está desabilitado.'); return; }
-      if (!validar()) {
-        var primeiro = document.querySelector('.erro, .erro-msg');
-        if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
-      var cond = regraNarrativa();
-      var t = String(valores['historia_clinica'] || '').trim();
-      // Regra NÃO se aplica a esta ficha → envia (tag null = não avaliada por regra).
-      if (!cond || !avaliaCond(cond, valores)) return postFicha(null);
-      // Regra se aplica: história PRECISA ser narrativa.
-      var r = (t.length >= 15) ? hCacheRef.current[t] : null;
-      if (r && r.narrativa === true)  return postFicha(true);       // já verificada ✓
-      if (r && r.narrativa === false) { setNudge(true); return; }   // BLOQUEIA (obrigatoriedade)
-      // Sem veredito no cache → checa sincronicamente antes de decidir.
-      setHistoriaChecando(true);
-      var ctrl = new AbortController();
-      var to = setTimeout(function () { ctrl.abort(); }, 20000);
-      fetch('/atb/api/checar-historia', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ historia: t, inst: inst }), signal: ctrl.signal
-      })
-        .then(function (r2) { return r2.json(); })
-        .then(function (d) {
-          clearTimeout(to); setHistoriaChecando(false);
-          if (d && d.disponivel) {
-            hCacheRef.current[t] = { narrativa: d.narrativa, aviso: d.aviso, checagem_id: d.checagem_id };
-            if (d.narrativa === false) { setHistoriaAviso(hCacheRef.current[t]); setNudge(true); }  // BLOQUEIA
-            else postFicha(true);                                                                    // ✓
-          } else {
-            postFicha(null);   // API fora/timeout → envia com tag "não verificada"
-          }
-        })
-        .catch(function () { clearTimeout(to); setHistoriaChecando(false); postFicha(null); });      // fail-open
-    }
-
-    // Modal de BLOQUEIO (obrigatoriedade). Sem "enviar assim mesmo" — só revisar.
-    function modalNudge() {
-      return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
-        e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
-          e('h3', { style: { margin: '0 0 8px', fontSize: '17px' } }, 'Complete a história clínica'),
-          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro antes de enviar.'),
-          e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '14px' } },
-            e('button', { onClick: function () { setNudge(null); var el = document.getElementById('campo-historia'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Revisar história')
-          )
-        )
-      );
     }
 
     // Estados de carregamento
@@ -1104,10 +1030,7 @@
                 key: c.key, campo: c, valor: valores[c.key], valores: valores,
                 erro: erros[c.key], set: set, inst: inst,
                 erroNome: erros['crm__nome'], erroDecl: erros['crm__decl'],
-                crmState: crm, setCrm: setCrm,
-                historiaHook: c.key === 'historia_clinica'
-                  ? { onBlur: checarHistoria, aviso: historiaAviso, checando: historiaChecando }
-                  : null
+                crmState: crm, setCrm: setCrm
               });
             }))
         );
@@ -1115,8 +1038,7 @@
       e('div', { className: 'rodape' },
         e('span', { className: 'prog' }, progresso + '% preenchido · ' + inst),
         e('button', { className: 'enviar', disabled: enviando, onClick: enviar },
-          enviando ? 'Enviando…' : 'Enviar solicitação →')),
-      nudge ? modalNudge() : null
+          enviando ? 'Enviando…' : 'Enviar solicitação →'))
     );
   }
 

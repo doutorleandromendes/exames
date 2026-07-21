@@ -33,7 +33,8 @@ export function registerFormTesteRoutes(app, pool, adminRequired) {
   // Página host de teste — reusa o atb-form.html real, mas aponta pro engine
   // espelho e adiciona um banner de "ambiente de teste".
   app.get('/atb/form-teste', gate, (req, res) => {
-    const inst = (req.atbTenant || req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
+    // Ambiente de teste usa SEMPRE o schema isolado HUSF_TESTE (não o de produção).
+    const inst = 'HUSF_TESTE';
     let html;
     try {
       html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');

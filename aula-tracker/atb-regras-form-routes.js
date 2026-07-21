@@ -223,9 +223,9 @@ function paginaEditorAvancado(schema, { alvo, tipo, raw, campos }) {
     </form>`);
 }
 
-const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade', ambos: 'Visibilidade + obrigatoriedade' };
+const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade', ambos: 'Visibilidade + obrigatoriedade', narrativaCond: 'Gatilho de IA — exigir história narrativa' };
 // tipos "físicos" que um tipo de UI escreve no schema
-const TIPOS_ALVO = { cond: ['cond'], requiredCond: ['requiredCond'], ambos: ['cond', 'requiredCond'] };
+const TIPOS_ALVO = { cond: ['cond'], requiredCond: ['requiredCond'], ambos: ['cond', 'requiredCond'], narrativaCond: ['narrativaCond'] };
 
 function shell(titulo, body) {
   return `<!DOCTYPE html><html lang="pt-BR"><head>
@@ -292,6 +292,7 @@ function paginaLista(schema) {
         if (c.cond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'cond' }, alvoLabel, 'Visibilidade', '', descreverCond(c.cond, campos), true) + '</tr>');
         if (c.requiredCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'requiredCond' }, alvoLabel, 'Obrigatoriedade', 'ob', descreverCond(c.requiredCond, campos), true) + '</tr>');
       }
+      if (c.narrativaCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'narrativaCond' }, alvoLabel, 'Gatilho de IA (narrativa)', 'ia', descreverCond(c.narrativaCond, campos), true) + '</tr>');
       if (c.required === true) {
         const nota = c.minChars ? `mínimo de ${c.minChars} caracteres` : 'preenchimento exigido';
         linhas.push(`
@@ -622,8 +623,13 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const schema = await getFormSchema(pool, inst);
       const r = resolverAlvo(schema, b.alvo);
       if (!r.obj) return res.status(400).send('Alvo não encontrado: ' + esc(b.alvo));
-      let tipo = ['requiredCond', 'ambos'].includes(b.tipo) ? b.tipo : 'cond';
+      let tipo = ['requiredCond', 'ambos', 'narrativaCond'].includes(b.tipo) ? b.tipo : 'cond';
       if (r.escopo === 'secao') tipo = 'cond'; // seção só tem visibilidade
+      // Gatilho de IA de narrativa só faz sentido no campo historia_clinica (o engine
+      // só lê historia_clinica.narrativaCond). Barra configuração inerte em outro campo.
+      if (tipo === 'narrativaCond' && b.alvo !== 'campo:historia_clinica') {
+        return res.status(400).send('O gatilho de IA de história narrativa só se aplica ao campo "historia_clinica". — <a href="javascript:history.back()">voltar</a>');
+      }
       const alvos = TIPOS_ALVO[tipo] || ['cond'];
       if (b.modo === 'json') {
         const txt = String(b.cond_json || '').trim();

@@ -257,7 +257,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       const _ins = gerarInsertFichas({
         schema: _schemaVal,
         parsed,
-        ctx: { instituicao_id: instRow?.id, submission_id: submissionId, payload_raw: d },
+        ctx: { instituicao_id: instRow?.id, submission_id: submissionId, payload_raw: d, historia_narrativa: (body.historia_narrativa === undefined ? null : body.historia_narrativa) },
         colunasReais: _colunasReais,
       });
       if (_ins.extras.length) {

@@ -227,5 +227,11 @@ export async function runAtbMigrations(pool) {
   await pool.query(`CREATE INDEX IF NOT EXISTS atb_sync_log_inst_idx
     ON atb_sync_log(instituicao_id, created_at DESC)`);
 
+  // Tag do gatilho de IA de história narrativa (Fase C):
+  //   true  = história verificada como narrativa
+  //   false = telegráfica (só grava assim se a regra NÃO bloquear o envio)
+  //   null  = não verificada (regra não se aplica, ou fail-open de infra)
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS historia_narrativa BOOLEAN`);
+
   console.log('[atb] migrations ok');
 }

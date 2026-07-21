@@ -67,6 +67,7 @@ export const COLUNAS_SISTEMA = [
   { col: 'sofa',                  from: ['parsed', 'sofa'] },
   { col: 'sofa_renal',            from: ['parsed', 'sofa_renal'] },
   { col: 'payload_raw',           from: ['ctx', 'payload_raw'], serial: 'json' },
+  { col: 'historia_narrativa',    from: ['ctx', 'historia_narrativa'] },
   { col: 'status',                from: ['lit', 'pendente'] },
   { col: 'link_exames',           from: ['parsed', 'link_exames'] },
   { col: 'link_labs',             from: ['parsed', 'link_labs'] },

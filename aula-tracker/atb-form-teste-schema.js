@@ -78,8 +78,13 @@ export function registerFormTesteSchemaRoutes(app, pool, adminRequired) {
     try {
       const prod = await getFormSchema(pool, 'HUSF');
       const teste = await getFormSchema(pool, INST_TESTE);
+      // Fichas de teste isolam-se pelo NOME do paciente (ZZ_TESTE...), não por
+      // instituição: atb_fichas referencia instituicao_id (FK), e HUSF_TESTE não
+      // existe em atb_instituicoes — a ficha de teste grava como HUSF normal.
       const nFichas = (await pool.query(
-        `SELECT count(*) n FROM atb_fichas WHERE instituicao=$1 AND deletado_em IS NULL`, [INST_TESTE]
+        `SELECT count(*) n FROM atb_fichas
+          WHERE deletado_em IS NULL
+            AND (UPPER(COALESCE(paciente_nome, paciente_nome_raw, '')) LIKE 'ZZ\\_TESTE%' ESCAPE '\\')`
       )).rows[0].n;
       const posColsTeste = (() => {
         if (!teste) return null;

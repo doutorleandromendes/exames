@@ -1,10 +1,10 @@
 {
   "nome": "posologia-estruturada",
   "alvo": "atb-form-engine.js",
-  "descricao": "Matriz aprende number/select; posologia vira dose_valor+dose_unidade+freq_tipo+freq_horas. Aditivo e retrocompatível.",
+  "descricao": "Matriz aprende number/select; posologia estruturada. Aditivo e retrocompatível.",
   "tambemToca": [
-    "atb-form-schema.js (colunas)",
-    "atb-posologia-normalizar-routes.js (textoPosologia)",
+    "atb-form-schema.js",
+    "atb-posologia-normalizar-routes.js",
     "atb-ficha-card-routes.js",
     "atb-parecer-routes.js",
     "atb-ficha-view-routes.js"
@@ -12,7 +12,7 @@
   "transformacoes": [
     {
       "ancora": "  function renderColunasMatriz(f, row, i, setLinha) {",
-      "vira": "  // [posologia-estruturada] Célula de matriz — renderizador ÚNICO dos dois modos.\n  // Tipo desconhecido cai em text: aditivo, nenhuma matriz existente muda.\n  function _celulaVisivel(c, row) {\n    if (!c || !c.mostrarSe) return true;\n    return row[c.mostrarSe.campo] === c.mostrarSe.valor;\n  }\n  function _celulaMatriz(c, row, onChange) {\n    var val = row[c.key];\n    if (c.type === 'select') {\n      return e('div', { className: 'sel-wrap' },\n        e('select', {\n          value: val == null ? '' : val,\n          onChange: function (ev) { onChange(ev.target.value); }\n        },\n          e('option', { value: '' }, '\\u2014'),\n          (c.options || []).map(function (o) {\n            var v = (o && typeof o === 'object') ? o.v : o;\n            var l = (o && typeof o === 'object') ? o.l : o;\n            return e('option', { key: v, value: v }, l);\n          })),\n        e('span', { className: 'seta' }, '\\u25bc'));\n    }\n    if (c.type === 'number') {\n      return e('input', {\n        type: 'text', inputMode: 'decimal', style: { maxWidth: '110px' },\n        value: (val === null || val === undefined) ? '' : String(val),\n        placeholder: c.placeholder || '',\n        onChange: function (ev) { onChange(ev.target.value); },\n        onBlur: function (ev) {\n          var t = String(ev.target.value == null ? '' : ev.target.value).trim().replace(',', '.');\n          if (t === '') return onChange('');\n          var n = Number(t);\n          if (!isNaN(n) && isFinite(n)) onChange(n);\n        }\n      });\n    }\n    return e('input', {\n      type: 'text',\n      value: val == null ? '' : val, placeholder: c.placeholder || '',\n      onChange: function (ev) { onChange(ev.target.value); }\n    });\n  }\n\n  function renderColunasMatriz(f, row, i, setLinha) {",
+      "vira": "  // [posologia-estruturada] Célula de matriz — renderizador ÚNICO dos dois modos.\n  function _celulaVisivel(c, row) {\n    if (!c || !c.mostrarSe) return true;\n    return row[c.mostrarSe.campo] === c.mostrarSe.valor;\n  }\n  function _celulaMatriz(c, row, onChange) {\n    var val = row[c.key];\n    if (c.type === 'select') {\n      return e('div', { className: 'sel-wrap' },\n        e('select', {\n          value: val == null ? '' : val,\n          onChange: function (ev) { onChange(ev.target.value); }\n        },\n          e('option', { value: '' }, '\\u2014'),\n          (c.options || []).map(function (o) {\n            var v = (o && typeof o === 'object') ? o.v : o;\n            var l = (o && typeof o === 'object') ? o.l : o;\n            return e('option', { key: v, value: v }, l);\n          })),\n        e('span', { className: 'seta' }, '\\u25bc'));\n    }\n    if (c.type === 'number') {\n      return e('input', {\n        type: 'text', inputMode: 'decimal', style: { maxWidth: '110px' },\n        value: (val === null || val === undefined) ? '' : String(val),\n        placeholder: c.placeholder || '',\n        onChange: function (ev) { onChange(ev.target.value); },\n        onBlur: function (ev) {\n          var t = String(ev.target.value == null ? '' : ev.target.value).trim().replace(',', '.');\n          if (t === '') return onChange('');\n          var n = Number(t);\n          if (!isNaN(n) && isFinite(n)) onChange(n);\n        }\n      });\n    }\n    return e('input', {\n      type: 'text',\n      value: val == null ? '' : val, placeholder: c.placeholder || '',\n      onChange: function (ev) { onChange(ev.target.value); }\n    });\n  }\n\n  function renderColunasMatriz(f, row, i, setLinha) {",
       "nota": "helper _celulaMatriz + _celulaVisivel"
     },
     {

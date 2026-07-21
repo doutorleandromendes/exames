@@ -34,7 +34,9 @@ export function registerFormTesteRoutes(app, pool, adminRequired) {
   // espelho e adiciona um banner de "ambiente de teste".
   app.get('/atb/form-teste', gate, (req, res) => {
     // Ambiente de teste usa SEMPRE o schema isolado HUSF_TESTE (não o de produção).
-    const inst = 'HUSF_TESTE';
+    // Schema vem de HUSF_TESTE; a FICHA grava como HUSF (nome ZZ_TESTE isola).
+    const schemaInst = 'HUSF_TESTE';
+    const inst = 'HUSF';
     let html;
     try {
       html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');
@@ -46,7 +48,7 @@ export function registerFormTesteRoutes(app, pool, adminRequired) {
     // injeta instituição + flag de teste
     html = html.replace(
       `<script>window.ATB_INSTITUICAO = window.ATB_INSTITUICAO || 'HUSF';</script>`,
-      `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_TESTE=true;</script>`
+      `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_SCHEMA_INST=${JSON.stringify(schemaInst)};window.ATB_TESTE=true;</script>`
     );
     // banner visual pra não confundir com produção
     html = html.replace('<div id="app">',

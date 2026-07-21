@@ -338,7 +338,6 @@
   }
 
   // [posologia-estruturada] Célula de matriz — renderizador ÚNICO dos dois modos.
-  // Tipo desconhecido cai em text: aditivo, nenhuma matriz existente muda.
   function _celulaVisivel(c, row) {
     if (!c || !c.mostrarSe) return true;
     return row[c.mostrarSe.campo] === c.mostrarSe.valor;
@@ -878,7 +877,7 @@
         try { window.parent.postMessage({ tipo: 'atb-preview-ready' }, window.location.origin); } catch (e2) {}
         return function () { window.removeEventListener('message', onMsg); };
       }
-      fetch('/atb/api/form-schema?inst=' + encodeURIComponent(inst))
+      fetch('/atb/api/form-schema?inst=' + encodeURIComponent(window.ATB_SCHEMA_INST || inst))
         .then(function (r) { if (!r.ok) throw new Error('schema indisponível'); return r.json(); })
         .then(function (d) { setSchema(d); })
         .catch(function (err) { setErroLoad(err.message); });

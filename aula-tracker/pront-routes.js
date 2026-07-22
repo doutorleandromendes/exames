@@ -189,9 +189,7 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
     try {
       labColetas = (await pool.query(
         `SELECT lc.id, to_char(lc.collected_at,'YYYY-MM-DD') data,
-                (SELECT count(*) FROM lab_results r WHERE r.collection_id=lc.id)::int nex,
-                (SELECT string_agg(r.exam_name, ' · ' ORDER BY r.sort_index NULLS LAST, r.id)
-                   FROM lab_results r WHERE r.collection_id=lc.id) exames
+                (SELECT count(*) FROM lab_results r WHERE r.collection_id=lc.id)::int nex
            FROM lab_collections lc
            JOIN lab_patients lp ON lp.id=lc.patient_id
           WHERE lp.pront_id=$1
@@ -262,8 +260,8 @@ export function registerProntRoutes(app, pool, authRequired, adminRequired, rend
           <tbody>${labColetas.map(c => `
             <tr>
               <td>${toBR(c.data)}</td>
-              <td><b>${c.nex} exame${c.nex == 1 ? "" : "s"}</b>${c.exames ? `<div class="mut" style="font-size:.88em;line-height:1.3;margin-top:2px;max-width:44ch">${safe(c.exames)}</div>` : ""}</td>
-              <td style="white-space:nowrap"><a href="/lab/admin/coletas/${c.id}/emissor">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview2" target="_blank">laudo PDF</a></td>
+              <td>${c.nex}</td>
+              <td><a href="/lab/admin/coletas/${c.id}">abrir</a> · <a href="/lab/admin/coletas/${c.id}/preview" target="_blank">laudo PDF</a></td>
             </tr>`).join("")}</tbody>
         </table>
       </div>` : ""}
@@ -1456,6 +1454,17 @@ window.__READY=1;`;
         m.style.color='#0e7a4b';m.textContent=w?'PDF aberto em nova aba ✓ — imprima em "Tamanho real"':'Habilite pop-ups p/ abrir o PDF';d.disabled=false;
       }catch(e){if(w)w.close();m.style.color='#b91c1c';m.textContent='Erro: '+e.message;d.disabled=false;}
     };
+    // Re-armar o "Salvar no prontuário": após um salvamento o botão fica travado para
+    // não gravar o MESMO documento em duplicidade. O único religar era o link "Novo
+    // documento" DENTRO da mensagem de sucesso — frágil: a barra de ferramentas o
+    // ignora e o botão de timbrado/assinatura apaga a mensagem (e o link junto).
+    // Aqui o botão volta a ficar disponível assim que o usuário faz qualquer coisa que
+    // caracterize um novo documento: editar o painel, trocar de aba, Novo ou Limpar.
+    function rearm(){ if(b.disabled){ b.disabled=false; if(m){ m.textContent=''; } } }
+    var __btnNovo=document.getElementById('btnNovo'); if(__btnNovo) __btnNovo.addEventListener('click',rearm);
+    var __btnClear=document.getElementById('btnClear'); if(__btnClear) __btnClear.addEventListener('click',rearm);
+    var __panel=document.getElementById('panel'); if(__panel){ __panel.addEventListener('input',rearm); __panel.addEventListener('change',rearm); }
+    document.querySelectorAll('.tab[data-doc]').forEach(function(t){ t.addEventListener('click',rearm); });
   })();</script>`;
 
   // botão "Baixar PDF assinado (ICP-Brasil)" — assinatura qualificada via Bird ID

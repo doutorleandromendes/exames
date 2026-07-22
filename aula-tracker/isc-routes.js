@@ -29,7 +29,7 @@ import {
   ISC_CLASSIFICACOES, ISC_CRITERIOS, POTENCIAL_CONTAMINACAO, STATUS_VIGILANCIA,
   PLACEHOLDERS, recomputarEstado, normalizaTelefone, formataTelefone,
   linkWhatsApp, renderTemplate, toISODate, dataBR, addDays, diffDias, hojeISO, JANELA_IDENTIDADE,
-  boolDe, enumDe, extraiRespostas, janelasDe, contatoTemAlerta,
+  boolDe, enumDe, extraiRespostas, janelasDe, contatoTemAlerta, alertasDe,
 } from './isc-core.js';
 
 function safe(s) {
@@ -137,11 +137,26 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
   }
 
   // Recomputa os derivados e grava. Chamada após QUALQUER escrita que possa
+  // Regras de alerta CONFIGURÁVEIS aplicáveis a uma ficha: as do tenant que
+  // valem para todas as equipes OU que incluem a equipe da ficha. Todas as
+  // regras vêm do banco — não há mais piso embutido no código.
+  async function regrasAlertaDe(instId, equipeId) {
+    const { rows } = await pool.query(
+      `SELECT * FROM isc_alerta_regras
+        WHERE ativo = true AND ($1::int IS NULL OR instituicao_id = $1)
+        ORDER BY ordem, id`, [instId]);
+    return rows.filter(r => {
+      const eqs = Array.isArray(r.equipe_ids) ? r.equipe_ids : [];
+      return eqs.length === 0 || (equipeId != null && eqs.map(Number).includes(Number(equipeId)));
+    });
+  }
+
   // mudar o estado (contato novo, edição de janelas, mudança de status).
   async function sincronizarEstado(id) {
     const dados = await carregarFicha(id, null);
     if (!dados) return null;
-    const est = recomputarEstado(dados.ficha, dados.contatos, dados.equipe);
+    const regras = await regrasAlertaDe(dados.ficha.instituicao_id, dados.ficha.equipe_id);
+    const est = recomputarEstado(dados.ficha, dados.contatos, dados.equipe, undefined, regras);
     await pool.query(
       `UPDATE isc_fichas SET
          janelas = $2, janelas_estado = $3, proxima_janela = $4, proximo_contato_em = $5,
@@ -173,7 +188,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
   const nav = (req) => `<a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a>`
     + `<a href="/isc/admin/nova">+ Nova ficha</a><a href="/isc/admin/importar">Importar mapa</a>`
-    + (ehMedico(req) ? `<a href="/isc/admin/triagem">Triagem</a>` : '')
+    + (ehMedico(req) ? `<a href="/isc/admin/triagem">Triagem</a><a href="/isc/admin/alertas">Alertas</a>` : '')
     + `<a href="/isc/admin/templates">Mensagens</a>`;
 
   const CSS = `

@@ -2,6 +2,7 @@
 // Rodar: node harness-isc-core.mjs
 import {
   recomputarEstado, contatoTemAlerta, normalizaTelefone, renderTemplate,
+  REGRAS_ALERTA_SEED,
   extraiRespostas, janelasDe, addDays, diffDias,
 } from './isc-core.js';
 
@@ -28,13 +29,17 @@ eq('override da ficha vence', janelasDe({ janelas: [15] }, { janelas_default: [7
 eq('sem equipe, implante', janelasDe({ implante: true }, null), [7, 30, 90]);
 
 console.log('\n── Alertas ──');
-t('febre Sim acende', contatoTemAlerta({ febre: 'Sim' }, false));
-t('febre Não não acende', !contatoTemAlerta({ febre: 'Não' }, false));
-t('ferida com secreção purulenta acende', contatoTemAlerta({ ferida: ['Secreção purulenta'] }, false));
-t('ferida SEM SINAIS não acende', !contatoTemAlerta({ ferida: ['SEM SINAIS DE INFECÇÃO'] }, false));
-t('ferida "Não tirou os pontos" não acende', !contatoTemAlerta({ ferida: ['Não tirou os pontos'] }, false));
-t('suspeita manual acende sozinha', contatoTemAlerta({}, true));
-t('vazio não acende', !contatoTemAlerta({}, false));
+// Modelo novo: não há piso embutido — as regras vêm sempre por parâmetro. Aqui
+// usamos as sementes (o que o banco planta no 1º boot) como regras ativas.
+const R = REGRAS_ALERTA_SEED.map(r => ({ ...r, ativo: true }));
+t('febre Sim acende', contatoTemAlerta({ febre: 'Sim' }, false, R));
+t('febre Não não acende', !contatoTemAlerta({ febre: 'Não' }, false, R));
+t('ferida com secreção purulenta acende', contatoTemAlerta({ ferida: ['Secreção purulenta'] }, false, R));
+t('ferida SEM SINAIS não acende', !contatoTemAlerta({ ferida: ['SEM SINAIS DE INFECÇÃO'] }, false, R));
+t('ferida "Não tirou os pontos" não acende', !contatoTemAlerta({ ferida: ['Não tirou os pontos'] }, false, R));
+t('suspeita manual acende sozinha, mesmo sem regras', contatoTemAlerta({}, true, []));
+t('vazio não acende', !contatoTemAlerta({}, false, R));
+t('SEM regras nada acende (não há piso embutido)', !contatoTemAlerta({ febre: 'Sim' }, false, []));
 
 console.log('\n── Motor de estado ──');
 const ficha = { data_cirurgia: '2026-07-01', implante: true, status_vigilancia: 'em_vigilancia' };
@@ -85,9 +90,12 @@ t('sem alerta (febre Não)', e.tem_alerta === false);
 
 // (6) alerta propaga para a ficha
 const comAlerta = [{ id: 4, janela: 7, sucesso: true, data_contato: '2026-07-08', respostas: { ferida: ['Deiscência'] } }];
-e = recomputarEstado(ficha, comAlerta, eqp, '2026-07-09');
+e = recomputarEstado(ficha, comAlerta, eqp, '2026-07-09', R);
 t('deiscência acende alerta na ficha', e.tem_alerta === true);
 t('alerta marcado na janela', e.janelas_estado['7'].alerta === true);
+// Sem regras, o mesmo contato não acende — prova que o piso saiu do código.
+const semR = recomputarEstado(ficha, comAlerta, eqp, '2026-07-09', []);
+t('sem regras, deiscência NÃO acende', semR.tem_alerta === false);
 
 // (7) todas as janelas cumpridas → conclui sozinha
 const todas = [7, 30, 90].map((j, i) => ({ id: i + 10, janela: j, sucesso: true, data_contato: addDays('2026-07-01', j), respostas: { febre: 'Não' } }));

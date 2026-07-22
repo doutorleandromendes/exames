@@ -274,9 +274,11 @@ export async function runIscMigrations(pool) {
     CREATE TABLE IF NOT EXISTS isc_config (
       instituicao_id    INTEGER PRIMARY KEY REFERENCES atb_instituicoes(id),
       whatsapp_business TEXT,     -- E.164 (ex.: 551124901268)
+      alerta_seed_em    TIMESTAMPTZ,  -- quando as regras-semente foram plantadas (1x)
       updated_at        TIMESTAMPTZ DEFAULT now()
     )
   `);
+  await pool.query(`ALTER TABLE isc_config ADD COLUMN IF NOT EXISTS alerta_seed_em TIMESTAMPTZ`);
 
   // ── Fila de envios ────────────────────────────────────────────────────────
   // PROVISÃO PARA ENVIO AUTOMÁTICO. Fase 1: o sistema agenda + renderiza a
@@ -415,6 +417,48 @@ export async function runIscMigrations(pool) {
   })]);
 
   await pool.query(`ALTER TABLE isc_import_lotes ADD COLUMN IF NOT EXISTS complementadas INTEGER DEFAULT 0`);
+  // ── Regras de alerta (flag de possível ISC conforme as respostas) ─────────
+  // TODAS as regras são configuráveis: não há piso embutido. grupos: E dentro
+  // do grupo, OU entre grupos. equipe_ids vazio/null = vale para todas as equipes.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS isc_alerta_regras (
+      id              SERIAL PRIMARY KEY,
+      instituicao_id  INTEGER REFERENCES atb_instituicoes(id),
+      nome            TEXT NOT NULL,
+      ativo           BOOLEAN DEFAULT true,
+      grupos          JSONB NOT NULL DEFAULT '[]',   -- [[{campo,valores}, ...], ...]
+      equipe_ids      JSONB DEFAULT '[]',            -- [] = todas as equipes
+      ordem           INTEGER DEFAULT 100,
+      created_at      TIMESTAMPTZ DEFAULT now(),
+      updated_at      TIMESTAMPTZ DEFAULT now(),
+      UNIQUE (instituicao_id, nome)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS isc_alerta_regras_idx ON isc_alerta_regras (instituicao_id, ativo)`);
+
+  // Semeia as regras clínicas mínimas como regras NORMAIS (editáveis), UMA vez
+  // por instituição. O marcador alerta_seed_em impede re-semear o que o médico
+  // apagou de propósito — sem ele, apagar "Febre" faria a regra voltar no
+  // próximo deploy.
+  {
+    const { REGRAS_ALERTA_SEED } = await import('./isc-core.js');
+    const { rows: insts } = await pool.query(`SELECT id FROM atb_instituicoes`);
+    for (const inst of insts) {
+      const { rows: [mark] } = await pool.query(
+        `SELECT alerta_seed_em FROM isc_config WHERE instituicao_id=$1`, [inst.id]);
+      if (mark && mark.alerta_seed_em) continue;
+      for (const r of REGRAS_ALERTA_SEED) {
+        await pool.query(
+          `INSERT INTO isc_alerta_regras (instituicao_id, nome, grupos, equipe_ids, ordem)
+           VALUES ($1,$2,$3,'[]',$4) ON CONFLICT (instituicao_id, nome) DO NOTHING`,
+          [inst.id, r.nome, JSON.stringify(r.grupos), r.ordem]);
+      }
+      await pool.query(
+        `INSERT INTO isc_config (instituicao_id, alerta_seed_em) VALUES ($1, now())
+         ON CONFLICT (instituicao_id) DO UPDATE SET alerta_seed_em = now()`, [inst.id]);
+    }
+  }
+
   await pool.query(`ALTER TABLE isc_fichas ADD COLUMN IF NOT EXISTS import_lote_id INTEGER REFERENCES isc_import_lotes(id) ON DELETE SET NULL`);
   await pool.query(`CREATE INDEX IF NOT EXISTS isc_fichas_lote_idx ON isc_fichas (import_lote_id)`);
 

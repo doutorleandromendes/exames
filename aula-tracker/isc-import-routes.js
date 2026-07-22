@@ -18,7 +18,7 @@ import {
   CAMPOS_IMPORTAVEIS, CAMPOS_COMPLEMENTAVEIS, parseTabular, adivinhaMapeamento,
   montarPrevia, chaveDedup, detectaDelimitador,
 } from './isc-import.js';
-import { toISODate, dataBR, janelasDe, recomputarEstado } from './isc-core.js';
+import { toISODate, dataBR, janelasDe, recomputarEstado, CHECKLIST } from './isc-core.js';
 import { normalizaAoA } from './isc-import-relatorio.js';
 
 function safe(s) {
@@ -127,7 +127,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <span style="color:#80868b;font-size:13px">${safe(sub)}</span>
         </div>
         ${sigla && logo ? `<img src="${logo}" alt="${safe(sigla)}" style="height:40px;width:auto;max-width:230px;object-fit:contain">` : ''}
-        <div style="display:flex;gap:14px"><a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a><a href="/isc/admin/nova">+ Manual</a><a href="/isc/admin/importar">Importar</a>${med ? '<a href="/isc/admin/triagem">Triagem</a>' : ''}</div>
+        <div style="display:flex;gap:14px"><a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a><a href="/isc/admin/nova">+ Manual</a><a href="/isc/admin/importar">Importar</a>${med ? '<a href="/isc/admin/triagem">Triagem</a><a href="/isc/admin/alertas">Alertas</a>' : ''}</div>
       </div>`;
   }
 
@@ -659,6 +659,240 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
            ON CONFLICT (instituicao_id, nome) DO NOTHING`, [instId, ...vals]);
       }
       res.redirect('/isc/admin/triagem');
+    } catch (e) { erro(res, e); }
+  });
+
+  // ── Regras de ALERTA (flag de possível ISC conforme as respostas) ─────────
+  // Ato médico: definir o que conta como suspeita de ISC alimenta o trabalho de
+  // classificação. Some para a colaboradora. Combinação E/OU, liga/desliga,
+  // escopo por equipe. TODAS as regras são editáveis — as regras clínicas
+  // mínimas foram semeadas no banco no primeiro boot e podem ser ajustadas ou
+  // apagadas como qualquer outra.
+  function opcoesDoCampo(key) {
+    const c = CHECKLIST.find(x => x.key === key);
+    if (!c) return ['Sim', 'Não'];
+    if (c.tipo === 'sim_nao') return ['Sim', 'Não'];
+    if (c.tipo === 'multi' && Array.isArray(c.opcoes)) return c.opcoes;
+    return ['Sim', 'Não'];
+  }
+
+  app.get('/isc/admin/alertas', medicoRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      const { rows } = await pool.query(
+        `SELECT * FROM isc_alerta_regras WHERE ($1::int IS NULL OR instituicao_id=$1) ORDER BY ordem, id`, [instId]);
+      const equipes = await equipesDe(instId);
+
+      // Dados para o editor dinâmico no browser (campos → opções válidas).
+      const campos = CHECKLIST.map(c => ({ key: c.key, label: c.label, opcoes: opcoesDoCampo(c.key) }));
+
+      const escopoTxt = (r) => {
+        const eqs = Array.isArray(r.equipe_ids) ? r.equipe_ids : [];
+        if (!eqs.length) return 'todas as equipes';
+        return equipes.filter(e => eqs.map(Number).includes(e.id)).map(e => e.nome).join(', ') || 'equipes removidas';
+      };
+      const gruposTxt = (r) => (Array.isArray(r.grupos) ? r.grupos : []).map(g =>
+        '(' + g.map(c => {
+          const lbl = (CHECKLIST.find(x => x.key === c.campo) || {}).label || c.campo;
+          return `${safe(lbl)} = ${safe((Array.isArray(c.valores) ? c.valores : [c.valores]).join(' ou '))}`;
+        }).join(' <b>E</b> ') + ')').join(' <b>OU</b> ');
+
+      const regraCard = (r) => `
+        <div class="card2" style="border-left:3px solid ${r.ativo ? '#e85d5d' : '#c9ccd1'}">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
+            <b>${safe(r.nome)}</b>
+            <span class="sub">${r.ativo ? '' : 'desligada · '}${safe(escopoTxt(r))}</span>
+          </div>
+          <p class="sub" style="margin:6px 0 10px;line-height:1.6">Acende quando: ${gruposTxt(r) || '<i>sem condições</i>'}</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <form method="post" action="/isc/admin/alertas/${r.id}/toggle" style="display:inline">
+              <input type="hidden" name="inst" value="${safe(sigla || '')}">
+              <button class="btn btn-sec" style="padding:4px 10px;font-size:12px">${r.ativo ? 'Desligar' : 'Ligar'}</button></form>
+            <button class="btn btn-sec" style="padding:4px 10px;font-size:12px" onclick="editar(${r.id})">Editar</button>
+            <form method="post" action="/isc/admin/alertas/${r.id}/excluir" style="display:inline" onsubmit="return confirm('Excluir a regra &quot;${safe(r.nome)}&quot;?')">
+              <input type="hidden" name="inst" value="${safe(sigla || '')}">
+              <button class="btn btn-sec btn-red" style="padding:4px 10px;font-size:12px;color:#c0392b">Excluir</button></form>
+          </div>
+          <script type="application/json" id="regra-${r.id}">${JSON.stringify({ nome: r.nome, grupos: r.grupos || [], equipe_ids: r.equipe_ids || [], ordem: r.ordem })}</script>
+        </div>`;
+
+      const html = `<div class="isc">
+        ${chrome(sigla, 'Regras de alerta', 'Quando as respostas do paciente acendem suspeita de ISC', true)}
+        <div class="card2" style="background:#f8f9fa">
+          <b style="font-size:13px">Como funciona</b>
+          <p class="sub" style="margin:6px 0 0;line-height:1.6">
+            Uma regra acende o alerta quando <b>algum grupo</b> casa. Dentro de um grupo, <b>todas</b> as condições
+            precisam casar (E); entre grupos, basta <b>uma</b> (OU). Escopo vazio = todas as equipes.
+            Todas as regras são ajustáveis. As regras clínicas iniciais já vêm carregadas — edite ou apague à vontade.
+          </p>
+        </div>
+
+        <h2 style="font-size:15px;margin:18px 0 8px">Suas regras</h2>
+        ${rows.map(regraCard).join('') || '<p class="sub" style="color:#c0392b">Nenhuma regra ativa — nenhuma resposta vai acender alerta. Crie ao menos uma abaixo.</p>'}
+
+        <h2 style="font-size:15px;margin:22px 0 8px">Nova regra <span class="sub" id="modo-edicao"></span></h2>
+        <div class="card2">
+          <form method="post" action="/isc/admin/alertas" id="fr">
+            <input type="hidden" name="inst" value="${safe(sigla || '')}">
+            <input type="hidden" name="id" id="rid">
+            <input type="hidden" name="grupos" id="grupos-json">
+            <div class="ff">
+              <div><label class="l">Nome da regra</label><input name="nome" id="nome" required placeholder="Febre + secreção purulenta"></div>
+              <div><label class="l">Ordem</label><input name="ordem" id="ordem" type="number" value="100"></div>
+            </div>
+            <div style="margin-top:10px">
+              <label class="l">Equipes (nenhuma marcada = todas)</label>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
+                ${equipes.map(e => `<label class="chk"><input type="checkbox" class="eq" value="${e.id}"> ${safe(e.nome)}</label>`).join('')}
+              </div>
+            </div>
+            <div style="margin-top:14px">
+              <label class="l">Condições</label>
+              <p class="sub" style="margin:2px 0 8px">Cada <b>grupo</b> é um E. Adicione grupos para fazer OU.</p>
+              <div id="grupos"></div>
+              <button type="button" class="btn btn-sec" style="margin-top:8px" onclick="addGrupo()">+ Grupo (OU)</button>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px">
+              <button class="btn" type="submit">Salvar regra</button>
+              <button class="btn btn-sec" type="button" onclick="resetForm()">Limpar</button>
+            </div>
+          </form>
+        </div>
+
+      </div>
+      <script>
+        const CAMPOS = ${JSON.stringify(campos)};
+        function optsCampo(sel){ return CAMPOS.map(c=>'<option value="'+c.key+'"'+(c.key===sel?' selected':'')+'>'+c.label+'</option>').join(''); }
+        function optsValor(campoKey, sel){
+          const c=CAMPOS.find(x=>x.key===campoKey)||CAMPOS[0];
+          const vals=Array.isArray(sel)?sel:(sel?[sel]:[]);
+          return c.opcoes.map(o=>'<option value="'+o.replaceAll('"','&quot;')+'"'+(vals.includes(o)?' selected':'')+'>'+o+'</option>').join('');
+        }
+        function condRow(cond){
+          const k=cond&&cond.campo||CAMPOS[0].key;
+          const div=document.createElement('div');
+          div.className='cond'; div.style.cssText='display:flex;gap:6px;margin:4px 0;align-items:center';
+          div.innerHTML='<select class="c-campo" style="flex:1;padding:6px;border:1px solid #dadce0;border-radius:6px">'+optsCampo(k)+'</select>'
+            +'<span class="sub">=</span>'
+            +'<select class="c-valor" multiple size="1" style="flex:1;padding:6px;border:1px solid #dadce0;border-radius:6px">'+optsValor(k, cond&&cond.valores)+'</select>'
+            +'<button type="button" class="btn btn-sec c-del" style="padding:2px 8px">×</button>';
+          div.querySelector('.c-campo').addEventListener('change',function(){
+            div.querySelector('.c-valor').innerHTML=optsValor(this.value);
+          });
+          div.querySelector('.c-del').addEventListener('click',function(){ div.remove(); });
+          return div;
+        }
+        function grupoBox(grupo){
+          const box=document.createElement('div');
+          box.className='grupo'; box.style.cssText='border:1px solid #e8eaed;border-radius:8px;padding:10px;margin:6px 0;background:#fafbfc';
+          box.innerHTML='<div class="sub" style="margin-bottom:4px">Grupo (todas as condições = E)</div>';
+          const conds=document.createElement('div'); conds.className='conds'; box.appendChild(conds);
+          (grupo&&grupo.length?grupo:[null]).forEach(c=>conds.appendChild(condRow(c)));
+          const add=document.createElement('button'); add.type='button'; add.className='btn btn-sec';
+          add.style.cssText='padding:2px 8px;margin-top:4px'; add.textContent='+ Condição (E)';
+          add.onclick=function(){ conds.appendChild(condRow()); };
+          box.appendChild(add);
+          return box;
+        }
+        function addGrupo(grupo){ document.getElementById('grupos').appendChild(grupoBox(grupo)); }
+        function coletar(){
+          return [...document.querySelectorAll('#grupos .grupo')].map(g=>
+            [...g.querySelectorAll('.cond')].map(c=>({
+              campo:c.querySelector('.c-campo').value,
+              valores:[...c.querySelector('.c-valor').selectedOptions].map(o=>o.value)
+            })).filter(c=>c.valores.length)
+          ).filter(g=>g.length);
+        }
+        function resetForm(){
+          document.getElementById('rid').value=''; document.getElementById('nome').value='';
+          document.getElementById('ordem').value='100'; document.getElementById('grupos').innerHTML='';
+          document.querySelectorAll('.eq').forEach(c=>c.checked=false);
+          document.getElementById('modo-edicao').textContent=''; addGrupo();
+        }
+        function editar(id){
+          const d=JSON.parse(document.getElementById('regra-'+id).textContent);
+          document.getElementById('rid').value=id; document.getElementById('nome').value=d.nome;
+          document.getElementById('ordem').value=d.ordem||100;
+          document.querySelectorAll('.eq').forEach(c=>{ c.checked=(d.equipe_ids||[]).map(String).includes(c.value); });
+          document.getElementById('grupos').innerHTML='';
+          (d.grupos&&d.grupos.length?d.grupos:[null]).forEach(g=>addGrupo(g));
+          document.getElementById('modo-edicao').textContent='· editando regra #'+id;
+          document.getElementById('nome').scrollIntoView({behavior:'smooth'});
+        }
+        document.getElementById('fr').addEventListener('submit',function(e){
+          const g=coletar();
+          if(!g.length){ e.preventDefault(); alert('Adicione ao menos uma condição.'); return; }
+          document.getElementById('grupos-json').value=JSON.stringify(g);
+          const eqs=[...document.querySelectorAll('.eq:checked')].map(c=>c.value);
+          let h=document.getElementById('fr').querySelector('input[name=equipe_ids]');
+          if(!h){ h=document.createElement('input'); h.type='hidden'; h.name='equipe_ids'; document.getElementById('fr').appendChild(h); }
+          h.value=JSON.stringify(eqs);
+        });
+        resetForm();
+      </script>${CSS}`;
+      res.send(renderShell('ISC · Regras de alerta', html, sigla ? getTenantLogo(sigla) : undefined));
+    } catch (e) { erro(res, e); }
+  });
+
+  app.post('/isc/admin/alertas', medicoRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      const b = req.body || {};
+      let grupos = [], equipe_ids = [];
+      try { grupos = JSON.parse(b.grupos || '[]'); } catch { grupos = []; }
+      try { equipe_ids = JSON.parse(b.equipe_ids || '[]'); } catch { equipe_ids = []; }
+
+      // Saneia contra o CHECKLIST: campo e valores têm de existir. Não confia no
+      // browser — condição forjada com campo inexistente nunca casaria, mas
+      // guardar lixo no banco confunde a próxima edição.
+      const validKeys = new Set(CHECKLIST.map(c => c.key));
+      grupos = (Array.isArray(grupos) ? grupos : [])
+        .map(g => (Array.isArray(g) ? g : []).filter(c => c && validKeys.has(c.campo) && Array.isArray(c.valores) && c.valores.length)
+          .map(c => ({ campo: c.campo, valores: c.valores.map(String) })))
+        .filter(g => g.length);
+      equipe_ids = (Array.isArray(equipe_ids) ? equipe_ids : []).map(Number).filter(Number.isInteger);
+      const nome = String(b.nome || '').trim();
+      if (!nome || !grupos.length) {
+        return res.status(400).send(renderShell('ISC · Alerta', `<div class="card">
+          <h1>Regra incompleta</h1><p class="mut">Informe um nome e ao menos uma condição.</p>
+          <a href="/isc/admin/alertas">← Voltar</a></div>`));
+      }
+      const ordem = Number.isFinite(Number(b.ordem)) ? Number(b.ordem) : 100;
+      const gj = JSON.stringify(grupos), ej = JSON.stringify(equipe_ids);
+
+      if (b.id) {
+        await pool.query(
+          `UPDATE isc_alerta_regras SET nome=$2, grupos=$3, equipe_ids=$4, ordem=$5, updated_at=now()
+            WHERE id=$1 AND ($6::int IS NULL OR instituicao_id=$6)`,
+          [Number(b.id), nome, gj, ej, ordem, instId]);
+      } else {
+        await pool.query(
+          `INSERT INTO isc_alerta_regras (instituicao_id, nome, grupos, equipe_ids, ordem)
+           VALUES ($1,$2,$3,$4,$5) ON CONFLICT (instituicao_id, nome) DO UPDATE
+             SET grupos=EXCLUDED.grupos, equipe_ids=EXCLUDED.equipe_ids, ordem=EXCLUDED.ordem, updated_at=now()`,
+          [instId, nome, gj, ej, ordem]);
+      }
+      res.redirect(`/isc/admin/alertas?${new URLSearchParams({ inst: sigla || '' })}`);
+    } catch (e) { erro(res, e); }
+  });
+
+  app.post('/isc/admin/alertas/:id/toggle', medicoRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      await pool.query(
+        `UPDATE isc_alerta_regras SET ativo = NOT ativo, updated_at=now()
+          WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`, [Number(req.params.id), instId]);
+      res.redirect(`/isc/admin/alertas?${new URLSearchParams({ inst: sigla || '' })}`);
+    } catch (e) { erro(res, e); }
+  });
+
+  app.post('/isc/admin/alertas/:id/excluir', medicoRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      await pool.query(
+        `DELETE FROM isc_alerta_regras WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`,
+        [Number(req.params.id), instId]);
+      res.redirect(`/isc/admin/alertas?${new URLSearchParams({ inst: sigla || '' })}`);
     } catch (e) { erro(res, e); }
   });
 

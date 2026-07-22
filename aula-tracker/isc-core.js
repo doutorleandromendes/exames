@@ -179,18 +179,66 @@ export function janelasDe(ficha, equipe) {
 export const TOLERANCIA_ATRASO_DIAS = 7;
 
 // ── Alertas ───────────────────────────────────────────────────────────────
-// Um contato "acende alerta" se qualquer resposta bater com CHECKLIST[].alerta.
-export function contatoTemAlerta(respostas, suspeita) {
+// Um contato "acende alerta" quando as respostas do paciente sugerem possível
+// ISC. Há duas fontes, e as duas convivem:
+//
+//   1. EMBUTIDAS (CHECKLIST[].alerta): o baseline clínico, versionado em código.
+//      Nunca somem — mesmo que o banco de regras esteja vazio, febre acende.
+//   2. CONFIGURÁVEIS (isc_alerta_regras): o médico cria/edita/desliga pela tela.
+//      Permitem combinação (E dentro do grupo, OU entre grupos) e escopo por
+//      equipe. É a resposta ao pedido de "regras de flag conforme as respostas".
+//
+// O resultado é o OR de tudo que está LIGADO. Desligar uma regra configurável
+// não desliga o baseline embutido — para silenciar o baseline, a regra teria de
+// ser reescrita em código (decisão consciente, não um clique).
+
+// Uma CONDIÇÃO casa quando a resposta do campo contém algum dos valores.
+function condCasa(respostas, cond) {
+  const v = (respostas || {})[cond.campo];
+  if (v == null) return false;
+  const vals = (Array.isArray(v) ? v : [v]).map(String);
+  const alvos = (Array.isArray(cond.valores) ? cond.valores : [cond.valores]).map(String);
+  return vals.some(x => alvos.includes(x));
+}
+
+// Uma REGRA configurável casa quando ALGUM grupo casa (OU entre grupos), e um
+// grupo casa quando TODAS as suas condições casam (E dentro do grupo).
+// Formato: regra.grupos = [ [ {campo,valores}, ... ], ... ]
+export function regraAlertaCasa(regra, respostas) {
+  if (!regra || regra.ativo === false) return false;
+  const grupos = Array.isArray(regra.grupos) ? regra.grupos : [];
+  if (!grupos.length) return false;
+  return grupos.some(grupo =>
+    Array.isArray(grupo) && grupo.length > 0 && grupo.every(cond => condCasa(respostas, cond)));
+}
+
+// Sementes de alerta: as regras clínicas mínimas, entregues como regras NORMAIS
+// e editáveis. O banco importa isto no primeiro boot (uma vez); a partir daí o
+// médico ajusta ou apaga como quiser. Não há regra "embutida" aplicada em tempo
+// de execução — o motor lê só o banco.
+const NOME_SEED = {
+  ferida: 'Sinais locais na ferida', dor_bifasica: 'Dor bifásica (melhorou e piorou)',
+  febre: 'Febre', atb_pos: 'Antibiótico após a cirurgia',
+  dx_infeccao: 'Diagnóstico de infecção da ferida', reabordagem: 'Reabordagem na mesma topografia',
+  readmissao: 'Readmissão hospitalar',
+};
+export const REGRAS_ALERTA_SEED = CHECKLIST
+  .filter(c => c.alerta && c.alerta.length)
+  .map((c, i) => ({
+    nome: NOME_SEED[c.key] || c.label, ordem: (i + 1) * 10,
+    grupos: [[{ campo: c.key, valores: c.alerta }]],
+  }));
+
+// respostas + regras → acende? TODAS as regras são configuráveis (vêm do banco);
+// não há mais piso embutido. `suspeita === true` (médico marcou) sempre acende.
+export function contatoTemAlerta(respostas, suspeita, regras = []) {
   if (suspeita === true) return true;
-  const r = respostas || {};
-  for (const campo of CHECKLIST) {
-    if (!campo.alerta) continue;
-    const v = r[campo.key];
-    if (v == null) continue;
-    const vals = Array.isArray(v) ? v : [v];
-    if (vals.some(x => campo.alerta.includes(String(x)))) return true;
-  }
-  return false;
+  return (Array.isArray(regras) ? regras : []).some(r => regraAlertaCasa(r, respostas));
+}
+
+// Quais regras acenderam — para explicar na ficha "por que está sinalizado".
+export function alertasDe(respostas, regras = []) {
+  return (Array.isArray(regras) ? regras : []).filter(r => regraAlertaCasa(r, respostas)).map(r => r.nome);
 }
 
 // ── Motor de estado ───────────────────────────────────────────────────────
@@ -204,7 +252,7 @@ export function contatoTemAlerta(respostas, suspeita) {
 //   'aberta'     → já venceu, dentro da tolerância, sem contato com sucesso
 //   'atrasada'   → passou a tolerância, sem contato com sucesso
 //   'sem_contato'→ tentativas registradas, todas sem sucesso, e já venceu tudo
-export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO()) {
+export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO(), regrasAlerta = []) {
   const janelas = janelasDe(ficha, equipe);
   const dtCir = toISODate(ficha?.data_cirurgia);
   const lista = Array.isArray(contatos) ? contatos : [];
@@ -215,7 +263,7 @@ export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO()) {
 
   for (const c of lista) {
     if (c?.sucesso === false) tentativasFalhas++;
-    if (c?.sucesso !== false && contatoTemAlerta(c?.respostas, c?.suspeita_isc)) temAlerta = true;
+    if (c?.sucesso !== false && contatoTemAlerta(c?.respostas, c?.suspeita_isc, regrasAlerta)) temAlerta = true;
   }
 
   for (const dias of janelas) {
@@ -242,7 +290,7 @@ export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO()) {
       data_contato: ok ? toISODate(ok.data_contato) : null,
       contato_id: ok ? ok.id : null,
       tentativas,
-      alerta: ok ? contatoTemAlerta(ok.respostas, ok.suspeita_isc) : false,
+      alerta: ok ? contatoTemAlerta(ok.respostas, ok.suspeita_isc, regrasAlerta) : false,
     };
 
     if (!ok && proximaJanela === null && (status === 'pendente' || status === 'aberta' || status === 'atrasada')) {

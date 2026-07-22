@@ -20,10 +20,16 @@ const ROLES = [
   { key: 'pront',    label: 'Prontuário', desc: 'Pacientes e documentos' },
   { key: 'agenda',   label: 'Agenda/Secretaria', desc: 'Consultas e orçamentos' },
   { key: 'recepcao', label: 'Recepção',   desc: 'Check-in na agenda' },
+  { key: 'pav',      label: 'PAV (bundle)', desc: 'Coleta do bundle de PAV à beira-leito' },
+  { key: 'treino',   label: 'Conta de treino', desc: 'Dados marcados p/ exclusão pós-trial' },
 ];
 const ROLE_KEYS = ROLES.map(r => r.key);
+// Campos PAV que NÃO são booleanos (não entram no loop de roles): valor/texto.
+// categoria_pav decide os itens e o alcance de salão; conselho é o registro
+// profissional (CREFITO/COREN) da fisio. Só relevantes se 'pav' estiver ligado.
+const CATEGORIAS_PAV_OPTS = [['', '—'], ['fisio', 'Fisioterapia'], ['enf', 'Enfermagem']];
 // super_admin entra nas queries só para exibição, nunca para escrita via form.
-const SELECT_COLS = ['id','full_name','email','expires_at','created_at','temp_password','super_admin', ...ROLE_KEYS];
+const SELECT_COLS = ['id','full_name','email','expires_at','created_at','temp_password','super_admin', ...ROLE_KEYS, 'categoria_pav', 'conselho'];
 
 // colunas ordenáveis (whitelist — nunca interpolar entrada do usuário em ORDER BY)
 const SORTABLE = new Set(['id','full_name','email','created_at','expires_at']);
@@ -153,6 +159,12 @@ export function registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }) {
             </div>
             <label class="mt2">Papéis</label>
             <div class="roles-grid">${createOpts}</div>
+            <div class="pav-extra">
+              <div><label>Categoria PAV <span class="mut">(se papel PAV)</span></label>
+                <select name="categoria_pav">${CATEGORIAS_PAV_OPTS.map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+              <div><label>Conselho <span class="mut">(CREFITO/COREN)</span></label>
+                <input name="conselho" placeholder="ex.: CREFITO 3/xxxxx"></div>
+            </div>
             <button class="mt2">Criar usuário</button>
           </form>
         </div>
@@ -163,6 +175,8 @@ export function registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }) {
           .chk{display:block;font-weight:400;margin:6px 0}
           .roles-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;margin-top:6px}
           @media(max-width:720px){ .roles-grid{grid-template-columns:1fr} }
+          .pav-extra{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:12px;padding-top:12px;border-top:1px solid #eef1f5}
+          @media(max-width:720px){ .pav-extra{grid-template-columns:1fr} }
         </style>`;
       res.send(renderShell('Usuários', body));
     } catch (err) {
@@ -192,6 +206,11 @@ export function registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }) {
 
       const cols = ['full_name','email','password_hash','expires_at','temp_password', ...picked];
       const vals = [full_name, email, hash, exp, plain, ...picked.map(() => true)];
+      // Campos PAV com valor (só se informados): categoria_pav (fisio/enf), conselho.
+      const catPav = ['fisio','enf'].includes(req.body.categoria_pav) ? req.body.categoria_pav : null;
+      const conselho = String(req.body.conselho || '').trim().slice(0, 60) || null;
+      if (catPav) { cols.push('categoria_pav'); vals.push(catPav); }
+      if (conselho) { cols.push('conselho'); vals.push(conselho); }
       const ph = vals.map((_, i) => `$${i+1}`).join(',');
       await pool.query(
         `INSERT INTO users (${cols.join(',')}) VALUES (${ph})`, vals);
@@ -244,6 +263,12 @@ export function registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }) {
             <label class="mt2">Papéis</label>
             <div class="roles-grid">${roleChecks}</div>
             <div class="mt">${saBlock}</div>
+            <div class="pav-extra">
+              <div><label>Categoria PAV <span class="mut">(se papel PAV)</span></label>
+                <select name="categoria_pav">${CATEGORIAS_PAV_OPTS.map(([v,l]) => `<option value="${v}" ${u.categoria_pav === v || (!u.categoria_pav && v==='') ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+              <div><label>Conselho <span class="mut">(CREFITO/COREN)</span></label>
+                <input name="conselho" value="${safe(u.conselho || '').replace(/"/g,'&quot;')}" placeholder="ex.: CREFITO 3/xxxxx"></div>
+            </div>
 
             <button class="mt2">Salvar</button>
           </form>
@@ -260,6 +285,8 @@ export function registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }) {
           .chk{display:block;font-weight:400;margin:6px 0}
           .roles-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;margin-top:6px}
           @media(max-width:720px){ .roles-grid{grid-template-columns:1fr} }
+          .pav-extra{display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;margin-top:12px;padding-top:12px;border-top:1px solid #eef1f5}
+          @media(max-width:720px){ .pav-extra{grid-template-columns:1fr} }
         </style>`;
       res.send(renderShell(`Usuário #${u.id}`, body));
     } catch (err) {
@@ -289,6 +316,11 @@ export function registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }) {
       const vals = [full_name, email, exp];
       let i = vals.length;
       for (const key of ROLE_KEYS) { sets.push(`${key}=$${++i}`); vals.push(pickedSet.has(key)); }
+      // Campos PAV com valor (não booleanos): categoria_pav (fisio/enf/—), conselho.
+      const catPav = ['fisio','enf'].includes(req.body.categoria_pav) ? req.body.categoria_pav : null;
+      const conselho = String(req.body.conselho || '').trim().slice(0, 60) || null;
+      sets.push(`categoria_pav=$${++i}`); vals.push(catPav);
+      sets.push(`conselho=$${++i}`); vals.push(conselho);
       if (password && password.trim()) {
         const hash = await bcrypt.hash(password.trim(), 10);
         sets.push(`password_hash=$${++i}`); vals.push(hash);

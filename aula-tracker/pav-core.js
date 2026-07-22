@@ -228,7 +228,7 @@ export function diaDoTurno(turno, agora = new Date()) {
 //   super_admin      → todos
 // ctx: { super_admin, categoria_pav, salao_sessao }
 export function saloesDoContexto(ctx) {
-  if (ctx?.super_admin) return [...SALOES_FISIO];
+  if (ctx?.super_admin || ctx?.scih) return [...SALOES_FISIO];  // SCIH cruza os dois salões
   if (ctx?.categoria_pav === 'fisio') return [...SALOES_FISIO];
   if (ctx?.categoria_pav === 'enf') return ctx?.salao_sessao ? [ctx.salao_sessao] : [];
   return [];
@@ -466,6 +466,40 @@ export function adesaoBundle(registroItens, regras = REGRAS_DEFAULT) {
   const completo = faltando.length === 0;
   const adesao = !completo ? null : (nc.length === 0 ? 1 : 0);
   return { completo, adesao, aplicaveis, conformes, nc, faltando };
+}
+
+// ── Estado dos turnos de UM dia, para o grid de vigilância do SCIH ─────────
+// Recebe os checks de um dia (cada um com {turno, itens}) e devolve, por turno
+// da grade (M/T/N/E), o estado visual:
+//   'conforme'  → preenchido e adesão all-or-none = 1
+//   'nc'        → preenchido mas com alguma não-conformidade (adesão 0 ou incompleto)
+//   'vazio'     → sem registro
+// Não confunde "não preenchido" com "não conforme": vazio é lacuna, nc é falha.
+export function estadoTurnosDoDia(checksDoDia, regras = REGRAS_DEFAULT) {
+  const porTurno = {};
+  for (const c of (checksDoDia || [])) {
+    if (c && c.turno) porTurno[c.turno] = c;
+  }
+  const out = {};
+  for (const def of TURNOS) {
+    const c = porTurno[def.turno];
+    if (!c) { out[def.turno] = 'vazio'; continue; }
+    const a = adesaoBundle(c.itens || {}, regras);
+    out[def.turno] = (a.adesao === 1) ? 'conforme' : 'nc';
+  }
+  return out;
+}
+
+// Resumo de cobertura de um dia: quantos turnos preenchidos, quantos conformes.
+export function coberturaDoDia(checksDoDia, regras = REGRAS_DEFAULT) {
+  const est = estadoTurnosDoDia(checksDoDia, regras);
+  let preenchidos = 0, conformes = 0;
+  for (const def of TURNOS) {
+    if (est[def.turno] === 'vazio') continue;
+    preenchidos++;
+    if (est[def.turno] === 'conforme') conformes++;
+  }
+  return { estados: est, preenchidos, conformes, total_turnos: TURNOS.length };
 }
 
 // ── Datas (mesmas do ISC — reusadas para casar comportamento) ─────────────

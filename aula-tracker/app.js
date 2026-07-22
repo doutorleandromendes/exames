@@ -195,7 +195,7 @@ try { registerIscRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscRoutes', e); }
 try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscImportRoutes', e); }
-try { registerPavRoutes(app, pool, pavRequired, renderShell); }
+try { registerPavRoutes(app, pool, pavRequired, renderShell, scihRequired); }
 catch (e) { console.error('ERRO registerPavRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }

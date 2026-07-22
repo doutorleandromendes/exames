@@ -163,7 +163,7 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
       const exp = parseISO(user.expires_at);
       if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
       req.user = user;
-      if(user.pav || user.super_admin || adm){
+      if(user.pav || user.scih || user.super_admin || adm){
         if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
           return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
         return next();

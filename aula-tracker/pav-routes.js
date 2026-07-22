@@ -21,8 +21,9 @@
 
 import {
   turnoVigente, podeEscrever, itensDaCategoria, leitosVisiveis, saloesDoContexto,
-  extraiRegistro, relacaoPF, efeitoEncerramento, REGISTRO, SALOES, SECRECAO_QUANTIDADE,
-  SECRECAO_ASPECTO, SUBGLOTICA_VIA, SUBGLOTICA_VIA_DEFAULT, CATEGORIAS_PAV, DESFECHOS,
+  extraiRegistro, relacaoPF, efeitoEncerramento, coberturaDoDia, estadoTurnosDoDia,
+  REGISTRO, SALOES, SECRECAO_QUANTIDADE,
+  SECRECAO_ASPECTO, SUBGLOTICA_VIA, SUBGLOTICA_VIA_DEFAULT, CATEGORIAS_PAV, DESFECHOS, TURNOS, hojeISO,
 } from './pav-core.js';
 
 function safe(s) {
@@ -53,7 +54,7 @@ function contextoDe(req, adm) {
   };
 }
 
-export function registerPavRoutes(app, pool, pavRequired, renderShell) {
+export function registerPavRoutes(app, pool, pavRequired, renderShell, scihRequired) {
 
   // Dias de VM (D+n) de um episódio até hoje — só para exibição no card.
   const dPlus = (intub) => {
@@ -65,6 +66,54 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
   };
 
   // ── FORM DO PLANTÃO ───────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+  //  GRID DE VIGILÂNCIA DO SCIH  (/pav/admin/grid) — scihRequired
+  // ══════════════════════════════════════════════════════════════════════════
+  // Visão de vigilância: TODOS os episódios ativos dos dois salões (SCIH cruza
+  // tudo, sem recorte de salão). Mostra cobertura do dia por turno, pendências
+  // de extubação (com confirmação do lado do SCIH) e contadores de topo.
+  // FILTRA dado de treino (treino=false) — trial não polui a vigilância real.
+  // NÃO gera indicador de VM-dia/PAV (isso é do ATB); só adesão/cobertura.
+  const gridGuard = scihRequired || pavRequired;
+  app.get('/pav/admin/grid', gridGuard, async (req, res) => {
+    try {
+      const sigla = req.atbTenant || '';
+      const hoje = hojeISO();
+
+      const params = [];
+      let where = `f.estado IN ('ativo','extubacao_pendente') AND COALESCE(f.treino,false) = false`;
+      if (sigla) { params.push(sigla); where += ` AND i.sigla = $${params.length}`; }
+
+      const { rows: fichas } = await pool.query(`
+        SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.leito, f.salao,
+               f.data_intubacao, f.estado, f.data_extubacao, f.desfecho,
+               f.extub_registrada_por_nome, f.extub_registrada_em,
+               i.sigla AS instituicao
+          FROM pav_fichas f
+          LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
+         WHERE ${where}
+         ORDER BY f.salao, f.leito NULLS LAST, f.id`, params);
+
+      // Checks de HOJE de todas as fichas, para a cobertura por turno.
+      let checksHoje = {};
+      if (fichas.length) {
+        const ids = fichas.map(f => f.id);
+        const { rows } = await pool.query(
+          `SELECT ficha_id, turno, itens FROM pav_checks
+            WHERE ficha_id = ANY($1::int[]) AND data = $2 AND COALESCE(treino,false) = false`,
+          [ids, hoje]);
+        for (const r of rows) {
+          (checksHoje[r.ficha_id] = checksHoje[r.ficha_id] || []).push({ turno: r.turno, itens: r.itens });
+        }
+      }
+
+      res.send(renderGrid({ sigla, fichas, checksHoje, hoje, dPlus }));
+    } catch (e) {
+      console.error('ERRO /pav/admin/grid', e);
+      res.status(500).send(renderShell('Erro', `<div class="card"><h1>Erro</h1><p>${safe(e.message)}</p></div>`));
+    }
+  });
+
   app.get('/pav/m', pavRequired, async (req, res) => {
     try {
       const adm = req.cookies?.adm === '1';
@@ -356,6 +405,152 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
   // ══════════════════════════════════════════════════════════════════════════
   //  RENDER
   // ══════════════════════════════════════════════════════════════════════════
+  // ── Render do grid de vigilância do SCIH (desktop) ────────────────────────
+  function renderGrid({ sigla, fichas, checksHoje, hoje, dPlus }) {
+    const emVM = fichas.length;
+    const pendentes = fichas.filter(f => f.estado === 'extubacao_pendente');
+    // "incompletos hoje": ativos com menos de 1 turno preenchido no dia
+    let incompletos = 0;
+    for (const f of fichas) {
+      if (f.estado !== 'ativo') continue;
+      const cob = coberturaDoDia(checksHoje[f.id] || []);
+      if (cob.preenchidos === 0) incompletos++;
+    }
+
+    const hojeBr = hoje.split('-').reverse().join('/');
+
+    // Bloco de pendências (se houver) — ação de confirmar do lado do SCIH.
+    let blocoPend = '';
+    if (pendentes.length) {
+      const linhas = pendentes.map(f => {
+        const dtx = f.data_extubacao ? String(f.data_extubacao).slice(0,10).split('-').reverse().join('/') : '';
+        const desf = (DESFECHOS.find(d => d[0] === f.desfecho) || [null, f.desfecho || ''])[1];
+        return `<div class="pend-row">
+          <div class="pend-info">
+            <b>${safe(f.paciente_nome || 'Paciente')}</b>
+            <span class="mut">${safe(SALAO_LABEL[f.salao]||f.salao)} · Leito ${safe(f.leito||'—')}</span>
+            <span class="pend-meta">Extubação ${safe(dtx)}${desf ? ' · ' + safe(desf) : ''}${f.extub_registrada_por_nome ? ' · registrada por ' + safe(f.extub_registrada_por_nome) : ''}</span>
+          </div>
+          <button class="confirmar" onclick="confirmarPend(${f.id})">Confirmar encerramento</button>
+        </div>`;
+      }).join('');
+      blocoPend = `<div class="pend-box">
+        <div class="pend-box-tit">⏳ Extubações aguardando confirmação (${pendentes.length})</div>
+        ${linhas}
+      </div>`;
+    }
+
+    // Linhas da grade.
+    const linhas = fichas.map(f => {
+      const cob = coberturaDoDia(checksHoje[f.id] || []);
+      const dp = dPlus(f.data_intubacao) || '';
+      const circulos = TURNOS.map(def => {
+        const st = cob.estados[def.turno];
+        const cls = st === 'conforme' ? 'c-ok' : (st === 'nc' ? 'c-nc' : 'c-vazio');
+        const tit = `${def.label}: ${st === 'conforme' ? 'conforme' : (st === 'nc' ? 'com não-conformidade' : 'sem registro')}`;
+        return `<span class="circ ${cls}" title="${tit}">${def.turno}</span>`;
+      }).join('');
+      const pend = f.estado === 'extubacao_pendente';
+      return `<tr class="${pend ? 'row-pend' : ''}">
+        <td class="td-leito">${safe(f.leito || '—')}</td>
+        <td class="mut">${safe(SALAO_LABEL[f.salao] || f.salao || '')}</td>
+        <td>${safe(f.paciente_nome || f.paciente_nome_raw || 'Paciente')}${pend ? ' <span class="tag-pend">extubação pendente</span>' : ''}</td>
+        <td class="td-dp">${dp}</td>
+        <td class="td-circ">${circulos}</td>
+        <td class="td-cob mut">${cob.preenchidos}/${cob.total_turnos}${cob.preenchidos ? ` · ${cob.conformes} conf.` : ''}</td>
+      </tr>`;
+    }).join('');
+
+    const corpo = fichas.length
+      ? `<table class="grid">
+          <thead><tr>
+            <th>Leito</th><th>Salão</th><th>Paciente</th><th>VM</th>
+            <th>Turnos hoje (${TURNOS.map(t=>t.turno).join('·')})</th><th>Cobertura</th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>`
+      : `<div class="vazio">Nenhum paciente em ventilação mecânica no momento.</div>`;
+
+    return `${HEAD_ADMIN(sigla)}
+<div class="top">
+  <div class="l1"><h1>Vigilância PAV${sigla ? ' · ' + safe(sigla) : ''}</h1><span class="data">${hojeBr}</span></div>
+</div>
+<div class="wrap">
+  <div class="cards">
+    <div class="stat"><div class="stat-n">${emVM}</div><div class="stat-l">em ventilação</div></div>
+    <div class="stat"><div class="stat-n">${incompletos}</div><div class="stat-l">sem registro hoje</div></div>
+    <div class="stat"><div class="stat-n">${pendentes.length}</div><div class="stat-l">extubações pendentes</div></div>
+  </div>
+  ${blocoPend}
+  ${corpo}
+  <div class="legenda">
+    <span><span class="circ c-ok">M</span> conforme</span>
+    <span><span class="circ c-nc">T</span> com não-conformidade</span>
+    <span><span class="circ c-vazio">N</span> sem registro</span>
+    <span class="mut">Classificação de PAV: módulo ATB</span>
+  </div>
+</div>
+${GRID_SCRIPT()}
+${FOOT()}`;
+  }
+
+  function HEAD_ADMIN(sigla) {
+    return `<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vigilância PAV${sigla ? ' · ' + safe(sigla) : ''}</title>
+<style>
+  :root{--pri:#0e6b52;--bg:#f1f5f4;--card:#fff;--ink:#1e293b;--mut:#64748b;--line:#e2e8f0;
+    --ok:#0e7a4b;--ok-bg:#dff2e8;--nc:#c0392b;--nc-bg:#fdecea;--warn:#b45309;--warn-bg:#fef3e2;--vazio:#cbd5e1}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+  .mut{color:var(--mut)}
+  .top{background:var(--pri);color:#fff;padding:14px 22px}
+  .top .l1{display:flex;align-items:center;gap:12px;max-width:1100px;margin:0 auto}
+  .top h1{font-size:17px;font-weight:700;margin:0;flex:1}
+  .top .data{font-size:13px;opacity:.9}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px 22px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .stat-n{font-size:28px;font-weight:600;line-height:1}
+  .stat-l{font-size:13px;color:var(--mut);margin-top:4px}
+  .pend-box{background:var(--warn-bg);border:1px solid #f0d8b0;border-radius:12px;padding:14px 16px;margin-bottom:18px}
+  .pend-box-tit{font-size:14px;font-weight:600;color:var(--warn);margin-bottom:10px}
+  .pend-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid #f0d8b0}
+  .pend-row:first-of-type{border-top:0}
+  .pend-info{flex:1;display:flex;flex-direction:column;gap:2px}
+  .pend-info b{font-size:14px}
+  .pend-info .mut{font-size:12px}
+  .pend-meta{font-size:12px;color:var(--warn)}
+  .confirmar{font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border:0;border-radius:9px;background:var(--pri);color:#fff;cursor:pointer;white-space:nowrap}
+  table.grid{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  table.grid th{text-align:left;font-size:12px;font-weight:600;color:var(--mut);padding:11px 14px;background:#f8fafc;border-bottom:1px solid var(--line)}
+  table.grid td{padding:11px 14px;border-bottom:1px solid var(--line)}
+  table.grid tr:last-child td{border-bottom:0}
+  .row-pend{background:var(--warn-bg)}
+  .td-leito{font-weight:600}
+  .td-dp{font-weight:600;color:var(--pri)}
+  .td-circ{white-space:nowrap}
+  .circ{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11px;font-weight:700;margin-right:3px;color:#fff}
+  .c-ok{background:var(--ok)} .c-nc{background:var(--nc)} .c-vazio{background:var(--vazio);color:#fff}
+  .tag-pend{font-size:11px;background:var(--warn-bg);color:var(--warn);border:1px solid #f0d8b0;border-radius:5px;padding:1px 6px;margin-left:6px}
+  .vazio{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:30px;text-align:center;color:var(--mut)}
+  .legenda{display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-top:14px;font-size:12px;color:var(--mut)}
+  .legenda .circ{width:18px;height:18px;font-size:9px;margin-right:5px}
+</style></head><body>`;
+  }
+
+  function GRID_SCRIPT() {
+    return `<script>
+function confirmarPend(id){
+  if(!confirm('Confirmar o encerramento deste episódio? A ficha sairá da vigilância e o VM-dia será fechado.')) return;
+  fetch('/pav/api/encerrar/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({acao:'confirmar'})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j}})})
+    .then(function(x){ if(!x.ok){ alert(x.j.erro||'Erro'); return; } location.reload(); })
+    .catch(function(){ alert('Falha de conexão'); });
+}
+</script>`;
+  }
+
   function renderSalaoPicker(sigla) {
     const botoes = SALOES.map(([k, label]) =>
       `<form method="post" action="/pav/salao"><input type="hidden" name="salao" value="${safe(k)}">

@@ -2,7 +2,7 @@
 // Rodar: node harness-pav-core.mjs
 import {
   extraiRegistro, turnoVigente, diaDoTurno, saloesDoContexto, podeEscrever,
-  leitosVisiveis, itensDaCategoria, podeTransferir, efeitoEncerramento, relacaoPF, piorDoDia, serieVentilatoria,
+  leitosVisiveis, itensDaCategoria, podeTransferir, efeitoEncerramento, estadoTurnosDoDia, coberturaDoDia, relacaoPF, piorDoDia, serieVentilatoria,
   vmDiaEpisodio, conformidadeItem, adesaoBundle,
   REGISTRO, REGRAS_DEFAULT, SUBGLOTICA_VIA_DEFAULT,
 } from './pav-core.js';
@@ -131,6 +131,24 @@ eq('super-admin encerra direto', efeitoEncerramento({ super_admin: true }, 'regi
 eq('fisio confirma pendência → encerrado', efeitoEncerramento({ categoria_pav: 'fisio' }, 'confirmar').estado_novo, 'encerrado');
 eq('enf NÃO confirma pendência', efeitoEncerramento({ categoria_pav: 'enf' }, 'confirmar').estado_novo, null);
 eq('motivo do bloqueio da enf ao confirmar', efeitoEncerramento({ categoria_pav: 'enf' }, 'confirmar').motivo, 'confirmação é ato de fisio/SCIH');
+
+console.log('\n── estadoTurnosDoDia / coberturaDoDia: grid do SCIH ──');
+// um dia com M conforme, T com NC (cabeceira não), N vazio, E vazio
+const bundleOk = { cabeceira:{resp:'sim'}, aspiracao:{resp:'sim'}, higiene_oral:{resp:'sim'},
+  subglotica:{resp:'sim'}, despertar:{resp:'sim'}, extubacao:{resp:'sim'}, cuff:{valor:28} };
+const bundleNC = { ...bundleOk, cabeceira:{resp:'nao'} };
+const checksDia = [ { turno:'M', itens: bundleOk }, { turno:'T', itens: bundleNC } ];
+const est = estadoTurnosDoDia(checksDia);
+eq('M conforme', est.M, 'conforme');
+eq('T com NC', est.T, 'nc');
+eq('N vazio (lacuna, não NC)', est.N, 'vazio');
+eq('E vazio', est.E, 'vazio');
+const cob = coberturaDoDia(checksDia);
+eq('2 turnos preenchidos', cob.preenchidos, 2);
+eq('1 turno conforme', cob.conformes, 1);
+eq('total de turnos = 4', cob.total_turnos, 4);
+// dia sem nenhum check → tudo vazio, 0 preenchidos
+eq('dia vazio: 0 preenchidos', coberturaDoDia([]).preenchidos, 0);
 
 console.log('\n═══ PARÂMETROS → ATB ═══');
 

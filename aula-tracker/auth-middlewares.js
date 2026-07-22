@@ -5,15 +5,31 @@
 
 const parseISO = s => (s ? new Date(s) : null);
 
+// Aceita apenas caminhos internos absolutos ("/x"), rejeitando protocol-relative
+// ("//host") e qualquer coisa que abra open-redirect. Compartilhado com aulas-routes.
+export function safeNext(n){
+  if (typeof n !== 'string') return null;
+  if (!n.startsWith('/')) return null;      // precisa ser caminho interno
+  if (n.startsWith('//') || n.startsWith('/\\')) return null; // sem protocol-relative
+  return n;
+}
+
+// URL que o usuário tentou acessar, só para navegação GET (replay de POST perderia o corpo).
+const wantedUrl = req => (req.method === 'GET' ? safeNext(req.originalUrl) : null);
+const withNext = (base, req) => {
+  const n = wantedUrl(req);
+  return n ? `${base}${base.includes('?') ? '&' : '?'}next=${encodeURIComponent(n)}` : base;
+};
+
 export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
 
   const isAdmin = req => req.cookies?.adm === '1';
 
-  const adminRequired = (req,res,next)=>{ if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado'); if(!isAdmin(req)) return res.redirect('/admin'); next(); };
+  const adminRequired = (req,res,next)=>{ if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado'); if(!isAdmin(req)) return res.redirect(withNext('/admin', req)); next(); };
 
   const authRequired = async (req,res,next)=>{
     const uid = req.cookies?.uid;
-    if(!uid) return res.redirect('/');
+    if(!uid) return res.redirect(withNext('/', req));
     try{
       const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,micro FROM users WHERE id=$1',[uid]);
       const user = rows[0];

@@ -43,6 +43,7 @@ import { registerAulasRoutes } from './aulas-routes.js';
 import { registerAulasAdminCursosRoutes } from './aulas-admin-cursos-routes.js';
 import { registerAulasAdminAlunosRoutes } from './aulas-admin-alunos-routes.js';
 import { registerAulasAdminRelatoriosRoutes } from './aulas-admin-relatorios-routes.js';
+import { registerAulasAdminUsuariosRoutes } from './aulas-admin-usuarios-routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -171,6 +172,8 @@ try { registerAulasAdminAlunosRoutes(app, pool, { authRequired, adminRequired })
 catch (e) { console.error('ERRO registerAulasAdminAlunosRoutes', e); }
 try { registerAulasAdminRelatoriosRoutes(app, pool, { authRequired, adminRequired }); }
 catch (e) { console.error('ERRO registerAulasAdminRelatoriosRoutes', e); }
+try { registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }); }
+catch (e) { console.error('ERRO registerAulasAdminUsuariosRoutes', e); }
 try { registerLabRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabRoutes', e); }
 

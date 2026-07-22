@@ -5,6 +5,7 @@ import bcrypt from 'bcrypt';
 import { safe, renderShell } from './ui-shell.js';
 import { fmt } from './aulas-utils.js';
 import { generateSignedUrlForKey } from './aulas-storage.js';
+import { safeNext } from './auth-middlewares.js';
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || null;
 const ALLOWED_EMAIL_DOMAIN = process.env.ALLOWED_EMAIL_DOMAIN || null;
@@ -13,11 +14,12 @@ export function registerAulasRoutes(app, pool, { authRequired, isAdmin }) {
 
 // ====== Público ======
 app.get('/', (req,res)=>{
+  const nextDest = safeNext(req.query.next) || '/inicio';
   const right = `<div class="card">
   <h2>Acesso</h2>
   <p class="mut">Use o login/senha fornecidos pela coordenação.</p>
   <p class="mut mt"><a href="/solicitar-acesso">Não tenho acesso — quero solicitar</a></p>
-  <p class="mut mt"><a href="/admin">Sou admin</a></p>
+  <p class="mut mt"><a href="/admin${req.query.next ? `?next=${encodeURIComponent(safeNext(req.query.next))}` : ''}">Sou admin</a></p>
 </div>`;
 
   const html = `
@@ -46,7 +48,7 @@ app.get('/', (req,res)=>{
         e.preventDefault(); const f = new FormData(e.target);
         try{
           await postJSON('/api/login',{ email:f.get('email'), password:f.get('password'), remember:f.get('remember')==='on' });
-          location.href='/inicio';
+          location.href=${JSON.stringify(nextDest)};
         }catch(err){ alert(err.message); }
       });
     </script>`;
@@ -115,8 +117,10 @@ app.post('/solicitar-acesso', async (req, res) => {
 // ====== Admin (ativação por ADMIN_SECRET em cookie) ======
 app.get('/admin', (req,res)=>{
   if(!ADMIN_SECRET) return res.send(renderShell('Admin', `<div class="card"><h1>Admin</h1><p class="mut">Defina ADMIN_SECRET.</p></div>`));
+  const nx = safeNext(req.query.next);
   const html = `<div class="card"><h1>Admin</h1>
     <form method="POST" action="/admin">
+      ${nx ? `<input type="hidden" name="next" value="${safe(nx)}">` : ''}
       <label>ADMIN_SECRET</label><input name="secret" type="password" required>
       <button>Entrar no modo admin</button>
     </form>
@@ -129,7 +133,7 @@ app.post('/admin', (req,res)=>{
   if(!ADMIN_SECRET) return res.status(500).send('ADMIN_SECRET não configurado');
   if(secret !== ADMIN_SECRET) return res.status(403).send('ADMIN_SECRET inválido');
   res.cookie('adm','1',{ httpOnly:true, sameSite:'lax', secure:true, maxAge: 1000*60*60*24 });
-  res.redirect('/inicio');
+  res.redirect(safeNext(req.body?.next) || '/inicio');
 });
 app.get('/admin/logout', (req,res)=>{ res.clearCookie('adm'); res.redirect('/'); });
 
@@ -189,6 +193,7 @@ app.get('/inicio', async (req,res)=>{
     extras.push(`<a class="hubcard" href="/atb/admin/config">⚙️ Configurar ATB</a>`);
   }
   if (sa) extras.push(`<a class="hubcard" href="/atb/admin/scih">👥 Acessos</a>`);
+  if (sa) extras.push(`<a class="hubcard" href="/admin/usuarios">🗂️ Usuários</a>`);
 
   // sem nenhum módulo → aulas (aluno recém-cadastrado vê a mensagem de lá)
   if (!mods.length) return res.redirect('/aulas');

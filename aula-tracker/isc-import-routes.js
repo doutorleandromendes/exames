@@ -711,7 +711,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
             <button class="btn btn-sec" style="padding:4px 10px;font-size:12px" onclick="editar(${r.id})">Editar</button>
             <form method="post" action="/isc/admin/alertas/${r.id}/excluir" style="display:inline" onsubmit="return confirm('Excluir a regra &quot;${safe(r.nome)}&quot;?')">
               <input type="hidden" name="inst" value="${safe(sigla || '')}">
-              <button class="btn btn-sec btn-red" style="padding:4px 10px;font-size:12px;color:#c0392b">Excluir</button></form>
+              <button class="btn btn-sec" style="padding:4px 10px;font-size:12px;background:#fff;color:#c0392b;border:1px solid #f0c0bb">Excluir</button></form>
           </div>
           <script type="application/json" id="regra-${r.id}">${JSON.stringify({ nome: r.nome, grupos: r.grupos || [], equipe_ids: r.equipe_ids || [], ordem: r.ordem })}</script>
         </div>`;

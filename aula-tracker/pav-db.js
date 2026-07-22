@@ -38,6 +38,10 @@ export async function runPavMigrations(pool) {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pav           BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS categoria_pav TEXT`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS conselho      TEXT`);
+  // Conta de TREINO: usada pelas equipes no trial de apresentação. Tudo que ela
+  // gera nasce com treino=true e é filtrado do grid/indicadores; cleanup por
+  // DELETE ... WHERE treino=true. A conta persiste (desativável) entre trials.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS treino BOOLEAN DEFAULT false`);
 
   // ── Fichas: 1 por episódio de VM ──────────────────────────────────────────
   await pool.query(`
@@ -114,7 +118,10 @@ export async function runPavMigrations(pool) {
   // cadastro pode cair no turno seguinte — registrado_em ≠ data_intubacao).
   await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS aberta_por      INTEGER REFERENCES users(id)`);
   await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS aberta_por_nome TEXT`);
+  // Flag de treino: propagado de quem abre/preenche. Filtrado do grid/indicadores.
+  await pool.query(`ALTER TABLE pav_fichas ADD COLUMN IF NOT EXISTS treino BOOLEAN DEFAULT false`);
   await pool.query(`CREATE INDEX IF NOT EXISTS pav_fichas_estado_idx ON pav_fichas (instituicao_id, estado, salao)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS pav_fichas_treino_idx ON pav_fichas (treino)`);
 
   // ── Checks: 1 por (ficha × data × turno × categoria) ──────────────────────
   // Chave única garante a anotação UMA vez por turno. A categoria entra na chave
@@ -164,6 +171,7 @@ export async function runPavMigrations(pool) {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS pav_checks_ficha_idx ON pav_checks (ficha_id, data)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS pav_checks_dia_idx   ON pav_checks (instituicao_id, data, salao)`);
+  await pool.query(`ALTER TABLE pav_checks ADD COLUMN IF NOT EXISTS treino BOOLEAN DEFAULT false`);
 
   // ── Transferências: log datado de mudança de salão ────────────────────────
   // Fonte da verdade do salão do paciente ao longo do tempo. pav_fichas.salao é

@@ -104,15 +104,38 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
 
       // Já preenchidos neste turno vigente (para marcar o card como "feito").
       let feitos = new Set();
-      if (vig && fichas.length) {
+      // Último registro conhecido de cada ficha, para mostrar como REFERÊNCIA
+      // passiva ao lado dos campos (Opção A: contexto sem carry-forward — o campo
+      // começa vazio, isto é só o "anterior: X" ao lado). Pega o check mais recente
+      // ANTERIOR ao turno vigente, de qualquer categoria (último valor conhecido).
+      let anteriores = {};
+      if (fichas.length) {
         const ids = fichas.map(f => f.id);
-        const { rows } = await pool.query(
-          `SELECT ficha_id FROM pav_checks WHERE ficha_id = ANY($1::int[]) AND data = $2 AND turno = $3`,
-          [ids, vig.data, vig.turno]);
-        feitos = new Set(rows.map(r => r.ficha_id));
+        if (vig) {
+          const { rows } = await pool.query(
+            `SELECT ficha_id FROM pav_checks WHERE ficha_id = ANY($1::int[]) AND data = $2 AND turno = $3`,
+            [ids, vig.data, vig.turno]);
+          feitos = new Set(rows.map(r => r.ficha_id));
+        }
+        // Último check por ficha: a linha com maior created_at entre as de maior
+        // data, excluindo o turno vigente. Subquery de MAX (ANSI, não DISTINCT ON)
+        // para ficar testável e alinhado ao resto do repo.
+        const { rows: ult } = await pool.query(`
+          SELECT c.ficha_id, c.data, c.turno, c.categoria, c.itens, c.vent, c.secrecao,
+                 c.preenchido_por_nome, c.identificacao_manual
+            FROM pav_checks c
+            JOIN (
+              SELECT ficha_id, MAX(created_at) AS mx
+                FROM pav_checks
+               WHERE ficha_id = ANY($1::int[])
+                 ${vig ? 'AND NOT (data = $2 AND turno = $3)' : ''}
+               GROUP BY ficha_id
+            ) m ON m.ficha_id = c.ficha_id AND m.mx = c.created_at`,
+          vig ? [ids, vig.data, vig.turno] : [ids]);
+        for (const r of ult) anteriores[r.ficha_id] = r;
       }
 
-      res.send(renderForm({ sigla, ctx, vig, fichas, feitos, dPlus }));
+      res.send(renderForm({ sigla, ctx, vig, fichas, feitos, anteriores, dPlus }));
     } catch (e) {
       console.error('ERRO /pav/m', e);
       res.status(500).send(renderShell('Erro', `<div class="card"><h1>Erro</h1><p class="mut">${safe(e.message)}</p></div>`));
@@ -164,14 +187,14 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
         INSERT INTO pav_fichas
           (instituicao_id, paciente_nome, prontuario, salao, leito,
            data_intubacao, numero_tubo, rima_labial, ativo, estado,
-           aberta_por, aberta_por_nome)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,'ativo',$9,$10)
+           aberta_por, aberta_por_nome, treino)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,'ativo',$9,$10,$11)
         RETURNING id`,
         [instId, nome.slice(0,200), String(b.prontuario||'').trim().slice(0,60) || null,
          salao, String(b.leito||'').trim().slice(0,20) || null, dataIntub,
          String(b.numero_tubo||'').trim().slice(0,20) || null,
          String(b.rima_labial||'').trim().slice(0,20) || null,
-         req.user?.id || null, req.user?.full_name || null]);
+         req.user?.id || null, req.user?.full_name || null, !!req.user?.treino]);
 
       res.json({ ok: true, id: rows[0].id });
     } catch (e) {
@@ -303,12 +326,13 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
         INSERT INTO pav_checks
           (ficha_id, instituicao_id, data, turno, categoria, salao,
            itens, vent, secrecao, preenchido_por, preenchido_por_nome,
-           identificacao_manual, retroativo)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           identificacao_manual, retroativo, treino)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$15)
         ON CONFLICT (ficha_id, data, turno, categoria) DO UPDATE SET
           itens = EXCLUDED.itens, vent = EXCLUDED.vent, secrecao = EXCLUDED.secrecao,
           preenchido_por = EXCLUDED.preenchido_por, preenchido_por_nome = EXCLUDED.preenchido_por_nome,
           identificacao_manual = EXCLUDED.identificacao_manual, retroativo = EXCLUDED.retroativo,
+          treino = EXCLUDED.treino,
           historico = pav_checks.historico || jsonb_build_object(
             'em', $14::text,
             'por', pav_checks.preenchido_por_nome,
@@ -318,7 +342,7 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
          JSON.stringify(reg.itens), JSON.stringify(reg.vent),
          reg.secrecao ? JSON.stringify(reg.secrecao) : null,
          req.user?.id || null, nome, identificacao, !!perm.retroativo,
-         new Date().toISOString()]);
+         new Date().toISOString(), !!req.user?.treino]);
 
       await pool.query(`UPDATE pav_fichas SET ultimo_check_em = now(), updated_at = now() WHERE id=$1`, [ficha.id]);
 
@@ -344,7 +368,7 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
 </div>${FOOT()}`;
   }
 
-  function renderForm({ sigla, ctx, vig, fichas, feitos, dPlus }) {
+  function renderForm({ sigla, ctx, vig, fichas, feitos, anteriores, dPlus }) {
     const cat = ctx.categoria_pav;
     const catLabel = (CATEGORIAS_PAV.find(c => c[0] === cat) || [null, cat])[1] || '—';
     const itens = itensDaCategoria(cat);
@@ -371,7 +395,7 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell) {
     if (!fichas.length) {
       lista = `<div class="aviso">Nenhum paciente em ventilação mecânica ${cat === 'enf' && ctx.salao_sessao ? 'neste salão' : 'nos seus salões'} no momento. Use “+ paciente em VM” para abrir uma ficha.</div>`;
     } else {
-      lista = fichas.map(f => card(f, itens, feitos.has(f.id), cat, dPlus, podeCheck, ctx)).join('');
+      lista = fichas.map(f => card(f, itens, feitos.has(f.id), cat, dPlus, podeCheck, ctx, (anteriores||{})[f.id])).join('');
     }
 
     return `${HEAD(sigla, 'Plantão')}
@@ -395,7 +419,32 @@ ${SCRIPT()}`;
   }
 
   // Card de um leito.
-  function card(f, itens, feito, cat, dPlus, podeCheck, ctx) {
+  // Monta o "anterior" (Opção A): mapa key→texto curto do último valor conhecido,
+  // + um rótulo de quando/quem. Não é default de campo; é referência ao lado.
+  function resumoAnterior(anterior) {
+    if (!anterior) return null;
+    const out = {};
+    const it = anterior.itens || {};
+    for (const c of REGISTRO) {
+      const v = it[c.key];
+      if (!v) continue;
+      if (c.tipo === 'valor' && v.valor != null) out[c.key] = String(v.valor);
+      else if (v.resp === 'sim') out[c.key] = 'sim';
+      else if (v.resp === 'nao') out[c.key] = 'não';
+    }
+    const vt = anterior.vent || {};
+    if (vt.fio2 != null) out.fio2 = String(vt.fio2);
+    if (vt.peep != null) out.peep = String(vt.peep);
+    if (vt.pao2 != null) out.pao2 = String(vt.pao2);
+    const s = anterior.secrecao;
+    if (s && s.aspecto) out.secrecao = s.aspecto + (s.quantidade ? ', ' + s.quantidade : '');
+    const dataBr = anterior.data ? String(anterior.data).slice(0,10).split('-').reverse().join('/') : '';
+    const quem = anterior.preenchido_por_nome || anterior.identificacao_manual || '';
+    out.__rot = `${TURNO_LABEL[anterior.turno] || anterior.turno || ''} ${dataBr}`.trim() + (quem ? ' · ' + quem : '');
+    return out;
+  }
+
+  function card(f, itens, feito, cat, dPlus, podeCheck, ctx, anterior) {
     const nome = safe(f.paciente_nome || f.paciente_nome_raw || 'Paciente');
     const dp = dPlus(f.data_intubacao);
     const sub = [
@@ -404,6 +453,9 @@ ${SCRIPT()}`;
       f.numero_tubo ? 'TOT ' + safe(f.numero_tubo) : '',
       f.rima_labial ? 'rima ' + safe(f.rima_labial) : '',
     ].filter(Boolean).join(' · ');
+
+    const ant = resumoAnterior(anterior);
+    const antAttr = ant ? ` data-ant='${safe(JSON.stringify(ant))}'` : '';
 
     const pendente = f.estado === 'extubacao_pendente';
     // Quem pode CONFIRMAR uma pendência: fisio, SCIH, super-admin.
@@ -429,7 +481,7 @@ ${SCRIPT()}`;
       ? `<button class="encerrar" type="button" onclick="abrirEncerrar(${f.id}, '${nome.replace(/'/g,"\\'")}')">Registrar extubação</button>`
       : '';
 
-    return `<div class="fcard ${feito ? 'done' : ''} ${pendente ? 'pendente' : ''}" data-ficha="${f.id}" data-nome="${nome}" data-sub="${safe(sub)}">
+    return `<div class="fcard ${feito ? 'done' : ''} ${pendente ? 'pendente' : ''}" data-ficha="${f.id}" data-nome="${nome}" data-sub="${safe(sub)}"${antAttr}>
       <div class="fc-head">
         <span class="nome">${nome}</span>
         ${dp ? `<span class="dp">${dp}</span>` : ''}
@@ -446,7 +498,7 @@ ${SCRIPT()}`;
   function SHEET(itens, cat) {
     const linhasItem = itens.map(c => {
       if (c.tipo === 'valor') {
-        return `<div class="row"><label>${safe(c.label)}</label>
+        return `<div class="row"><label>${safe(c.label)} <span class="ant" data-ant-key="${c.key}"></span></label>
           <input type="number" inputmode="decimal" name="v_${c.key}" placeholder="${safe(c.unidade || '')}"></div>`;
       }
       // sim_nao
@@ -461,7 +513,7 @@ ${SCRIPT()}`;
         just = `<input class="just" name="j_${c.key}" placeholder="Justificativa (obrigatória se Não)" style="display:none">`;
       }
       return `<div class="row simnao" data-key="${c.key}"${c.via ? ' data-via="1"' : ''}${c.justifica_se_nao ? ' data-just="1"' : ''}>
-        <label>${safe(c.label)}${c.per === 'dia' ? ' <span class="tag1x">1×/dia</span>' : ''}</label>
+        <label>${safe(c.label)}${c.per === 'dia' ? ' <span class="tag1x">1×/dia</span>' : ''} <span class="ant" data-ant-key="${c.key}"></span></label>
         <div class="sn">
           <button type="button" class="sim" onclick="sn(this,'sim')">Sim</button>
           <button type="button" class="nao" onclick="sn(this,'nao')">Não</button>
@@ -485,14 +537,14 @@ ${SCRIPT()}`;
     ${linhasItem}
     <div class="sec-tit">Parâmetros ventilatórios</div>
     <div class="grid2">
-      <div class="row"><label>FiO₂ (%)</label><input type="number" inputmode="decimal" name="fio2" oninput="calcPF()"></div>
-      <div class="row"><label>PEEP (cmH₂O)</label><input type="number" inputmode="decimal" name="peep"></div>
+      <div class="row"><label>FiO₂ (%) <span class="ant" data-ant-key="fio2"></span></label><input type="number" inputmode="decimal" name="fio2" oninput="calcPF()"></div>
+      <div class="row"><label>PEEP (cmH₂O) <span class="ant" data-ant-key="peep"></span></label><input type="number" inputmode="decimal" name="peep"></div>
     </div>
     <div class="grid2">
-      <div class="row"><label>PaO₂ (mmHg)</label><input type="number" inputmode="decimal" name="pao2" oninput="calcPF()"></div>
+      <div class="row"><label>PaO₂ (mmHg) <span class="ant" data-ant-key="pao2"></span></label><input type="number" inputmode="decimal" name="pao2" oninput="calcPF()"></div>
       <div class="row"><label>PaO₂/FiO₂</label><div class="pf" id="pf">—</div></div>
     </div>
-    <div class="sec-tit">Secreção traqueal</div>
+    <div class="sec-tit">Secreção traqueal <span class="ant" data-ant-key="secrecao"></span></div>
     <div class="grid2">
       <div class="row"><label>Quantidade</label><select name="sec_quantidade"><option value="">—</option>${secQtd}</select></div>
       <div class="row"><label>Aspecto</label><select name="sec_aspecto"><option value="">—</option>${secAsp}</select></div>
@@ -620,6 +672,8 @@ ${SCRIPT()}`;
   .pend-nota{font-size:12px;color:var(--mut);margin-top:6px}
   .pend .confirmar{width:100%;font:inherit;font-size:14px;font-weight:600;padding:9px;border:0;border-radius:9px;background:var(--pri);color:#fff;cursor:pointer;margin-top:8px}
   .enc-nota{font-size:12px;line-height:1.4;margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
+  .ant{font-size:11px;font-weight:400;color:var(--mut);background:#eef2f7;border-radius:5px;padding:1px 6px;margin-left:4px}
+  .ant:empty{display:none}
 </style></head><body>`;
   }
   function FOOT() { return `</body></html>`; }
@@ -641,6 +695,15 @@ function abrir(id){
   document.querySelectorAll('#sheet .sn button').forEach(function(b){b.classList.remove('on')});
   document.querySelectorAll('#sheet .via,#sheet .just').forEach(function(e){e.style.display='none'});
   document.getElementById('pf').textContent='—';
+  // Preenche os rótulos "anterior: X" (Opção A: referência passiva; campos ficam
+  // vazios, isto é só contexto ao lado). Lê data-ant do card.
+  var ant={}; try{ ant=JSON.parse(c.dataset.ant||'{}'); }catch(e){ ant={}; }
+  var rot=ant.__rot||'';
+  document.querySelectorAll('#sheet .ant').forEach(function(sp){
+    var k=sp.getAttribute('data-ant-key');
+    if(k && ant[k]!=null && k!=='__rot'){ sp.textContent='anterior: '+ant[k]; sp.title=rot; }
+    else { sp.textContent=''; }
+  });
   document.getElementById('bg').classList.add('on');
   document.getElementById('sheet').classList.add('on');
 }

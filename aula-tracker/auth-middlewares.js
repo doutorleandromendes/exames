@@ -157,7 +157,7 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     const uid = req.cookies?.uid;
     if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
     try{
-      const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,pav,categoria_pav,conselho,instituicao FROM users WHERE id=$1',[uid]);
+      const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,pav,categoria_pav,conselho,treino,instituicao FROM users WHERE id=$1',[uid]);
       const user = rows[0];
       if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
       const exp = parseISO(user.expires_at);

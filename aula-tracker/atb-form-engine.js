@@ -146,9 +146,19 @@
       taProps.onDrop = bloqueia;                                   // arrastar-soltar texto
       taProps.onDragOver = function (ev) { ev.preventDefault(); };
     }
+    if (p.historiaHook) {
+      taProps.id = 'campo-historia';
+      taProps.onBlur = function (ev) { p.historiaHook.onBlur(ev.target.value); };
+    }
+    var _hh = p.historiaHook, _avisoBox = null;
+    if (_hh) {
+      if (_hh.checando) _avisoBox = e('div', { style: { marginTop: '6px', fontSize: '12.5px', color: '#5f6368' } }, 'verificando história…');
+      else if (_hh.aviso) _avisoBox = e('div', { style: { marginTop: '8px', padding: '9px 11px', background: '#fef7e0', border: '1px solid #f0d58a', borderRadius: '8px', fontSize: '13px', color: '#7a5b00', lineHeight: 1.45 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro.');
+    }
     return e('div', { className: 'campo' },
       e(Rotulo, { texto: f.label, required: _ehObrigatorio(f, p.valores) }),
       e('textarea', taProps),
+      _avisoBox,
       f.bloquearColar ? e('div', { className: 'dica' },
         'Para garantir o registro real, este campo não aceita colar — digite a história clínica.') : null,
       p.erro ? e('div', { className: 'erro-msg' }, p.erro) : null,
@@ -868,6 +878,12 @@
     var crmState = useState({ status: '', nome: '' }), crm = crmState[0], setCrm = crmState[1];
     var okState = useState(false), enviado = okState[0], setEnviado = okState[1];
     var sendState = useState(false), enviando = sendState[0], setEnviando = sendState[1];
+    // Gatilho de IA — historia narrativa (Fase C)
+    var avisoSt = useState(null), historiaAviso = avisoSt[0], setHistoriaAviso = avisoSt[1];
+    var hChecSt = useState(false), historiaChecando = hChecSt[0], setHistoriaChecando = hChecSt[1];
+    var nudgeSt = useState(false), nudge = nudgeSt[0], setNudge = nudgeSt[1];
+    var hCacheRef = React.useRef({});
+    var hUltimoRef = React.useRef('');
 
     var inst = window.ATB_INSTITUICAO || 'HUSF';
     var PREVIEW = new URLSearchParams(window.location.search).get('preview') === '1';
@@ -992,17 +1008,46 @@
       return Object.keys(novos).length === 0;
     }
 
-    function enviar() {
-      if (PREVIEW) { alert('Modo pré-visualização — o envio está desabilitado.'); return; }
-      if (!validar()) {
-        var primeiro = document.querySelector('.erro, .erro-msg');
-        if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
+    // Regra de historia narrativa: vem de schema (campo historia_clinica -> narrativaCond).
+    // Sem regra configurada = nao bloqueia (producao segura). window.ATB_TESTE ativa a
+    // condicao de teste so no ambiente HUSF_TESTE (inerte em producao).
+    function regraNarrativa() {
+      var campo = null;
+      ((schema && schema.secoes) || []).forEach(function (s) {
+        (s.campos || []).forEach(function (c) { if (c.key === 'historia_clinica') campo = c; });
+      });
+      if (campo && campo.narrativaCond) return campo.narrativaCond;
+      if (window.ATB_TESTE) return { all: [ { campo: 'setor', op: 'in', valor: ['UTI', 'UTI C'] } ] };
+      return null;
+    }
+    function checarHistoria(texto) {
+      var t = String(texto || '').trim();
+      if (t.length < 15) { setHistoriaAviso(null); return; }
+      var cache = hCacheRef.current;
+      if (cache[t]) { setHistoriaAviso(cache[t].narrativa === false ? cache[t] : null); return; }
+      hUltimoRef.current = t;
+      setHistoriaChecando(true);
+      fetch('/atb/api/checar-historia', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ historia: t, inst: inst })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          setHistoriaChecando(false);
+          if (hUltimoRef.current !== t) return;
+          if (d && d.disponivel) {
+            cache[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id };
+            setHistoriaAviso(d.narrativa === false ? cache[t] : null);
+          } else { setHistoriaAviso(null); }
+        })
+        .catch(function () { setHistoriaChecando(false); setHistoriaAviso(null); });
+    }
+    function postFicha(tagNarrativa) {
+      setNudge(false);
       setEnviando(true);
       fetch('/atb/api/fichas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instituicao: inst, dados: valores })
+        body: JSON.stringify({ instituicao: inst, dados: valores, historia_narrativa: (tagNarrativa === undefined ? null : tagNarrativa) })
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
@@ -1011,6 +1056,48 @@
           else alert('Erro ao enviar: ' + (res.d.error || res.d.erro || 'tente novamente'));
         })
         .catch(function (err) { setEnviando(false); alert('Erro de conexão: ' + err.message); });
+    }
+    function enviar() {
+      if (PREVIEW) { alert('Modo pré-visualização — o envio está desabilitado.'); return; }
+      if (!validar()) {
+        var primeiro = document.querySelector('.erro, .erro-msg');
+        if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      var cond = regraNarrativa();
+      var t = String(valores['historia_clinica'] || '').trim();
+      if (!cond || !avaliaCond(cond, valores)) return postFicha(null);
+      var r = (t.length >= 15) ? hCacheRef.current[t] : null;
+      if (r && r.narrativa === true)  return postFicha(true);
+      if (r && r.narrativa === false) { setNudge(true); return; }
+      setHistoriaChecando(true);
+      var ctrl = new AbortController();
+      var to = setTimeout(function () { ctrl.abort(); }, 20000);
+      fetch('/atb/api/checar-historia', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ historia: t, inst: inst }), signal: ctrl.signal
+      })
+        .then(function (r2) { return r2.json(); })
+        .then(function (d) {
+          clearTimeout(to); setHistoriaChecando(false);
+          if (d && d.disponivel) {
+            hCacheRef.current[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id };
+            if (d.narrativa === false) { setHistoriaAviso(hCacheRef.current[t]); setNudge(true); }
+            else postFicha(true);
+          } else { postFicha(null); }
+        })
+        .catch(function () { clearTimeout(to); setHistoriaChecando(false); postFicha(null); });
+    }
+    function modalNudge() {
+      return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
+        e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
+          e('h3', { style: { margin: '0 0 8px', fontSize: '17px' } }, 'Complete a história clínica'),
+          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro antes de enviar.'),
+          e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '14px' } },
+            e('button', { onClick: function () { setNudge(false); var el = document.getElementById('campo-historia'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Revisar história')
+          )
+        )
+      );
     }
 
     // Estados de carregamento
@@ -1041,7 +1128,10 @@
                 key: c.key, campo: c, valor: valores[c.key], valores: valores,
                 erro: erros[c.key], set: set, inst: inst,
                 erroNome: erros['crm__nome'], erroDecl: erros['crm__decl'],
-                crmState: crm, setCrm: setCrm
+                crmState: crm, setCrm: setCrm,
+                historiaHook: c.key === 'historia_clinica'
+                  ? { onBlur: checarHistoria, aviso: historiaAviso, checando: historiaChecando }
+                  : null
               });
             }))
         );
@@ -1049,7 +1139,8 @@
       e('div', { className: 'rodape' },
         e('span', { className: 'prog' }, progresso + '% preenchido · ' + inst),
         e('button', { className: 'enviar', disabled: enviando, onClick: enviar },
-          enviando ? 'Enviando…' : 'Enviar solicitação →'))
+          enviando ? 'Enviando…' : 'Enviar solicitação →')),
+      nudge ? modalNudge() : null
     );
   }
 

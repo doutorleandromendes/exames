@@ -62,9 +62,11 @@ export const INDICADORES = {
              familia: 'iras', limiar: 'svdMax', limiarMin: 'svdMin', sin: ['svd', 'sonda vesical', 'uso de sonda'] },
   cvc:     { rotulo: 'Utilização de CVC', unidade: '%', setores: ['utiAB', 'utic'],
              familia: 'iras', limiar: 'cvcMax', limiarMin: 'cvcMin', sin: ['cvc', 'cateter central', 'uso de cateter'] },
-  hm:      { rotulo: 'Adesão à higiene das mãos', unidade: '%',
+  hm:      { rotulo: 'Higiene das mãos — consumo de álcool gel', unidade: 'mL/paciente-dia',
              setores: ['utiAB', 'utic', 'clinicaMedica', 'clinicaCirurgica', 'epm'], familia: 'iras',
-             sin: ['higiene das maos', 'hm', 'lavagem de maos', 'adesao higiene'] },
+             referencia: { valor: 20, texto: 'Referência OMS: ≥ 20 mL/paciente-dia', direcao: 'maior_melhor' },
+             sin: ['higiene das maos', 'hm', 'alcool', 'álcool', 'alcool gel', 'álcool gel', 'gel alcoolico',
+                   'preparacao alcoolica', 'preparação alcoólica', 'antissepsia', 'consumo de alcool'] },
   // -------- séries mensais das clínicas (infSeries) ------------------------
   infSeries: { rotulo: 'Infecções por mês (por topografia)', unidade: 'casos',
              setores: ['clinicaMedica', 'clinicaCirurgica', 'epm'], familia: 'iras',
@@ -95,9 +97,8 @@ export const INDICADORES = {
 export const ANCORAS = {
   iras: {
     testeSignificancia: true,
-    metodo: 'Regressão multivariada binomial negativa ou de Poisson (conforme a frequência de desfechos). Os limiares mínimo e máximo são o INTERVALO DE PREDIÇÃO DE 95% do modelo ajustado sobre a série histórica. Endemicidade global e HD: teste binomial exato de Clopper-Pearson, com limiar pelo IC95% sobre biênio de referência.',
-    classificacao: 'Endêmico = dentro dos limiares previstos pelo modelo. Alerta supraendêmico = acima do limiar máximo. Atividade excepcional = aumento sustentado por ≥3 competências consecutivas acima do limiar.',
-    regra: 'A leitura correta é POSICIONAL, contra o modelo: compare o valor com o limiar previsto (IP95%) e use a classificação de status. Valor dentro dos limiares = variação compatível com o previsto (NÃO é aumento real). Acima do limiar máximo = alerta supraendêmico. Não use Mann-Kendall aqui: a tendência destas séries é avaliada pelo modelo de predição, não por teste de tendência monotônica.',
+    metodo: 'Âncora principal (SAHE): posição histórica por percentil com bootstrap (n=3000) sobre período de referência, classificada em zonas — abaixo (<P10), baixa (P10–P25), endêmica (P25–P75), alerta (P75–P90), epidêmica (>P90). Cada mês traz ainda um p de Poisson (chance de a variação ser acaso). Tendência avaliada por Mann-Kendall + declive de Sen. Onde não há SAHE, usa-se o intervalo de predição de 95% de regressão binomial negativa/Poisson (limiarMin/limiarMax).',
+    regra: 'DISTINGA NÍVEL DE TENDÊNCIA — são coisas diferentes e a confusão entre elas é o erro mais comum: (a) NÍVEL = onde o valor está na distribuição histórica → use zona + percentil (ex.: "P98, zona epidêmica"); (b) TENDÊNCIA = se vem subindo ao longo do tempo → use SOMENTE o Mann-Kendall (tau, p) e o declive de Sen. Um valor pode estar em zona epidêmica (nível alto) SEM tendência de alta (MK não significativo) — nesse caso é um PICO, não uma escalada, e a resposta deve dizer isso. Se mk_p ≥ 0,05, NÃO afirme que "vem aumentando".',
   },
   mdr: {
     testeSignificancia: true,
@@ -157,24 +158,51 @@ TOM — escreva como um colega experiente responde de viva-voz, não como um rel
 PROIBIDO (soa a relatório): "considerando que", "além disso", "o que reforça a ideia de que",
 "o que é compatível com", "vale ressaltar", "cabe destacar", "em suma", "de modo geral".
 
-EXEMPLO RUIM (não faça):
-"Não, não há sinal de aumento nas infecções de cateter na UTI AB em 2026, considerando que os
-valores estão dentro do previsto pelo modelo, com a última leitura em junho sendo de 13,05 por
-1000 CVC-dia, o que é compatível com o esperado. Além disso, não há meses consecutivos acima
-do limiar máximo, o que reforça a ideia de que a situação está dentro do controle esperado."
+EXEMPLO RUIM (não faça — confunde nível com tendência e usa o limiar errado):
+"Não. A utilização de sonda vesical na UTI C ficou dentro da faixa prevista o ano todo — junho
+fechou em 93%, bem abaixo do teto de 100%. Nenhum mês de 2026 estourou o limiar."
 
-EXEMPLO BOM (faça assim):
-"Não. A IPCS ficou dentro da faixa prevista o ano todo — junho fechou em 13,05/1000 CVC-dia,
-bem abaixo do teto de 24,93. Nenhum mês de 2026 estourou o limiar."
+EXEMPLO BOM (mesmo caso, lido corretamente):
+"O nível está alto: junho fechou em 93%, no percentil 98 da série histórica — zona epidêmica.
+Mas não é uma escalada: o Mann-Kendall não mostra tendência significativa (p=0,71) e o declive
+de Sen é levemente negativo. É um pico isolado, não um aumento sustentado."
+
+OUTRO EXEMPLO BOM (nível baixo):
+"Não. A PAV ficou no percentil 2 em junho (2,85/1000 VM-dia) — abaixo do esperado para a série.
+A tendência também não aponta alta (Mann-Kendall p=0,08, declive negativo)."
 
 COMO LER A ESTATÍSTICA (inviolável — a resposta tem que ser fiel ao método):
-- Os limiares (limiarMax/limiarMin) NÃO são cortes arbitrários: são o intervalo de predição de 95% de um modelo de regressão (binomial negativa ou Poisson) ajustado sobre a série histórica. Estar dentro deles significa "compatível com o previsto".
-- Use o campo "avaliacaoLimiar" já calculado: posicao ("dentro"/"acima"/"abaixo") e mesesAcimaConsecutivos.
-  · dentro → a variação é compatível com o previsto pelo modelo. NÃO chame isso de aumento real.
-  · acima do limiar máximo → alerta supraendêmico.
-  · ≥3 competências consecutivas acima → atividade excepcional.
-- Quando houver "veredito" de Mann-Kendall (MDR/consumo), use-o: se sig=false, diga explicitamente que a tendência não é estatisticamente significativa.
-- Nunca calcule estatística por conta própria, nunca invente número, nunca contrarie a classificação de status.
+
+A) Quando o item traz "posicaoHistorica" (âncora principal), use-a — ela vem antes de qualquer outra coisa:
+   · ultimoMes.zona + ultimoMes.percentil dizem o NÍVEL (onde o valor está na história).
+     Zonas: abaixo (<P10) · baixa (P10–P25) · endêmica (P25–P75) · alerta (P75–P90) · epidêmica (>P90).
+   · tendencia (Mann-Kendall + Sen) diz se vem SUBINDO ou CAINDO ao longo do tempo.
+   · ultimoMes.p_poisson é a chance de a variação do mês ser acaso.
+
+B) NUNCA confunda NÍVEL com TENDÊNCIA — é o erro mais grave possível aqui:
+   · Pergunta "está alto?" → responda com zona/percentil.
+   · Pergunta "vem aumentando / aumentou?" → responda com a TENDÊNCIA (Mann-Kendall).
+   · Se a tendência NÃO é significativa (significativa:false, p ≥ 0,05), você NÃO pode dizer que
+     vem aumentando — mesmo que a zona seja epidêmica. Nesse caso o correto é dizer que o valor
+     está alto (é um PICO) mas não há tendência de alta.
+   · Se o declive de Sen for negativo, mencione que a inclinação é de queda, não de alta.
+
+C) Quando NÃO houver "posicaoHistorica", use limiarMax/limiarMin e avaliacaoLimiar (intervalo de
+   predição de 95%): dentro = compatível com o previsto; acima do teto = alerta supraendêmico;
+   ≥3 competências consecutivas acima = atividade excepcional.
+
+D) Para MDR e consumo de ATB, use o veredito de Mann-Kendall em "estatistica.veredito"; se sig=false,
+   diga explicitamente que a tendência não é estatisticamente significativa.
+
+D2) Quando houver "referenciaExterna" (ex.: OMS ≥20 mL/pac-dia para álcool gel), é ELA que responde
+   perguntas do tipo "está bom / está adequado / atende?" — cite o valor e a referência, e diga se
+   atende. Se o valor estiver perto do limite, diga que está no limite. Nível histórico (percentil)
+   e referência externa são coisas distintas: use a referência para "está bom?" e o percentil para
+   "está alto/baixo em relação à nossa história?".
+
+E) Nunca calcule estatística por conta própria, nunca invente número, nunca contrarie a zona nem o
+   veredito de tendência. "statusSetorGeral" é a classificação GERAL do setor — não é a do indicador;
+   não use no lugar da zona.
 
 OUTRAS REGRAS:
 - Use APENAS os números dos DADOS. Cite a unidade quando o número for o ponto da frase.

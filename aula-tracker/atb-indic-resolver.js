@@ -19,17 +19,19 @@ import { SETORES, INDICADORES, ANCORAS, GRUPOS_SETOR } from './atb-indic-glossar
 const BASE = process.env.ATB_INDIC_BASE || 'https://scih.lcmendes.med.br';
 const TTL_MS = 10 * 60 * 1000;   // cache de 10 min (os JSONs mudam 1x/semana)
 
-const _cache = { iras: null, stats: null, em: 0 };
+const _cache = { iras: null, stats: null, sahe: null, em: 0 };
 
 export async function carregarDados(fetchImpl = fetch) {
   if (_cache.iras && (Date.now() - _cache.em) < TTL_MS) return _cache;
-  const [ri, rs] = await Promise.all([
+  const [ri, rs, rh] = await Promise.all([
     fetchImpl(`${BASE}/data_iras.json`),
     fetchImpl(`${BASE}/data_stats.json`),
+    fetchImpl(`${BASE}/data_sahe.json`),
   ]);
   if (!ri.ok) throw new Error(`data_iras.json HTTP ${ri.status}`);
   _cache.iras = await ri.json();
   _cache.stats = rs.ok ? await rs.json() : null;
+  _cache.sahe = rh.ok ? await rh.json() : null;   // âncora principal: zonas/percentis/MK
   _cache.em = Date.now();
   return _cache;
 }
@@ -82,6 +84,35 @@ function pontos(serie, periodo) {
   return [serie[serie.length - 1]];
 }
 
+// ── Âncora SAHE: posição histórica (percentil/zona), p de Poisson do mês e
+// tendência (Mann-Kendall + Sen). É a âncora PRINCIPAL para os indicadores
+// cobertos (pav/ipcs/cvc/svd nas UTIs; ilav*/bact* na HD).
+function anexarSahe(sahe, setor, indicKey, pts) {
+  const bloco = sahe?.[setor]?.[indicKey];
+  if (!bloco) return null;
+  const meses = bloco.meses || {};
+  // zona/percentil dos pontos pedidos (e do último, como referência)
+  const noPeriodo = (pts || []).map(x => {
+    const m = meses[x.p];
+    return m ? { periodo: x.p, valor: x.v ?? null, zona: m.zona, percentil: m.pct, p_poisson: m.p_poi } : null;
+  }).filter(Boolean);
+  const chaves = Object.keys(meses);
+  const ultimoMes = chaves[chaves.length - 1];
+  const ult = meses[ultimoMes];
+  return {
+    fonte: 'SAHE — posição histórica por percentil (bootstrap n=3000)',
+    referencia: `${sahe[setor].ref_inicio}–${sahe[setor].ref_fim} (n=${sahe[setor].n_ref})`,
+    percentis: { p10: bloco.p10, p25: bloco.p25, p50: bloco.p50, p75: bloco.p75, p90: bloco.p90 },
+    ultimoMes: ult ? { periodo: ultimoMes, zona: ult.zona, percentil: ult.pct, p_poisson: ult.p_poi } : null,
+    noPeriodo,
+    tendencia: {
+      teste: 'Mann-Kendall + declive de Sen',
+      tau: bloco.mk_tau, p: bloco.mk_p, direcao: bloco.mk_dir, sen: bloco.sen,
+      significativa: (bloco.mk_p != null && bloco.mk_p < 0.05),
+    },
+  };
+}
+
 // ── Veredito estatístico disponível para a família ─────────────────────────
 function anexarEstatistica(stats, setor, indicKey, indic) {
   const fam = indic.familia;
@@ -117,7 +148,7 @@ function anexarEstatistica(stats, setor, indicKey, indic) {
 
 // ── Resolve um localizador em FATOS ────────────────────────────────────────
 export function resolver(dados, loc) {
-  const iras = dados.iras, stats = dados.stats;
+  const iras = dados.iras, stats = dados.stats, sahe = dados.sahe;
   const out = { periodoBase: iras?.periodo || null, itens: [], avisos: [] };
   if (stats?.meta?.periodo && iras?.periodo && stats.meta.periodo !== iras.periodo) {
     out.avisos.push(`As análises estatísticas são de ${stats.meta.periodo}; os indicadores estão atualizados até ${iras.periodo}.`);
@@ -187,14 +218,26 @@ export function resolver(dados, loc) {
                 : `dentro do previsto pelo modelo — último valor ${ultimo?.v} dentro da faixa (${faixa})`),
       } : null;
 
+      const posHist = anexarSahe(sahe, setor, ik, pts);
+      // Referência externa (ex.: OMS ≥20 mL/pac-dia para álcool gel) — âncora
+      // objetiva para perguntas do tipo "está bom?".
+      let refExterna = null;
+      if (indic.referencia && ultimo?.v != null) {
+        const r = indic.referencia, atende = r.direcao === 'maior_melhor' ? (ultimo.v >= r.valor) : (ultimo.v <= r.valor);
+        refExterna = { ...r, valorAtual: ultimo.v, periodo: ultimo.p, atende,
+          leitura: `${ultimo.v} ${indic.unidade} em ${ultimo.p} — ${atende ? 'ATENDE' : 'NÃO atende'} a ${r.texto}` };
+      }
       out.itens.push({
         setor, setorRotulo: SETORES[setor]?.rotulo || setor,
         indicador: ik, indicadorRotulo: indic.rotulo, unidade: indic.unidade,
         pontos: pts.map(x => ({ periodo: x.p, valor: x.v ?? null, ...(x.e !== undefined ? { esbl: x.e, kpc: x.k, acin: x.a } : {}) })),
         serieCompleta: (loc.periodo?.tipo === 'serie') ? undefined : serie.slice(-8).map(x => ({ periodo: x.p, valor: x.v ?? null })),
-        limiarMax, limiarMin,
-        avaliacaoLimiar,
-        statusSetor: bloco.status ?? null,
+        // ÂNCORA PRINCIPAL quando existe (zona/percentil + Mann-Kendall/Sen):
+        posicaoHistorica: posHist,
+        referenciaExterna: refExterna,
+        // Fallback (intervalo de predição) — só use quando NÃO houver posicaoHistorica:
+        ...(posHist ? {} : { limiarMax, limiarMin, avaliacaoLimiar }),
+        statusSetorGeral: bloco.status ?? null,
         estatistica: anexarEstatistica(stats, setor, ik, indic),
       });
       if (!pts.length) out.avisos.push(`Período não encontrado na série de ${indic.rotulo} (${SETORES[setor]?.rotulo || setor}).`);

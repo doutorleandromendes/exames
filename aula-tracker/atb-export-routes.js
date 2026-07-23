@@ -208,11 +208,10 @@ export function registerExportRoutes(app, pool, adminRequired) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     if (!temAcesso(req)) return res.send(paginaRestrito(req));
     res.send(paginaEscolha({
-      titulo: 'Exportar dados das fichas (prescritores)',
-      subtitulo: 'Somente o conteúdo inserido pelos prescritores no formulário. Escolha o recorte de tempo.',
+      titulo: 'Exportar dados das fichas',
+      subtitulo: 'Conteúdo inserido pelos prescritores no formulário. Escolha o recorte de tempo.',
       hrefBase: '/atb/export/prescritores.csv',
-      nota: 'Não inclui parecer do SCIH, classificação de IRAS, adesão nem dados de sistema. '
-          + 'Abrange fichas do sistema novo e importadas do JotForm.',
+      nota: 'Abrange fichas do sistema novo e importadas do JotForm.',
     }));
   });
 

@@ -28,6 +28,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { montarMensagensNarrativa, parseSaidaNarrativa } from './atb-historia-narrativa.js';
+import { montarMensagensIsc, parseSaidaIsc, RESPONSE_FORMAT_ISC } from './atb-historia-isc.js';
 
 const API_URL   = (process.env.ATB_NARRATIVA_API_URL || 'https://api.deepinfra.com/v1/openai').replace(/\/$/, '');
 const API_KEY   = process.env.ATB_NARRATIVA_API_KEY || '';
@@ -71,9 +72,11 @@ export function deidentificar(texto) {
 
 // ── Chamada à API (OpenAI-compatible) ────────────────────────────────────────
 // Retorna { narrativa, aviso } ou null (null → fail-open no chamador).
-async function classificar(historia) {
-  if (!API_KEY) return null;                       // sem key → fail-open
-  const texto = DEID_ON ? deidentificar(historia) : historia;
+// Chamada única ao provedor. Compartilhada pelos dois classificadores para que
+// timeout, de-id, tratamento de erro e log de custo não divirjam em duas cópias.
+// Devolve { conteudo, custo } ou { erro }.
+async function chamarModelo(messages, responseFormat, tag) {
+  if (!API_KEY) return { erro: 'sem ATB_NARRATIVA_API_KEY' };
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), CHAT_TIMEOUT);
   try {
@@ -81,29 +84,43 @@ async function classificar(historia) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
       signal: ctrl.signal,
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0,
-        response_format: RESPONSE_FORMAT,
-        messages: montarMensagensNarrativa(texto),
-      }),
+      body: JSON.stringify({ model: MODEL, temperature: 0, response_format: responseFormat, messages }),
     });
     if (!r.ok) {
       const corpo = await r.text().catch(() => '');
-      console.error('[historia] API HTTP', r.status, '| url:', `${API_URL}/chat/completions`,
-        '| model:', MODEL, '| body:', corpo.slice(0, 300));
-      return null;
+      console.error(`[historia:${tag}] API HTTP`, r.status, '| model:', MODEL, '| body:', corpo.slice(0, 300));
+      return { erro: `HTTP ${r.status}` };
     }
     const data = await r.json();
-    if (data?.usage?.estimated_cost != null)
-      console.log('[historia] custo_estimado', data.usage.estimated_cost);
-    return parseSaidaNarrativa(data?.choices?.[0]?.message?.content || '');
+    const custo = data?.usage?.estimated_cost ?? null;
+    if (custo != null) console.log(`[historia:${tag}] custo_estimado`, custo);
+    return { conteudo: data?.choices?.[0]?.message?.content || '', custo };
   } catch (e) {
-    console.error('[historia] API erro', e.message);
-    return null;
+    console.error(`[historia:${tag}] API erro`, e.message);
+    return { erro: e.name === 'AbortError' ? 'timeout' : e.message };
   } finally {
     clearTimeout(t);
   }
+}
+
+// Rótulo 1 — FORMA (narrativa vs telegráfica). Contrato preservado: devolve o
+// objeto ou null (o chamador trata null como fail-open).
+async function classificar(historia) {
+  const texto = DEID_ON ? deidentificar(historia) : historia;
+  const r = await chamarModelo(montarMensagensNarrativa(texto), RESPONSE_FORMAT, 'narrativa');
+  if (r.erro) return null;
+  return parseSaidaNarrativa(r.conteudo);
+}
+
+// Rótulo 2 — CONTEÚDO (indícios de ISC). Avaliação independente, prompt e
+// few-shots próprios: fundir com a de forma contaminaria as duas.
+// Devolve { isc, indicios, custo } ou { erro } — o chamador decide o que fazer.
+export async function classificarIsc(historia) {
+  const texto = DEID_ON ? deidentificar(historia) : historia;
+  const r = await chamarModelo(montarMensagensIsc(texto), RESPONSE_FORMAT_ISC, 'isc');
+  if (r.erro) return { erro: r.erro };
+  const o = parseSaidaIsc(r.conteudo);
+  return o ? { ...o, custo: r.custo } : { erro: 'resposta ilegível do modelo' };
 }
 
 async function garantirTabela(pool) {
@@ -123,7 +140,12 @@ async function garantirTabela(pool) {
 }
 
 export function registerHistoriaRoutes(app, pool) {
-  garantirTabela(pool).catch(e => console.error('[historia] migration', e));
+  garantirTabela(pool)
+    .then(() => Promise.all([
+      pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS isc BOOLEAN`),
+      pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS isc_indicios TEXT`),
+    ]))
+    .catch(e => console.error('[historia] migration', e));
 
   // Página de teste (isolada, sem o form real) — valida o endpoint no navegador.
   app.get('/atb/api/checar-historia', (req, res) => {
@@ -162,20 +184,47 @@ async function ir(){
 
     if (!historia) return res.json({ disponivel: false });   // nada a checar → fail-open
 
-    const r = await classificar(historia);
-    if (!r) return res.json({ disponivel: false });          // API fora/lixo/timeout → fail-open
+    // Quais rótulos o cliente quer. Ausente = só 'narrativa' — assim o engine
+    // já implantado (que não manda `quer`) segue funcionando idêntico, e não se
+    // paga por uma classificação que nenhuma regra pediu.
+    const pedidos = Array.isArray(req.body?.quer) && req.body.quer.length
+      ? req.body.quer.map(String) : ['narrativa'];
+    const querNarrativa = pedidos.includes('narrativa');
+    const querIsc = pedidos.includes('isc');
+    if (!querNarrativa && !querIsc) return res.json({ disponivel: false });
+
+    // Em paralelo: a latência é a da mais lenta, não a soma.
+    const [rn, ri] = await Promise.all([
+      querNarrativa ? classificar(historia) : Promise.resolve(null),
+      querIsc ? classificarIsc(historia) : Promise.resolve(null),
+    ]);
+
+    // Fail-open POR RÓTULO: se um falhar e o outro vier, usa-se o que veio.
+    const okNarrativa = querNarrativa && !!rn;
+    const okIsc = querIsc && !!ri && !ri.erro;
+    if (!okNarrativa && !okIsc) return res.json({ disponivel: false });
 
     // Log (rótulo). Não deixa erro de log travar o fluxo.
     let checagem_id = null;
     try {
       const ins = await pool.query(
-        `INSERT INTO atb_historia_checagens (inst, historia, disponivel, narrativa, aviso)
-         VALUES ($1,$2,true,$3,$4) RETURNING id`,
-        [inst, historia, r.narrativa, r.aviso || null]);
+        `INSERT INTO atb_historia_checagens (inst, historia, disponivel, narrativa, aviso, isc, isc_indicios)
+         VALUES ($1,$2,true,$3,$4,$5,$6) RETURNING id`,
+        [inst, historia,
+         okNarrativa ? rn.narrativa : null, okNarrativa ? (rn.aviso || null) : null,
+         okIsc ? ri.isc : null, okIsc ? (ri.indicios || null) : null]);
       checagem_id = ins.rows[0].id;
     } catch (e) { console.error('[historia] log', e.message); }
 
-    return res.json({ disponivel: true, narrativa: r.narrativa, aviso: r.aviso || '', checagem_id });
+    // Rótulo não pedido ou que falhou vai como null — o cliente ignora nulos.
+    return res.json({
+      disponivel: true,
+      narrativa: okNarrativa ? rn.narrativa : null,
+      aviso: okNarrativa ? (rn.aviso || '') : '',
+      isc: okIsc ? ri.isc : null,
+      indicios: okIsc ? (ri.indicios || '') : '',
+      checagem_id,
+    });
   });
 
   // Registra o override (enviou apesar do aviso de telegráfica) — o rótulo de ouro.

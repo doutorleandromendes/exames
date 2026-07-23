@@ -17,48 +17,15 @@
 // chamadas de API — um refresh acidental não deve queimar cota.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { montarMensagensIsc, parseSaidaIsc, RESPONSE_FORMAT_ISC } from './atb-historia-isc.js';
-import { deidentificar } from './atb-historia-routes.js';
+import { classificarIsc } from './atb-historia-routes.js';
 import { page, esc } from './atb-regras-routes.js';
 
-const API_URL = (process.env.ATB_NARRATIVA_API_URL || 'https://api.deepinfra.com/v1/openai').replace(/\/$/, '');
-const API_KEY = process.env.ATB_NARRATIVA_API_KEY || '';
 const MODEL   = process.env.ATB_NARRATIVA_MODEL || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
+// Só para EXIBIR o estado no cabeçalho — a chamada em si vive em atb-historia-routes.js.
+const API_KEY = process.env.ATB_NARRATIVA_API_KEY || '';
 const DEID_ON = process.env.ATB_HISTORIA_DEID === '1';
-const TIMEOUT = 20000;
 const CONCORRENCIA = 4;      // gentil com a API; 30 fichas saem em ~8 rodadas
 const ISC = 'Infecção do sítio cirúrgico';
-
-async function classificarIsc(historia) {
-  if (!API_KEY) return { erro: 'sem ATB_NARRATIVA_API_KEY' };
-  const texto = DEID_ON ? deidentificar(historia) : historia;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), TIMEOUT);
-  try {
-    const r = await fetch(`${API_URL}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
-      signal: ctrl.signal,
-      body: JSON.stringify({
-        model: MODEL, temperature: 0,
-        response_format: RESPONSE_FORMAT_ISC,
-        messages: montarMensagensIsc(texto),
-      }),
-    });
-    if (!r.ok) {
-      const corpo = await r.text().catch(() => '');
-      return { erro: `HTTP ${r.status}: ${corpo.slice(0, 120)}` };
-    }
-    const data = await r.json();
-    const out = parseSaidaIsc(data?.choices?.[0]?.message?.content || '');
-    if (!out) return { erro: 'resposta ilegível do modelo' };
-    return { ...out, custo: data?.usage?.estimated_cost ?? null };
-  } catch (e) {
-    return { erro: e.name === 'AbortError' ? 'timeout (20s)' : e.message };
-  } finally {
-    clearTimeout(t);
-  }
-}
 
 // Executa em lotes de CONCORRENCIA, preservando a ordem de entrada.
 async function emLotes(itens, fn) {

@@ -156,7 +156,9 @@ async function ir(){
   // Checagem chamada pelo formulário antes do envio.
   app.post('/atb/api/checar-historia', async (req, res) => {
     const historia = String(req.body?.historia || '').trim();
-    const inst = String(req.body?.inst || '') || null;
+    // O rótulo de instituição vem do TENANT (servidor), não do corpo da
+    // requisição: cliente não decide em qual hospital sua checagem é logada.
+    const inst = req.atbTenant || String(req.body?.inst || '') || null;
 
     if (!historia) return res.json({ disponivel: false });   // nada a checar → fail-open
 

@@ -71,6 +71,16 @@ async function emLotes(itens, fn) {
   return out;
 }
 
+// Cláusula de tenant idêntica à do /consulta e do export: fichas HUSF antigas
+// têm instituicao_id NULL e contam como HUSF. Sem isso, o dry-run leria fichas
+// de OUTRO hospital — isolamento entre HUSF e SCMI não é opcional.
+function escopoTenant(inst, params) {
+  params.push(inst);
+  const n = params.length;
+  return ` AND (f.instituicao_id = (SELECT id FROM atb_instituicoes WHERE sigla=$${n})`
+       + ` OR (f.instituicao_id IS NULL AND $${n}='HUSF'))`;
+}
+
 export function registerIscDryrunRoutes(app, pool, adminRequired) {
   const soSuper = [adminRequired, (req, res, next) => {
     if (req.user?.super_admin || req.cookies?.adm === '1') return next();
@@ -79,6 +89,7 @@ export function registerIscDryrunRoutes(app, pool, adminRequired) {
 
   app.get('/atb/admin/historia/isc-dryrun', soSuper, async (req, res) => {
     // n inválido/negativo cai no padrão (30); teto de 100 para não estourar cota.
+    const tenant = req.atbTenant || 'HUSF';
     const nBruto = parseInt(req.query.n, 10);
     const n = Math.min(nBruto > 0 ? nBruto : 30, 100);
     const rodar = req.query.run === '1';
@@ -92,7 +103,7 @@ export function registerIscDryrunRoutes(app, pool, adminRequired) {
           <div><label class="f">Quantas fichas</label><input name="n" value="${n}" style="width:80px"></div>
           <div style="align-self:flex-end"><button type="submit">Rodar classificador</button></div>
         </form>
-        <p class="nota" style="margin-top:8px">Modelo: <code>${esc(MODEL)}</code>${DEID_ON ? ' · de-id ligada' : ''}${API_KEY ? '' : ' · <span style="color:#c5221f">ATB_NARRATIVA_API_KEY ausente</span>'}</p>
+        <p class="nota" style="margin-top:8px">Instituição: <strong>${esc(tenant)}</strong> · Modelo: <code>${esc(MODEL)}</code>${DEID_ON ? ' · de-id ligada' : ''}${API_KEY ? '' : ' · <span style="color:#c5221f">ATB_NARRATIVA_API_KEY ausente</span>'}</p>
       </div>`;
 
     if (!rodar) {
@@ -101,6 +112,9 @@ export function registerIscDryrunRoutes(app, pool, adminRequired) {
     }
 
     try {
+      const params = [];
+      const escopo = escopoTenant(tenant, params);
+      params.push(n);
       const { rows } = await pool.query(`
         SELECT f.id, f.historia_clinica, f.foco_infeccao, f.tipo_terapia, i.sigla,
                COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) AS quando
@@ -109,8 +123,9 @@ export function registerIscDryrunRoutes(app, pool, adminRequired) {
          WHERE f.deletado_em IS NULL
            AND f.historia_clinica IS NOT NULL
            AND btrim(f.historia_clinica) <> ''
+           ${escopo}
          ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC
-         LIMIT $1`, [n]);
+         LIMIT $${params.length}`, params);
 
       if (!rows.length) return res.send(page('Dry-run ISC', cab + '<div class="card"><p class="mut">Nenhuma ficha com história preenchida.</p></div>'));
 

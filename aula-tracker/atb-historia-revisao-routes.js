@@ -43,6 +43,14 @@ function filtroValido(k) {
   return typeof k === 'string' && Object.prototype.hasOwnProperty.call(FILTROS, k);
 }
 
+// Escopo de tenant. As checagens gravam a sigla em `inst`; linhas antigas sem
+// inst contam como HUSF, mesma convenção das fichas. Vale para LEITURA e para
+// ESCRITA — sem o filtro no UPDATE, um admin de um hospital poderia rotular
+// checagem do outro adivinhando o id.
+function escopoInst(n) {
+  return `(inst = $${n} OR (inst IS NULL AND $${n} = 'HUSF'))`;
+}
+
 async function garantirColunas(pool) {
   // Aditivo: a tabela é criada por atb-historia-routes.js; aqui só o rótulo.
   await pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS revisao TEXT`);
@@ -62,6 +70,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
   // ── TELA ──────────────────────────────────────────────────────────────────
   app.get('/atb/admin/historia/revisao', gate, async (req, res) => {
     try {
+      const tenant = req.atbTenant || 'HUSF';
       const chave = filtroValido(req.query.f) ? req.query.f : 'pendentes';
       const filtro = FILTROS[chave];
 
@@ -78,7 +87,8 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
           count(*) FILTER (WHERE narrativa = true  AND revisao = 'acertou')::int AS fn_ok,
           count(*) FILTER (WHERE narrativa = true  AND revisao = 'errou')::int   AS fn_erro,
           count(*) FILTER (WHERE override = true)::int                         AS overrides
-        FROM atb_historia_checagens`);
+        FROM atb_historia_checagens
+         WHERE ${escopoInst(1)}`, [tenant]);
 
       const revFalse = m.fp_ok + m.fp_erro;      // sinalizadas já revisadas
       const revTrue = m.fn_ok + m.fn_erro;       // passadas já revisadas
@@ -87,9 +97,9 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
         SELECT id, inst, historia, disponivel, narrativa, aviso, override, motivo,
                revisao, revisado_em, created_at
           FROM atb_historia_checagens
-         WHERE ${filtro.where}
+         WHERE (${filtro.where}) AND ${escopoInst(1)}
          ORDER BY created_at DESC
-         LIMIT 60`);
+         LIMIT 60`, [tenant]);
 
       const abas = Object.keys(FILTROS).map((k) =>
         k === chave
@@ -129,6 +139,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
       res.send(page('Revisão do gatilho de história', `
         <div class="card">
           <h1>Qualidade do gatilho de história</h1>
+          <p class="nota">Instituição: <strong>${esc(tenant)}</strong></p>
           <p class="mut">O modelo classifica a história como narrativa ou telegráfica. Aqui você julga o classificador: lendo o caso, a IA acertou? Os rótulos medem as duas direções de erro e servem de conjunto de avaliação para calibrar o gatilho.</p>
         </div>
 
@@ -181,7 +192,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
         await pool.query(
           `UPDATE atb_historia_checagens
               SET revisao = $2, revisado_em = CASE WHEN $2 IS NULL THEN NULL ELSE now() END
-            WHERE id = $1`, [id, valor]);
+            WHERE id = $1 AND ${escopoInst(3)}`, [id, valor, req.atbTenant || 'HUSF']);
       }
     } catch (e) {
       console.error('[historia-revisao] gravar:', e.message);

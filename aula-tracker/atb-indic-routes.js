@@ -54,10 +54,12 @@ function limitar(ip) {
   return { ok: true, restam: LIMITE_HORA - lista.length };
 }
 
-async function chamarLLM(system, user, maxTokens = 400) {
+async function chamarLLM(system, user, maxTokens = 400, rotulo = 'llm') {
   if (!API_KEY) throw new Error('ATB_NLQ_API_KEY não configurada.');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT);
+  const t0 = Date.now();
+  const entradaChars = system.length + user.length;
   try {
     const r = await fetch(`${API_URL}/chat/completions`, {
       method: 'POST',
@@ -77,8 +79,11 @@ async function chamarLLM(system, user, maxTokens = 400) {
       throw new Error(`API HTTP ${r.status} ${corpo.slice(0, 200)}`);
     }
     const d = await r.json();
-    if (d?.usage?.estimated_cost != null) console.log('[indic] custo', d.usage.estimated_cost);
+    console.log(`[indic] ${rotulo}: ${Date.now()-t0}ms | entrada ${entradaChars} chars | custo ${d?.usage?.estimated_cost ?? '?'}`);
     return (d?.choices?.[0]?.message?.content || '').trim();
+  } catch (e) {
+    console.error(`[indic] ${rotulo} FALHOU após ${Date.now()-t0}ms | entrada ${entradaChars} chars | ${e.message}`);
+    throw e;
   } finally { clearTimeout(t); }
 }
 
@@ -119,7 +124,7 @@ export function registerIndicRoutes(app, deps = {}) {
     try {
       // 1) LOCALIZAR
       passo = 'localizar';
-      const bruto = await chamarLLM(promptLocalizador(), pergunta, 300);
+      const bruto = await chamarLLM(promptLocalizador(), pergunta, 300, 'localizar');
       const loc = parseLocalizador(bruto);
       if (!loc) return res.json({ resposta: 'Não consegui interpretar a pergunta. Tente citar o setor e o indicador (ex.: "PAV na UTI A/B em 2025").' });
       if (loc.erro) return res.json({ resposta: `Não reconheci um termo da pergunta: ${loc.erro}. Os indicadores disponíveis são de IRAS, MDR e consumo de ATB por setor.`, localizador: loc });
@@ -137,8 +142,16 @@ export function registerIndicRoutes(app, deps = {}) {
       // 3) VERBALIZAR (ancorado só nos fatos)
       const contexto = JSON.stringify({ pergunta, dados_resolvidos: fatos }, null, 1);
       passo = 'verbalizar';
-      const resposta = await chamarLLM(promptVerbalizador(),
-        `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`, 260);
+      const msgUser = `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`;
+      let resposta;
+      try {
+        resposta = await chamarLLM(promptVerbalizador(), msgUser, 260, 'verbalizar');
+      } catch (e1) {
+        // Uma nova tentativa: a falha observada é intermitente (mesma pergunta
+        // funciona em outra hora), compatível com latência transitória do provedor.
+        console.warn('[indic] verbalizar falhou; tentando 1x mais');
+        resposta = await chamarLLM(promptVerbalizador(), msgUser, 260, 'verbalizar-retry');
+      }
 
       return res.json({ resposta, localizador: loc, fatos, periodoBase: fatos.periodoBase });
     } catch (e) {

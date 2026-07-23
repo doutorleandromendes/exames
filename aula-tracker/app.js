@@ -22,6 +22,7 @@ import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADI
 import { registerNlqRoutes } from './atb-nlq-routes.js';   // ← ADICIONAR (pergunta em PT → SQL, admin, read-only)
 import { registerHistoriaRoutes } from './atb-historia-routes.js';   // ← ADICIONAR (nudge de história narrativa)
 import { registerHistoriaRevisaoRoutes } from './atb-historia-revisao-routes.js';   // ← ADICIONAR (revisão da qualidade do gatilho)
+import { registerIscDryrunRoutes } from './atb-historia-isc-dryrun.js';   // ← ADICIONAR (dry-run do classificador de ISC)
 import { registerIndicRoutes } from './atb-indic-routes.js';   // ← ADICIONAR (perguntas aos indicadores SCIH)
 import { registerFormTesteRoutes } from './atb-form-teste-routes.js';   // ← ADICIONAR (dry-run do form, admin)
 import { registerFormTransportadorRoutes } from './atb-form-transportador.js';   // ← ADICIONAR (promoção teste→produção)
@@ -194,6 +195,8 @@ try { registerHistoriaRoutes(app, pool); }
 catch (e) { console.error('ERRO registerHistoriaRoutes', e); }
 try { registerHistoriaRevisaoRoutes(app, pool, adminRequired); }
 catch (e) { console.error('ERRO registerHistoriaRevisaoRoutes', e); }
+try { registerIscDryrunRoutes(app, pool, adminRequired); }
+catch (e) { console.error('ERRO registerIscDryrunRoutes', e); }
 try { registerIndicRoutes(app, { adminRequired }); }
 catch (e) { console.error('ERRO registerIndicRoutes', e); }
 try { registerFormTesteRoutes(app, pool, adminRequired); }

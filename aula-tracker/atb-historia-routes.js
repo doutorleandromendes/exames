@@ -58,7 +58,7 @@ const RESPONSE_FORMAT = {
 // alguém, no futuro, digitar um identificador no texto livre. Mascaramento
 // conservador: prefixos de nome (Sr./Sra./Dr./RN), prontuário/registro com
 // número, e datas. Roda em ~0ms.
-function deidentificar(texto) {
+export function deidentificar(texto) {
   let t = String(texto);
   // "Sr./Sra./Dr./Dra./RN + Nome Próprio" → prefixo + [NOME]
   t = t.replace(/\b(Sr\.?|Sra\.?|Dr\.?|Dra\.?|RN)\s+[A-ZÀ-Ý][\wÀ-ÿ]+(?:\s+(?:d[aeo]s?\s+)?[A-ZÀ-Ý][\wÀ-ÿ]+){0,3}/g, '$1 [NOME]');

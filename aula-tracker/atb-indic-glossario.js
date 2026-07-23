@@ -52,16 +52,16 @@ export const INDICADORES = {
              setores: ['utiAB', 'utic', 'utiNeo'], familia: 'iras', limiar: 'ipcsMax',
              sin: ['ipcs', 'corrente sanguinea', 'bacteremia', 'infeccao de cateter', 'icsl', 'primaria'] },
   tot:     { rotulo: 'Taxa global de IRAS do setor', unidade: '/1000 pacientes-dia',
-             setores: ['utiAB', 'utic'], familia: 'iras', limiar: 'totMax',
+             setores: ['utiAB', 'utic'], familia: 'iras', limiar: 'totMax', limiarMin: 'totMin',
              sin: ['total', 'taxa total', 'iras total', 'infeccao total', 'global do setor'] },
   taxaIH:  { rotulo: 'Taxa de infecção hospitalar', unidade: '%',
              setores: ['global', 'clinicaMedica', 'clinicaCirurgica', 'epm'], familia: 'iras',
              sin: ['taxa ih', 'taxa de infeccao', 'infeccao hospitalar', 'taxa de ih'] },
   // -------- uso de dispositivos (família 'iras') ---------------------------
   svd:     { rotulo: 'Utilização de SVD', unidade: '%', setores: ['utiAB', 'utic'],
-             familia: 'iras', limiar: 'svdMax', sin: ['svd', 'sonda vesical', 'uso de sonda'] },
+             familia: 'iras', limiar: 'svdMax', limiarMin: 'svdMin', sin: ['svd', 'sonda vesical', 'uso de sonda'] },
   cvc:     { rotulo: 'Utilização de CVC', unidade: '%', setores: ['utiAB', 'utic'],
-             familia: 'iras', limiar: 'cvcMax', sin: ['cvc', 'cateter central', 'uso de cateter'] },
+             familia: 'iras', limiar: 'cvcMax', limiarMin: 'cvcMin', sin: ['cvc', 'cateter central', 'uso de cateter'] },
   hm:      { rotulo: 'Adesão à higiene das mãos', unidade: '%',
              setores: ['utiAB', 'utic', 'clinicaMedica', 'clinicaCirurgica', 'epm'], familia: 'iras',
              sin: ['higiene das maos', 'hm', 'lavagem de maos', 'adesao higiene'] },
@@ -75,36 +75,39 @@ export const INDICADORES = {
              sin: ['mdr', 'multirresistente', 'multirresistencia', 'kpc', 'esbl', 'acinetobacter', 'resistencia'] },
   // -------- DOT (família 'dot': TEM Mann-Kendall/joinpoint) ----------------
   dddPip:   { rotulo: 'Consumo de piperacilina-tazobactam', unidade: 'DDD/1000 pac-dia',
-              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'pip', limiar: 'pipMax',
+              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'pip', limiar: 'pipMax', limiarMin: 'pipMin',
               sin: ['pipe', 'piperacilina', 'tazo', 'tazocin'] },
   dddCarba: { rotulo: 'Consumo de carbapenêmicos', unidade: 'DDD/1000 pac-dia',
-              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'cbp', limiar: 'carbaMax',
+              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'cbp', limiar: 'carbaMax', limiarMin: 'carbaMin',
               sin: ['carbapenemico', 'carbapenem', 'meropenem', 'meropenem'] },
   dddGlico: { rotulo: 'Consumo de glicopeptídeos', unidade: 'DDD/1000 pac-dia',
-              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'gpp', limiar: 'glicoMax',
+              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'gpp', limiar: 'glicoMax', limiarMin: 'glicoMin',
               sin: ['glicopeptideo', 'vancomicina', 'vanco', 'teico'] },
   dddPoli:  { rotulo: 'Consumo de polimixinas', unidade: 'DDD/1000 pac-dia',
-              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'pb', limiar: 'poliMax',
+              setores: ['utiAB', 'utic'], familia: 'dot', chaveStats: 'pb', limiar: 'poliMax', limiarMin: 'poliMin',
               sin: ['polimixina', 'poli', 'colistina'] },
 };
 
 // ── Âncoras estatísticas disponíveis por família ────────────────────────────
-// É o mapa que impede o modelo de afirmar tendência onde não há teste.
+// Metodologia conforme as NOTAS METODOLÓGICAS do próprio painel do SCIH.
+// (Correção importante: as taxas de IRAS TÊM modelo estatístico — os limiares
+// são o intervalo de predição de 95% de uma regressão, não um corte arbitrário.)
 export const ANCORAS = {
   iras: {
-    testeSignificancia: false,
-    disponivel: ['limiar de endemicidade (limiares)', 'classificação endêmica (status)', 'série histórica'],
-    regra: 'NÃO existe teste de significância para taxas de IRAS. Descreva o valor, compare com o limiar de endemicidade e cite o status. NUNCA afirme "aumento/queda significativa" nem "tendência estatística".',
+    testeSignificancia: true,
+    metodo: 'Regressão multivariada binomial negativa ou de Poisson (conforme a frequência de desfechos). Os limiares mínimo e máximo são o INTERVALO DE PREDIÇÃO DE 95% do modelo ajustado sobre a série histórica. Endemicidade global e HD: teste binomial exato de Clopper-Pearson, com limiar pelo IC95% sobre biênio de referência.',
+    classificacao: 'Endêmico = dentro dos limiares previstos pelo modelo. Alerta supraendêmico = acima do limiar máximo. Atividade excepcional = aumento sustentado por ≥3 competências consecutivas acima do limiar.',
+    regra: 'A leitura correta é POSICIONAL, contra o modelo: compare o valor com o limiar previsto (IP95%) e use a classificação de status. Valor dentro dos limiares = variação compatível com o previsto (NÃO é aumento real). Acima do limiar máximo = alerta supraendêmico. Não use Mann-Kendall aqui: a tendência destas séries é avaliada pelo modelo de predição, não por teste de tendência monotônica.',
   },
   mdr: {
     testeSignificancia: true,
-    disponivel: ['Mann-Kendall (mdr_mensal)', 'joinpoint', 'CUSUM', 'IC-Poisson 2026'],
-    regra: 'Use o veredito do Mann-Kendall (tendencia + sig + p). Se sig=false, diga explicitamente que a tendência NÃO é estatisticamente significativa.',
+    metodo: 'Regressão multivariada de Poisson com teste de tendência de Cochran-Armitage; limiar de endemicidade por Clopper-Pearson sobre biênio base. Complementarmente: Mann-Kendall mensal, CUSUM e IC-Poisson.',
+    regra: 'Use o veredito do Mann-Kendall (tendencia + sig + p) quando presente e, se houver, o IC-Poisson. Se sig=false, diga explicitamente que a tendência NÃO é estatisticamente significativa.',
   },
   dot: {
     testeSignificancia: true,
-    disponivel: ['Mann-Kendall (dot_mensal_por_par / dot_institucional)', 'joinpoint'],
-    regra: 'Use o veredito do Mann-Kendall (tendencia + sig + p). Se sig=false, diga explicitamente que a tendência NÃO é estatisticamente significativa.',
+    metodo: 'Mann-Kendall e joinpoint sobre a série mensal de consumo; limiares por intervalo de predição de 95% do modelo de regressão.',
+    regra: 'Use o veredito do Mann-Kendall (tendencia + sig + p). Se sig=false, diga explicitamente que a tendência NÃO é estatisticamente significativa. Compare também o valor com o limiar previsto.',
   },
 };
 
@@ -142,18 +145,25 @@ REGRA INVIOLÁVEL: se a pergunta mencionar algo que não está nas listas acima,
 
 // ── Prompt do passo 3 (verbalizar) — o anti-delírio ─────────────────────────
 export function promptVerbalizador() {
-  return `Você é um assistente de vigilância epidemiológica do SCIH. Você recebe DADOS JÁ RESOLVIDOS (valores reais extraídos dos indicadores) e responde à pergunta do usuário em português, de forma conversacional e concisa.
+  return `Você é o assistente de vigilância epidemiológica do SCIH conversando com um profissional da equipe. Você recebe DADOS JÁ RESOLVIDOS (valores reais dos indicadores) e responde à pergunta de forma direta e conversacional — como um colega competente responderia, não como um relatório.
 
-REGRAS INVIOLÁVEIS (violá-las é erro grave):
-1. Use APENAS os números que estão nos DADOS. Nunca invente, estime ou recalcule valores.
-2. Sobre TENDÊNCIA (aumento/queda/estável):
-   - Se os DADOS trazem um teste estatístico (mann_kendall/cusum/ic_poisson), use o veredito dele.
-     Se sig=false, diga EXPLICITAMENTE que a variação NÃO é estatisticamente significativa.
-   - Se os DADOS dizem "sem teste de significância disponível", você NÃO pode afirmar que houve
-     aumento ou queda real. Descreva os valores observados, compare com o limiar de endemicidade
-     e com o status, e diga com franqueza que não há teste estatístico para essa série.
-3. Nunca dê conselho clínico nem recomende conduta. Você descreve indicadores.
-4. Se os DADOS estiverem vazios ou incompletos, diga o que falta — não preencha lacunas.
-5. Cite sempre a unidade e o período dos números que usar.
-6. Seja direto: 2 a 5 frases. Sem listas longas, sem preâmbulo.`;
+TOM:
+- Responda a pergunta que foi feita, logo na primeira frase. Se a pergunta é "vem aumentando?", comece com a resposta ("Não, não há sinal de aumento..." / "Sim, houve..."), não com um preâmbulo de valores.
+- Português natural, fluido. Nada de "Em [mês], a taxa de X foi de Y" como abertura padrão.
+- 2 a 4 frases. Sem listas, sem cabeçalhos, sem repetir tudo que está nos dados.
+- Pode usar os números para sustentar o que afirma, mas eles servem ao argumento — não são o argumento.
+
+COMO LER A ESTATÍSTICA (inviolável — a resposta tem que ser fiel ao método):
+- Os limiares (limiarMax/limiarMin) NÃO são cortes arbitrários: são o intervalo de predição de 95% de um modelo de regressão (binomial negativa ou Poisson) ajustado sobre a série histórica. Estar dentro deles significa "compatível com o previsto".
+- Use o campo "avaliacaoLimiar" já calculado: posicao ("dentro"/"acima"/"abaixo") e mesesAcimaConsecutivos.
+  · dentro → a variação é compatível com o previsto pelo modelo. NÃO chame isso de aumento real.
+  · acima do limiar máximo → alerta supraendêmico.
+  · ≥3 competências consecutivas acima → atividade excepcional.
+- Quando houver "veredito" de Mann-Kendall (MDR/consumo), use-o: se sig=false, diga explicitamente que a tendência não é estatisticamente significativa.
+- Nunca calcule estatística por conta própria, nunca invente número, nunca contrarie a classificação de status.
+
+OUTRAS REGRAS:
+- Use APENAS os números dos DADOS. Cite a unidade quando o número for o ponto da frase.
+- Nunca dê conselho clínico nem recomende conduta.
+- Se faltar dado, diga o que falta em vez de preencher a lacuna.`;
 }

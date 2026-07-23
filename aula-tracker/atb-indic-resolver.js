@@ -85,14 +85,13 @@ function pontos(serie, periodo) {
 // ── Veredito estatístico disponível para a família ─────────────────────────
 function anexarEstatistica(stats, setor, indicKey, indic) {
   const fam = indic.familia;
-  // Enxuto por item: a `regra` e a lista `disponivel` da família são içadas
-  // uma única vez pelo resolver (out.ancoragem) — repeti-las por item inflava
-  // o contexto enviado ao verbalizador sem acrescentar informação.
-  const base = { familia: fam, testeSignificancia: ANCORAS[fam]?.testeSignificancia ?? false };
-  if (!stats || fam === 'iras') {
-    return { ...base, veredito: null,
-      nota: 'Sem teste de significância disponível para esta série.' };
+  const base = { familia: fam, testeSignificancia: true, metodo: ANCORAS[fam]?.metodo || null };
+  if (fam === 'iras') {
+    // A ancoragem das IRAS é POSICIONAL (valor vs intervalo de predição de 95%
+    // do modelo) + a classificação de status — não um teste de tendência.
+    return { ...base, veredito: null, leitura: 'posicional-vs-modelo' };
   }
+  if (!stats) return { ...base, veredito: null, nota: 'Análises do R indisponíveis no momento.' };
   const suf = SUFIXO_STATS[setor];
   if (fam === 'dot' && indic.chaveStats && suf) {
     const mk = stats.dot_mensal_por_par?.[`${indic.chaveStats}_${suf}`]?.mann_kendall
@@ -148,13 +147,41 @@ export function resolver(dados, loc) {
         continue;
       }
       const pts = pontos(serie, loc.periodo);
-      const limiar = indic.limiar ? (bloco.limiares?.[indic.limiar] ?? null) : null;
+      const limiarMax = indic.limiar    ? (bloco.limiares?.[indic.limiar]    ?? null) : null;
+      const limiarMin = indic.limiarMin ? (bloco.limiares?.[indic.limiarMin] ?? null) : null;
+
+      // Leitura POSICIONAL contra o intervalo de predição de 95% do modelo.
+      // É isto que responde "houve aumento real?" para taxas de IRAS:
+      // dentro do IP = compatível com o previsto; acima do máximo = supraendêmico;
+      // ≥3 competências consecutivas acima = atividade excepcional.
+      function posicaoDe(v) {
+        if (v == null) return null;
+        if (limiarMax != null && v > limiarMax) return 'acima';
+        if (limiarMin != null && v < limiarMin) return 'abaixo';
+        if (limiarMax == null && limiarMin == null) return null;
+        return 'dentro';
+      }
+      let consec = 0;
+      for (let i = serie.length - 1; i >= 0; i--) {
+        const v = serie[i]?.v;
+        if (limiarMax != null && v != null && v > limiarMax) consec++; else break;
+      }
+      const ultimo = serie[serie.length - 1];
+      const avaliacaoLimiar = (limiarMax != null || limiarMin != null) ? {
+        posicaoUltimo: posicaoDe(ultimo?.v),
+        posicaoNoPeriodo: pts.map(x => ({ periodo: x.p, valor: x.v ?? null, posicao: posicaoDe(x.v) })),
+        mesesAcimaConsecutivos: consec,
+        classificacao: consec >= 3 ? 'atividade excepcional (≥3 competências acima do limiar)'
+                     : (posicaoDe(ultimo?.v) === 'acima' ? 'alerta supraendêmico' : 'dentro do previsto pelo modelo'),
+      } : null;
+
       out.itens.push({
         setor, setorRotulo: SETORES[setor]?.rotulo || setor,
         indicador: ik, indicadorRotulo: indic.rotulo, unidade: indic.unidade,
         pontos: pts.map(x => ({ periodo: x.p, valor: x.v ?? null, ...(x.e !== undefined ? { esbl: x.e, kpc: x.k, acin: x.a } : {}) })),
         serieCompleta: (loc.periodo?.tipo === 'serie') ? undefined : serie.slice(-8).map(x => ({ periodo: x.p, valor: x.v ?? null })),
-        limiarEndemicidade: limiar,
+        limiarMax, limiarMin,
+        avaliacaoLimiar,
         statusSetor: bloco.status ?? null,
         estatistica: anexarEstatistica(stats, setor, ik, indic),
       });

@@ -596,14 +596,18 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
     try {
       const schema = await getFormSchema(pool, inst);
       const alvo = req.query.alvo ? String(req.query.alvo) : '';
-      let tipo = ['requiredCond', 'ambos'].includes(req.query.tipo) ? req.query.tipo : 'cond';
+      // A allowlist precisa espelhar a do POST /salvar — se 'narrativaCond' faltar
+      // aqui, a edição cai em 'cond', lê campo.cond (inexistente) e a tela abre em
+      // branco, como se a regra fosse nova.
+      let tipo = ['requiredCond', 'ambos', 'narrativaCond'].includes(req.query.tipo) ? req.query.tipo : 'cond';
       let juncao = 'all', conds = [], escopo = 'campo', complexo = false, raw = null;
       if (alvo) {
         const r = resolverAlvo(schema, alvo);
         escopo = r.escopo;
         if (escopo === 'secao') tipo = 'cond';
         // se cond e requiredCond forem idênticas, oferece edição unificada
-        if (tipo !== 'ambos' && r.obj && r.obj.cond && r.obj.requiredCond
+        // (não vale para narrativaCond: é um eixo próprio, não se unifica com cond)
+        if (tipo !== 'ambos' && tipo !== 'narrativaCond' && r.obj && r.obj.cond && r.obj.requiredCond
             && JSON.stringify(r.obj.cond) === JSON.stringify(r.obj.requiredCond)) {
           tipo = 'ambos';
         }

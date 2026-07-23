@@ -85,7 +85,10 @@ function pontos(serie, periodo) {
 // ── Veredito estatístico disponível para a família ─────────────────────────
 function anexarEstatistica(stats, setor, indicKey, indic) {
   const fam = indic.familia;
-  const base = { familia: fam, ...ANCORAS[fam] };
+  // Enxuto por item: a `regra` e a lista `disponivel` da família são içadas
+  // uma única vez pelo resolver (out.ancoragem) — repeti-las por item inflava
+  // o contexto enviado ao verbalizador sem acrescentar informação.
+  const base = { familia: fam, testeSignificancia: ANCORAS[fam]?.testeSignificancia ?? false };
   if (!stats || fam === 'iras') {
     return { ...base, veredito: null,
       nota: 'Sem teste de significância disponível para esta série.' };
@@ -157,6 +160,16 @@ export function resolver(dados, loc) {
       });
       if (!pts.length) out.avisos.push(`Período não encontrado na série de ${indic.rotulo} (${SETORES[setor]?.rotulo || setor}).`);
     }
+  }
+  // Regras de ancoragem: uma vez por família presente (não por item).
+  const fams = [...new Set(out.itens.map(i => i.estatistica?.familia).filter(Boolean))];
+  out.ancoragem = {};
+  for (const f of fams) if (ANCORAS[f]) out.ancoragem[f] = ANCORAS[f].regra;
+
+  // Guarda contra payload patológico (ex.: 3 setores x 4 indicadores x série cheia)
+  if (out.itens.length > 6) {
+    out.avisos.push(`A pergunta abrange ${out.itens.length} combinações; mostrando as 6 primeiras.`);
+    out.itens = out.itens.slice(0, 6);
   }
   return out;
 }

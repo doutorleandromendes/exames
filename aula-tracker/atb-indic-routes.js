@@ -36,7 +36,7 @@ const MODEL   = process.env.ATB_INDIC_MODEL || 'meta-llama/Llama-3.3-70B-Instruc
 const ORIGENS = (process.env.ATB_INDIC_ORIGENS || 'https://scih.lcmendes.med.br')
   .split(',').map(s => s.trim()).filter(Boolean);
 const LIMITE_HORA = parseInt(process.env.ATB_INDIC_LIMITE || '8', 10);
-const TIMEOUT = 25000;
+const TIMEOUT = 45000;   // igual ao NL→SQL (proven): 25s era curto p/ o passo de verbalizar
 
 // ── Rate-limit em memória (janela deslizante de 1h por IP) ──────────────────
 // Em memória basta: reinício do Render zera, e o custo por pergunta é ínfimo.
@@ -138,7 +138,7 @@ export function registerIndicRoutes(app, deps = {}) {
       const contexto = JSON.stringify({ pergunta, dados_resolvidos: fatos }, null, 1);
       passo = 'verbalizar';
       const resposta = await chamarLLM(promptVerbalizador(),
-        `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`, 500);
+        `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`, 260);
 
       return res.json({ resposta, localizador: loc, fatos, periodoBase: fatos.periodoBase });
     } catch (e) {

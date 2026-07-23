@@ -54,7 +54,7 @@ function limitar(ip) {
   return { ok: true, restam: LIMITE_HORA - lista.length };
 }
 
-async function chamarLLM(system, user, jsonMode) {
+async function chamarLLM(system, user, maxTokens = 400) {
   if (!API_KEY) throw new Error('ATB_NLQ_API_KEY não configurada.');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT);
@@ -65,7 +65,10 @@ async function chamarLLM(system, user, jsonMode) {
       signal: ctrl.signal,
       body: JSON.stringify({
         model: MODEL, temperature: 0,
-        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        // Sem response_format: é a configuração comprovada nesta stack (NL→SQL).
+        // O modo json_object sem schema pode gerar saída sem parada e estourar o
+        // timeout. O parse do localizador já extrai o primeiro {...} com robustez.
+        max_tokens: maxTokens,   // guarda contra geração desenfreada
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
       }),
     });
@@ -112,14 +115,17 @@ export function registerIndicRoutes(app, deps = {}) {
     const pergunta = String(req.body?.pergunta || '').trim().slice(0, 400);
     if (!pergunta) return res.status(400).json({ erro: 'Pergunta vazia.' });
 
+    let passo = 'inicio';
     try {
       // 1) LOCALIZAR
-      const bruto = await chamarLLM(promptLocalizador(), pergunta, true);
+      passo = 'localizar';
+      const bruto = await chamarLLM(promptLocalizador(), pergunta, 300);
       const loc = parseLocalizador(bruto);
       if (!loc) return res.json({ resposta: 'Não consegui interpretar a pergunta. Tente citar o setor e o indicador (ex.: "PAV na UTI A/B em 2025").' });
       if (loc.erro) return res.json({ resposta: `Não reconheci um termo da pergunta: ${loc.erro}. Os indicadores disponíveis são de IRAS, MDR e consumo de ATB por setor.`, localizador: loc });
 
       // 2) RESOLVER (determinístico)
+      passo = 'carregar-dados';
       const dados = await carregarDados();
       const fatos = resolver(dados, loc);
       if (!fatos.itens.length) {
@@ -130,12 +136,13 @@ export function registerIndicRoutes(app, deps = {}) {
 
       // 3) VERBALIZAR (ancorado só nos fatos)
       const contexto = JSON.stringify({ pergunta, dados_resolvidos: fatos }, null, 1);
+      passo = 'verbalizar';
       const resposta = await chamarLLM(promptVerbalizador(),
-        `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`, false);
+        `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`, 500);
 
       return res.json({ resposta, localizador: loc, fatos, periodoBase: fatos.periodoBase });
     } catch (e) {
-      console.error('[indic]', e.message);
+      console.error(`[indic] falha no passo "${passo}":`, e.message);
       return res.status(503).json({ erro: 'Serviço de perguntas indisponível no momento.' });
     }
   });

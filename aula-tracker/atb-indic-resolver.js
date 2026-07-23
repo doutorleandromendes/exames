@@ -167,12 +167,24 @@ export function resolver(dados, loc) {
         if (limiarMax != null && v != null && v > limiarMax) consec++; else break;
       }
       const ultimo = serie[serie.length - 1];
+      const posUlt = posicaoDe(ultimo?.v);
+      const faixa = [
+        limiarMin != null ? `piso ${limiarMin}` : null,
+        limiarMax != null ? `teto ${limiarMax}` : null,
+      ].filter(Boolean).join(' / ');
       const avaliacaoLimiar = (limiarMax != null || limiarMin != null) ? {
-        posicaoUltimo: posicaoDe(ultimo?.v),
+        posicaoUltimo: posUlt,
         posicaoNoPeriodo: pts.map(x => ({ periodo: x.p, valor: x.v ?? null, posicao: posicaoDe(x.v) })),
         mesesAcimaConsecutivos: consec,
-        classificacao: consec >= 3 ? 'atividade excepcional (≥3 competências acima do limiar)'
-                     : (posicaoDe(ultimo?.v) === 'acima' ? 'alerta supraendêmico' : 'dentro do previsto pelo modelo'),
+        // O número vai DENTRO da frase: a comparação "valor contra teto" é a
+        // informação principal e precisa chegar legível ao verbalizador.
+        classificacao: consec >= 3
+          ? `atividade excepcional — ${consec} competências consecutivas acima do ${faixa}`
+          : (posUlt === 'acima'
+              ? `alerta supraendêmico — último valor ${ultimo?.v} acima do ${faixa}`
+              : posUlt === 'abaixo'
+                ? `abaixo do previsto pelo modelo — último valor ${ultimo?.v} abaixo do ${faixa}`
+                : `dentro do previsto pelo modelo — último valor ${ultimo?.v} dentro da faixa (${faixa})`),
       } : null;
 
       out.itens.push({

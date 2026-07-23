@@ -22,7 +22,9 @@
 // Env:
 //   ATB_NLQ_API_KEY    — chave DeepInfra (a mesma do NL→SQL).
 //   ATB_NLQ_API_URL    — default https://api.deepinfra.com/v1/openai
-//   ATB_INDIC_MODEL    — default meta-llama/Llama-3.3-70B-Instruct-Turbo
+//   ATB_INDIC_MODEL      — modelo do passo LOCALIZAR (default Llama-3.3-70B-Instruct-Turbo)
+//   ATB_INDIC_MODEL_RESP — modelo do passo VERBALIZAR (default: o mesmo acima).
+//                          Ex. rápido/barato: meta-llama/Meta-Llama-3.1-8B-Instruct
 //   ATB_INDIC_ORIGENS  — origens CORS permitidas (csv). Default: o dashboard.
 //   ATB_INDIC_LIMITE   — perguntas/hora por IP (default 8).
 // ════════════════════════════════════════════════════════════════════════════
@@ -33,6 +35,10 @@ import { carregarDados, resolver } from './atb-indic-resolver.js';
 const API_URL = (process.env.ATB_NLQ_API_URL || 'https://api.deepinfra.com/v1/openai').replace(/\/$/, '');
 const API_KEY = process.env.ATB_NLQ_API_KEY || '';
 const MODEL   = process.env.ATB_INDIC_MODEL || 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
+// Passo 3 (verbalizar) só redige 2-4 frases a partir de fatos JÁ RESOLVIDOS —
+// a correção estatística vem do resolvedor, não do tamanho do modelo. Por isso
+// pode usar um modelo menor/mais rápido. Sem esta env, usa o mesmo do localizar.
+const MODEL_RESP = process.env.ATB_INDIC_MODEL_RESP || MODEL;
 const ORIGENS = (process.env.ATB_INDIC_ORIGENS || 'https://scih.lcmendes.med.br')
   .split(',').map(s => s.trim()).filter(Boolean);
 const LIMITE_HORA = parseInt(process.env.ATB_INDIC_LIMITE || '8', 10);
@@ -54,7 +60,7 @@ function limitar(ip) {
   return { ok: true, restam: LIMITE_HORA - lista.length };
 }
 
-async function chamarLLM(system, user, maxTokens = 400, rotulo = 'llm') {
+async function chamarLLM(system, user, maxTokens = 400, rotulo = 'llm', modelo = MODEL) {
   if (!API_KEY) throw new Error('ATB_NLQ_API_KEY não configurada.');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT);
@@ -66,7 +72,7 @@ async function chamarLLM(system, user, maxTokens = 400, rotulo = 'llm') {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
       signal: ctrl.signal,
       body: JSON.stringify({
-        model: MODEL, temperature: 0,
+        model: modelo, temperature: 0,
         // Sem response_format: é a configuração comprovada nesta stack (NL→SQL).
         // O modo json_object sem schema pode gerar saída sem parada e estourar o
         // timeout. O parse do localizador já extrai o primeiro {...} com robustez.
@@ -79,10 +85,10 @@ async function chamarLLM(system, user, maxTokens = 400, rotulo = 'llm') {
       throw new Error(`API HTTP ${r.status} ${corpo.slice(0, 200)}`);
     }
     const d = await r.json();
-    console.log(`[indic] ${rotulo}: ${Date.now()-t0}ms | entrada ${entradaChars} chars | custo ${d?.usage?.estimated_cost ?? '?'}`);
+    console.log(`[indic] ${rotulo}: ${Date.now()-t0}ms | ${modelo} | entrada ${entradaChars} chars | custo ${d?.usage?.estimated_cost ?? '?'}`);
     return (d?.choices?.[0]?.message?.content || '').trim();
   } catch (e) {
-    console.error(`[indic] ${rotulo} FALHOU após ${Date.now()-t0}ms | entrada ${entradaChars} chars | ${e.message}`);
+    console.error(`[indic] ${rotulo} FALHOU após ${Date.now()-t0}ms | ${modelo} | entrada ${entradaChars} chars | ${e.message}`);
     throw e;
   } finally { clearTimeout(t); }
 }
@@ -145,12 +151,12 @@ export function registerIndicRoutes(app, deps = {}) {
       const msgUser = `PERGUNTA DO USUÁRIO: ${pergunta}\n\nDADOS RESOLVIDOS (use apenas estes):\n${contexto}`;
       let resposta;
       try {
-        resposta = await chamarLLM(promptVerbalizador(), msgUser, 260, 'verbalizar');
+        resposta = await chamarLLM(promptVerbalizador(), msgUser, 260, 'verbalizar', MODEL_RESP);
       } catch (e1) {
         // Uma nova tentativa: a falha observada é intermitente (mesma pergunta
         // funciona em outra hora), compatível com latência transitória do provedor.
         console.warn('[indic] verbalizar falhou; tentando 1x mais');
-        resposta = await chamarLLM(promptVerbalizador(), msgUser, 260, 'verbalizar-retry');
+        resposta = await chamarLLM(promptVerbalizador(), msgUser, 260, 'verbalizar-retry', MODEL_RESP);
       }
 
       return res.json({ resposta, localizador: loc, fatos, periodoBase: fatos.periodoBase });

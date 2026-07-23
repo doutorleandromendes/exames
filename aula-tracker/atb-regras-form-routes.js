@@ -223,9 +223,9 @@ function paginaEditorAvancado(schema, { alvo, tipo, raw, campos }) {
     </form>`);
 }
 
-const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade', ambos: 'Visibilidade + obrigatoriedade', narrativaCond: 'Gatilho de IA — exigir história narrativa' };
+const TIPOS = { cond: 'Visibilidade', requiredCond: 'Obrigatoriedade', ambos: 'Visibilidade + obrigatoriedade', narrativaCond: 'Gatilho de IA — exigir história narrativa', iscCond: 'Gatilho de IA — triagem de ISC' };
 // tipos "físicos" que um tipo de UI escreve no schema
-const TIPOS_ALVO = { cond: ['cond'], requiredCond: ['requiredCond'], ambos: ['cond', 'requiredCond'], narrativaCond: ['narrativaCond'] };
+const TIPOS_ALVO = { cond: ['cond'], requiredCond: ['requiredCond'], ambos: ['cond', 'requiredCond'], narrativaCond: ['narrativaCond'], iscCond: ['iscCond'] };
 
 function shell(titulo, body) {
   return `<!DOCTYPE html><html lang="pt-BR"><head>
@@ -293,6 +293,7 @@ function paginaLista(schema) {
         if (c.requiredCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'requiredCond' }, alvoLabel, 'Obrigatoriedade', 'ob', descreverCond(c.requiredCond, campos), true) + '</tr>');
       }
       if (c.narrativaCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'narrativaCond' }, alvoLabel, 'Gatilho de IA (narrativa)', 'ia', descreverCond(c.narrativaCond, campos), true) + '</tr>');
+      if (c.iscCond) linhas.push('<tr>' + linhaRegra({ alvo: 'campo:' + c.key, tipo: 'iscCond' }, alvoLabel, 'Gatilho de IA (ISC)', 'ia', descreverCond(c.iscCond, campos), true) + '</tr>');
       if (c.required === true) {
         const nota = c.minChars ? `mínimo de ${c.minChars} caracteres` : 'preenchimento exigido';
         linhas.push(`
@@ -599,7 +600,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       // A allowlist precisa espelhar a do POST /salvar — se 'narrativaCond' faltar
       // aqui, a edição cai em 'cond', lê campo.cond (inexistente) e a tela abre em
       // branco, como se a regra fosse nova.
-      let tipo = ['requiredCond', 'ambos', 'narrativaCond'].includes(req.query.tipo) ? req.query.tipo : 'cond';
+      let tipo = ['requiredCond', 'ambos', 'narrativaCond', 'iscCond'].includes(req.query.tipo) ? req.query.tipo : 'cond';
       let juncao = 'all', conds = [], escopo = 'campo', complexo = false, raw = null;
       if (alvo) {
         const r = resolverAlvo(schema, alvo);
@@ -607,7 +608,7 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
         if (escopo === 'secao') tipo = 'cond';
         // se cond e requiredCond forem idênticas, oferece edição unificada
         // (não vale para narrativaCond: é um eixo próprio, não se unifica com cond)
-        if (tipo !== 'ambos' && tipo !== 'narrativaCond' && r.obj && r.obj.cond && r.obj.requiredCond
+        if (tipo !== 'ambos' && tipo !== 'narrativaCond' && tipo !== 'iscCond' && r.obj && r.obj.cond && r.obj.requiredCond
             && JSON.stringify(r.obj.cond) === JSON.stringify(r.obj.requiredCond)) {
           tipo = 'ambos';
         }
@@ -627,12 +628,14 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const schema = await getFormSchema(pool, inst);
       const r = resolverAlvo(schema, b.alvo);
       if (!r.obj) return res.status(400).send('Alvo não encontrado: ' + esc(b.alvo));
-      let tipo = ['requiredCond', 'ambos', 'narrativaCond'].includes(b.tipo) ? b.tipo : 'cond';
+      let tipo = ['requiredCond', 'ambos', 'narrativaCond', 'iscCond'].includes(b.tipo) ? b.tipo : 'cond';
       if (r.escopo === 'secao') tipo = 'cond'; // seção só tem visibilidade
       // Gatilho de IA de narrativa só faz sentido no campo historia_clinica (o engine
       // só lê historia_clinica.narrativaCond). Barra configuração inerte em outro campo.
-      if (tipo === 'narrativaCond' && b.alvo !== 'campo:historia_clinica') {
-        return res.status(400).send('O gatilho de IA de história narrativa só se aplica ao campo "historia_clinica". — <a href="javascript:history.back()">voltar</a>');
+      // Os dois gatilhos de IA leem o texto de historia_clinica — o engine só
+      // consulta historia_clinica.<tipo>. Barra configuração inerte em outro campo.
+      if ((tipo === 'narrativaCond' || tipo === 'iscCond') && b.alvo !== 'campo:historia_clinica') {
+        return res.status(400).send('Os gatilhos de IA só se aplicam ao campo "historia_clinica". — <a href="javascript:history.back()">voltar</a>');
       }
       const alvos = TIPOS_ALVO[tipo] || ['cond'];
       if (b.modo === 'json') {
@@ -661,7 +664,9 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const b = req.body || {};
       const schema = await getFormSchema(pool, inst);
       const r = resolverAlvo(schema, b.alvo);
-      let tipo = ['requiredCond', 'ambos'].includes(b.tipo) ? b.tipo : 'cond';
+      // BUG corrigido: sem os tipos de IA aqui, excluir uma regra de gatilho caía
+      // em 'cond' e apagava a VISIBILIDADE do campo, deixando a regra de IA viva.
+      let tipo = ['requiredCond', 'ambos', 'narrativaCond', 'iscCond'].includes(b.tipo) ? b.tipo : 'cond';
       if (r.escopo === 'secao') tipo = 'cond';
       const alvos = TIPOS_ALVO[tipo] || ['cond'];
       if (r.obj) { alvos.forEach(t => delete r.obj[t]); await saveFormSchema(pool, inst, schema, req.user?.id || null); }

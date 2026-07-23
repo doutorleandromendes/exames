@@ -23,7 +23,7 @@
 
 import { getLatestHealthcheck, renderHealthCard } from './atb-healthcheck.js';
 
-const ehAdmin = req => req.cookies?.adm === '1';
+export const ehAdmin = req => req.cookies?.adm === '1';
 
 function normIp(ip) { return String(ip || '').replace(/^::ffff:/i, '').trim(); }
 function ipv4ToInt(ip) {
@@ -53,7 +53,7 @@ function ipDoHospital(ipRaw) {
 
 // IP real do cliente atrás de Cloudflare+Render: CF-Connecting-IP é o mais
 // confiável (a Cloudflare sobrescreve); senão o 1º IP do X-Forwarded-For.
-function ipCliente(req) {
+export function ipCliente(req) {
   const cf = req.headers['cf-connecting-ip'];
   if (cf) return cf.trim();
   const xff = req.headers['x-forwarded-for'];
@@ -69,7 +69,7 @@ function tenantIpLivre(req) {
   const t = req && req.atbTenant ? String(req.atbTenant).toUpperCase() : null;
   return !!(t && livres.includes(t));
 }
-function temAcesso(req) {
+export function temAcesso(req) {
   if (tenantIpLivre(req)) return true;             // tenant isento da checagem de IP (por config)
   return ehAdmin(req) || ipDoHospital(ipCliente(req));
 }
@@ -131,7 +131,7 @@ function _layout(titulo, miolo) {
 <body>${miolo}</body></html>`;
 }
 
-function paginaRestrito(req) {
+export function paginaRestrito(req) {
   const ip  = req ? normIp(ipCliente(req)) : '';
   const xff = req ? (req.headers['x-forwarded-for'] || '') : '';
   const temCfg = !!(process.env.HOSPITAL_IPS || '').trim();

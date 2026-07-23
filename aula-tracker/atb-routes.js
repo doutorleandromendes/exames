@@ -23,6 +23,8 @@ import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
 import { registerConsultaRoutes } from './atb-consulta-routes.js';
+import { registerExportRoutes } from './atb-export-routes.js';
+import { registerRelatorioIndicRoutes } from './atb-relatorio-indic-routes.js';
 import { ensureHealthcheckTable, startHealthcheckSchedule, registerHealthcheckRoutes } from './atb-healthcheck.js';
 import { ensureIntegridadeTable, startIntegridadeSchedule, registerIntegridadeRoutes } from './atb-integridade.js';
 import { ensureRegrasCheckTable, startRegrasCheckSchedule, registerRegrasCheckRoutes } from './atb-regras-check.js';
@@ -110,6 +112,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerFichaRetroRoutes(app, pool, adminRequired);
   registerAdesaoRoutes(app, pool, adminRequired);
   registerConsultaRoutes(app, pool);
+  registerExportRoutes(app, pool, adminRequired);          // CSV: /atb/admin/export (full) + /atb/export (prescritores, IP)
+  registerRelatorioIndicRoutes(app, pool, adminRequired);  // PDF de indicadores: /atb/relatorio-indicadores
   ensureHealthcheckTable(pool).then(() => startHealthcheckSchedule(pool)).catch(e => console.error('[atb] healthcheck:', e.message));
   registerHealthcheckRoutes(app, pool, adminRequired);
   ensureIntegridadeTable(pool).then(() => startIntegridadeSchedule(pool)).catch(e => console.error('[atb] integridade:', e.message));

@@ -44,7 +44,14 @@ const _arr = v => Array.isArray(v) ? v : (v == null ? [] : (typeof v === 'string
 const _obj = v => (v && typeof v === 'object' && !Array.isArray(v)) ? v
   : (typeof v === 'string' ? (() => { try { return JSON.parse(v) || {}; } catch { return {}; } })() : {});
 const _bool = b => b === true ? 'Sim' : b === false ? 'Não' : null;
-const _dt = d => d ? new Date(d).toLocaleDateString('pt-BR') : null;
+// 'YYYY-MM-DD' puro é formatado à mão: new Date('2026-07-05') é meia-noite UTC
+// e vira 04/07 em BRT. Coluna DATE (que o pg devolve como Date local) e strings
+// com hora seguem o caminho normal.
+const _dt = d => {
+  if (!d) return null;
+  const m = (typeof d === 'string') && d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : new Date(d).toLocaleDateString('pt-BR');
+};
 
 // idade calculada a partir da DN (anos; meses se <2a; dias se <2m). Fallback: idade armazenada.
 function _idade(dn, fallback) {
@@ -89,15 +96,24 @@ const KEYS_TEMATICOS = new Set([
   'atb_previos','culturas_colhidas','culturas_previas','posologia',
 ]);
 
-function blocoExtrasFormulario(schema, payload, s) {
-  if (!payload || typeof payload !== 'object') return '';
+// `ficha` entra porque um campo PROMOVIDO deixa de existir em payload_raw e
+// passa a viver na coluna f[col]. Sem esse fallback, promover um campo o fazia
+// SUMIR da ficha — exatamente o oposto do que o comentário de KEYS_TEMATICOS
+// promete. Também não se pode abortar quando payload_raw é nulo: ficha antiga
+// sem payload ainda pode ter colunas promovidas preenchidas.
+function blocoExtrasFormulario(schema, payload, s, ficha) {
+  const pl = (payload && typeof payload === 'object') ? payload : {};
+  const fx = (ficha   && typeof ficha   === 'object') ? ficha   : {};
   const pares = [];
   for (const sec of (schema && schema.secoes ? schema.secoes : []))
     for (const c of (sec.campos || [])) {
       if (!c.key || c.type === 'matrix') continue;
       const col = COLUNA_DE[c.key] || c.key;
       if (KEYS_TEMATICOS.has(col)) continue;             // já aparece num bloco temático
-      const v = payload[c.key];
+      // payload_raw manda quando a chave existe (campo ainda EXTRA); senão cai
+      // na coluna promovida. Nessa ordem: durante a promoção os dois coexistem,
+      // e o payload é o que o formulário acabou de gravar.
+      const v = (pl[c.key] !== undefined) ? pl[c.key] : fx[col];
       if (v == null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && !v.length)) continue;
       let val;
       if (c.type === 'date') val = _dt(v);
@@ -435,7 +451,7 @@ export function registerFichaViewRoutes(app, pool, adminRequired) {
       try {
         const _schema = await getFormSchema(pool, f.instituicao || 'HUSF');
         matrizes = extrairMatrizes(_schema);
-        _extrasHTML = blocoExtrasFormulario(_schema, f.payload_raw, _safe);
+        _extrasHTML = blocoExtrasFormulario(_schema, f.payload_raw, _safe, f);
       } catch (e) { console.error('[atb] matrizes/extras schema:', e.message); }
       const culturas = await buscarCulturasDaFicha(pool, f);
       res.send(paginaFichaView(f, anexos, _safe, podeEditar, matrizes, renderCulturasComplemento(culturas), _extrasHTML));

@@ -156,6 +156,63 @@ r = await post(`/isc/admin/alertas/${regra.id}/excluir`, { inst: 'HUSF' });
 t('exclui', r.status === 302);
 eq('sumiu', (await pool.query('SELECT count(*)::int n FROM isc_alerta_regras WHERE id=$1', [regra.id])).rows[0].n, 0);
 
+console.log('\n── Mudar regra NÃO reprocessa sozinho (e a tela avisa) ──');
+// O alerta é gravado quando a ficha é tocada. Mudar a regra depois deixa o
+// grid misturado: ficha contatada depois segue a regra nova, ficha parada
+// mantém a antiga. Mesmas respostas, alertas diferentes — é o que o banner
+// existe para denunciar.
+await pool.query('TRUNCATE isc_envios, isc_contatos, isc_fichas RESTART IDENTITY CASCADE');
+await pool.query(`UPDATE isc_config SET alerta_regras_em = NULL, alerta_recalc_em = NULL`);
+await pool.query(`UPDATE isc_alerta_regras SET ativo = true`);
+const mkF = async n => (await pool.query(
+  `INSERT INTO isc_fichas (instituicao_id, paciente_nome, prontuario, data_cirurgia, procedimento,
+     equipe_id, identidade_status, janelas, janelas_estado, status_vigilancia)
+   VALUES ($1,$2,'P'||$2,$3,'OPERAÇÃO CESARIANA',$4,'confirmada','[7,30]','{}','em_vigilancia') RETURNING id`,
+  [inst.id, n, D, OBST])).rows[0].id;
+const f1 = await mkF('UMA'), f2 = await mkF('DUAS');
+for (const id of [f1, f2]) {
+  await post(`/isc/admin/ficha/${id}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-X', r_febre: 'Sim', responsavel: 'Ana' });
+}
+const comAlerta = async () => (await pool.query('SELECT count(*)::int n FROM isc_fichas WHERE tem_alerta')).rows[0].n;
+eq('as duas acendem por febre', await comAlerta(), 2);
+
+let hh = await pega('/isc/admin/alertas?inst=HUSF');
+t('sem mudança de regra, sem banner', !hh.includes('ainda seguem as regras antigas'));
+
+const { rows: [rFebre] } = await pool.query(
+  `SELECT id FROM isc_alerta_regras WHERE nome='Febre' AND instituicao_id=$1`, [inst.id]);
+await post(`/isc/admin/alertas/${rFebre.id}/toggle`, { inst: 'HUSF' });
+eq('desligar a regra NÃO mexe nos alertas já gravados', await comAlerta(), 2);
+hh = await pega('/isc/admin/alertas?inst=HUSF');
+t('a tela AVISA que está desatualizado', hh.includes('ainda seguem as regras antigas'));
+t('e oferece o recálculo', hh.includes('Recalcular alertas de todas'));
+
+console.log('\n── Recalcular alinha tudo ──');
+let rr = await post('/isc/admin/alertas/recalcular?inst=HUSF', {});
+eq('responde 202 (trabalha em segundo plano)', rr.status, 202);
+eq('e diz quantas fichas entraram na fila', (await rr.json()).fichas, 2);
+await new Promise(s => setTimeout(s, 1200));
+eq('depois do reprocesso, nenhuma acende', await comAlerta(), 0);
+hh = await pega('/isc/admin/alertas?inst=HUSF');
+t('banner de desatualizado some', !hh.includes('ainda seguem as regras antigas'));
+t('e mostra quantas mudaram', hh.includes('ficha(s) mudaram'));
+
+// E o inverso: religar a regra e reprocessar traz os alertas de volta.
+await post(`/isc/admin/alertas/${rFebre.id}/toggle`, { inst: 'HUSF' });
+await post('/isc/admin/alertas/recalcular?inst=HUSF', {});
+await new Promise(s => setTimeout(s, 1200));
+eq('religar + recalcular acende de novo', await comAlerta(), 2);
+
+console.log('\n── Recálculo não estraga o que já foi feito ──');
+const { rows: [cAntes] } = await pool.query('SELECT count(*)::int n FROM isc_contatos');
+await pool.query(`UPDATE isc_fichas SET isc_classificacao='confirmada', isc_patogeno='S. aureus' WHERE id=$1`, [f1]);
+await post('/isc/admin/alertas/recalcular?inst=HUSF', {});
+await new Promise(s => setTimeout(s, 1200));
+const { rows: [cDep] } = await pool.query('SELECT count(*)::int n FROM isc_contatos');
+eq('contatos intactos', cDep.n, cAntes.n);
+const { rows: [fc] } = await pool.query('SELECT isc_classificacao, isc_patogeno FROM isc_fichas WHERE id=$1', [f1]);
+eq('classificação intacta', [fc.isc_classificacao, fc.isc_patogeno], ['confirmada', 'S. aureus']);
+
 console.log('\n── Guardas ──');
 h = await pega('/isc/admin/alertas?inst=HUSF');
 t('nav tem link de Alertas', h.includes('/isc/admin/alertas'));

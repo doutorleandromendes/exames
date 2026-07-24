@@ -313,6 +313,12 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       rotulo.telefone_presumido = 'DDD presumido'; rotulo.equipe_id = 'Equipe'; rotulo.especialidade = 'Especialidade';
       const linhasUI = itens.slice(0, 300).map(it => {
         const [bg, fg, tx] = PILL[it.status];
+        // Mostrar POR QUAL chave casou: quando o casamento vem de nome+data
+        // (o último recurso, usado na virada de layout), é bom que apareça —
+        // é o único que depende de o nome estar escrito igual dos dois lados.
+        const casou = it.casouPor
+          ? `<span class="sub">casou por <code>${safe(it.casouPor)}</code>${/^nome:/.test(it.casouPor) ? ' <b style="color:#b06000">(nome+data — confira)</b>' : ''}</span>`
+          : '';
         const compl = it.complemento
           ? `<span style="color:#1a73e8">Vai preencher: <b>${safe(Object.keys(it.complemento.campos).map(k => rotulo[k] || k).join(', '))}</b></span>`
           : '';
@@ -321,7 +327,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         const chaveTxt = (it.status === 'nova' && (it.chaves || []).length)
           ? `<span class="sub">chave: <code>${safe(it.chaves.join(' · '))}</code></span>` : '';
         const msgs = [
-          compl, chaveTxt,
+          compl, casou, chaveTxt,
           it.motivo ? `<span style="color:#5f6368">${safe(it.motivo)}</span>` : '',
           ...it.erros.map(e => `<span style="color:#c0392b">${safe(e)}</span>`),
           ...it.avisos.map(a => `<span style="color:#b06000">${safe(a)}</span>`)].filter(Boolean).join('<br>');
@@ -691,6 +697,15 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   // escopo por equipe. TODAS as regras são editáveis — as regras clínicas
   // mínimas foram semeadas no banco no primeiro boot e podem ser ajustadas ou
   // apagadas como qualquer outra.
+  // Toda alteração de regra carimba a hora: é o que permite a tela saber que os
+  // alertas já gravados ficaram velhos.
+  async function marcarRegrasMudaram(instId) {
+    if (instId == null) return;
+    await pool.query(
+      `INSERT INTO isc_config (instituicao_id, alerta_regras_em) VALUES ($1, now())
+       ON CONFLICT (instituicao_id) DO UPDATE SET alerta_regras_em = now()`, [instId]).catch(() => {});
+  }
+
   function opcoesDoCampo(key) {
     const c = CHECKLIST.find(x => x.key === key);
     if (!c) return ['Sim', 'Não'];
@@ -739,8 +754,39 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <script type="application/json" id="regra-${r.id}">${JSON.stringify({ nome: r.nome, grupos: r.grupos || [], equipe_ids: r.equipe_ids || [], ordem: r.ordem })}</script>
         </div>`;
 
+      const { rows: [cfg] } = await pool.query(
+        `SELECT alerta_regras_em, alerta_recalc_em, alerta_recalc_mudou FROM isc_config WHERE instituicao_id=$1`,
+        [instId]).catch(() => ({ rows: [] }));
+      // Desatualizado = a última mudança de regra é mais nova que o último
+      // reprocessamento. Enquanto isso, o grid mostra uma mistura: ficha tocada
+      // depois da mudança segue a regra nova; ficha parada, a antiga.
+      const desatualizado = !!(cfg?.alerta_regras_em &&
+        (!cfg.alerta_recalc_em || new Date(cfg.alerta_recalc_em) < new Date(cfg.alerta_regras_em)));
+
       const html = `<div class="isc">
         ${chrome(sigla, 'Regras de alerta', 'Quando as respostas do paciente acendem suspeita de ISC', true)}
+        ${desatualizado ? `<div class="card2" style="border-left:3px solid #f0a500;background:#fffaf2">
+          <b style="font-size:13px">Os alertas já gravados ainda seguem as regras antigas</b>
+          <p class="sub" style="margin:6px 0 10px;line-height:1.6">
+            O alerta de cada ficha é gravado quando ela é tocada — mudar uma regra <b>não</b> reprocessa
+            o que já existe. Até reprocessar, o grid mostra uma mistura: ficha contatada depois da mudança
+            segue a regra nova; ficha parada mantém a antiga.
+          </p>
+          <button class="btn" id="brecalc">Recalcular alertas de todas as fichas</button>
+          <span class="sub" id="mrecalc" style="margin-left:10px"></span>
+        </div>` : (cfg?.alerta_recalc_em ? `<p class="sub" style="margin:0 0 12px">Alertas reprocessados em ${dataBR(cfg.alerta_recalc_em)}${cfg.alerta_recalc_mudou != null ? ` · ${cfg.alerta_recalc_mudou} ficha(s) mudaram` : ''}. <a href="#" id="brecalc2">Recalcular de novo</a></p>` : '')}
+        <script>
+          function recalcISC(btn){
+            var msg=document.getElementById('mrecalc')||{};
+            if(btn) btn.disabled=true; msg.textContent='Reprocessando…';
+            fetch('/isc/admin/alertas/recalcular?inst=${encodeURIComponent(sigla || '')}',{method:'POST'})
+              .then(function(r){return r.json()})
+              .then(function(j){ msg.textContent=(j.fichas||0)+' ficha(s) na fila — recarregue em alguns segundos.'; })
+              .catch(function(){ msg.textContent='Falhou. Tente de novo.'; if(btn) btn.disabled=false; });
+          }
+          var b1=document.getElementById('brecalc'); if(b1) b1.addEventListener('click',function(){recalcISC(b1)});
+          var b2=document.getElementById('brecalc2'); if(b2) b2.addEventListener('click',function(e){e.preventDefault();recalcISC(null)});
+        </script>
         <div class="card2" style="background:#f8f9fa">
           <b style="font-size:13px">Como funciona</b>
           <p class="sub" style="margin:6px 0 0;line-height:1.6">
@@ -895,6 +941,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
              SET grupos=EXCLUDED.grupos, equipe_ids=EXCLUDED.equipe_ids, ordem=EXCLUDED.ordem, updated_at=now()`,
           [instId, nome, gj, ej, ordem]);
       }
+      await marcarRegrasMudaram(instId);
       res.redirect(`/isc/admin/alertas?${new URLSearchParams({ inst: sigla || '' })}`);
     } catch (e) { erro(res, e); }
   });
@@ -905,6 +952,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       await pool.query(
         `UPDATE isc_alerta_regras SET ativo = NOT ativo, updated_at=now()
           WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`, [Number(req.params.id), instId]);
+      await marcarRegrasMudaram(instId);
       res.redirect(`/isc/admin/alertas?${new URLSearchParams({ inst: sigla || '' })}`);
     } catch (e) { erro(res, e); }
   });
@@ -915,6 +963,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       await pool.query(
         `DELETE FROM isc_alerta_regras WHERE id=$1 AND ($2::int IS NULL OR instituicao_id=$2)`,
         [Number(req.params.id), instId]);
+      await marcarRegrasMudaram(instId);
       res.redirect(`/isc/admin/alertas?${new URLSearchParams({ inst: sigla || '' })}`);
     } catch (e) { erro(res, e); }
   });

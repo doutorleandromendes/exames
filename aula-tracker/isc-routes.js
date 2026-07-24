@@ -1163,6 +1163,45 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     } catch (e) { erro(res, e); }
   });
 
+  // ── Recalcular alertas ──────────────────────────────────────────────────
+  // O alerta é DERIVADO das respostas pelas regras vigentes — mas só é gravado
+  // quando algo mexe na ficha. Mudar uma regra não reprocessa o que já existe,
+  // e o grid fica misturado: ficha tocada depois reflete a regra nova, ficha
+  // parada mantém a antiga. Mesmas respostas, alertas diferentes.
+  //
+  // Esta rota reprocessa todas as fichas do tenant com as regras de agora.
+  // Responde 202 e trabalha em segundo plano, como o cron — reprocessar
+  // centenas de fichas não cabe no tempo de uma requisição de formulário.
+  app.post('/isc/admin/alertas/recalcular', scihRequired, async (req, res) => {
+    try {
+      const { sigla, instId } = await resolveInst(req);
+      const { rows } = await pool.query(
+        `SELECT id, tem_alerta FROM isc_fichas
+          WHERE status_vigilancia <> 'excluida' AND ($1::int IS NULL OR instituicao_id = $1)
+          ORDER BY id`, [instId]);
+
+      res.status(202).json({ ok: true, fichas: rows.length });
+
+      // Fire-and-forget: o navegador já recebeu resposta.
+      (async () => {
+        let mudaram = 0;
+        for (const f of rows) {
+          try {
+            const est = await sincronizarEstado(f.id);
+            if (est && est.tem_alerta !== f.tem_alerta) mudaram++;
+          } catch (e) { console.error('[isc] recalcular alerta ficha', f.id, e.message); }
+        }
+        await pool.query(
+          `INSERT INTO isc_config (instituicao_id, alerta_recalc_em, alerta_recalc_mudou)
+           VALUES ($1, now(), $2)
+           ON CONFLICT (instituicao_id) DO UPDATE
+             SET alerta_recalc_em = now(), alerta_recalc_mudou = EXCLUDED.alerta_recalc_mudou`,
+          [instId, mudaram]).catch(() => {});
+        console.log(`[isc] alertas recalculados: ${rows.length} ficha(s), ${mudaram} mudaram`);
+      })();
+    } catch (e) { erro(res, e); }
+  });
+
   // ── Passo 0: identidade ─────────────────────────────────────────────────
   // Registra que a colaboradora confirmou (ou não) que o número é do paciente.
   // Vale por PACIENTE (a ficha): confirmou uma vez, as janelas clínicas liberam.

@@ -283,6 +283,11 @@ export async function runIscMigrations(pool) {
     )
   `);
   await pool.query(`ALTER TABLE isc_config ADD COLUMN IF NOT EXISTS alerta_seed_em TIMESTAMPTZ`);
+  // Quando as regras de alerta mudaram e quando os alertas foram reprocessados.
+  // Se a mudança é mais recente que o recálculo, o grid está desatualizado.
+  await pool.query(`ALTER TABLE isc_config ADD COLUMN IF NOT EXISTS alerta_regras_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE isc_config ADD COLUMN IF NOT EXISTS alerta_recalc_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE isc_config ADD COLUMN IF NOT EXISTS alerta_recalc_mudou INTEGER`);
 
   // ── Fila de envios ────────────────────────────────────────────────────────
   // PROVISÃO PARA ENVIO AUTOMÁTICO. Fase 1: o sistema agenda + renderiza a

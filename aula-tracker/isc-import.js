@@ -499,15 +499,37 @@ export function camposComplementaveis(atual, novo) {
 // existentes: Set de chaves "atendimento|data_cirurgia" já no banco.
 // Classifica cada linha e detecta duplicata DENTRO do próprio arquivo também
 // (mapa cirúrgico repete linha quando a cirurgia é remarcada).
-// Prefere o nº da cirurgia: é único e NÃO muda quando a cirurgia é remarcada.
-// atendimento+data é o fallback para planilhas que não trazem o nº.
-export function chaveDedup(ficha) {
+// ── Deduplicação ──────────────────────────────────────────────────────────
+// O relatório do Tasy tem largura fixa: cada coluna nova entra no lugar de
+// outra. Já circularam três combinações — (nº cirurgia + atendimento),
+// (prontuário + atendimento) e (nº cirurgia + prontuário) — e uma ficha antiga
+// pode ter sido criada por qualquer uma delas.
+//
+// Por isso a dedup trabalha com uma LISTA ordenada de chaves, não uma só: a
+// linha nova tenta todas as suas chaves contra todas as chaves registradas da
+// ficha existente. Sem isso, trocar o layout do relatório recriaria do zero as
+// fichas já em vigilância — com o paciente recebendo tudo de novo.
+//
+// Ordem = confiabilidade: o nº da cirurgia identifica O ATO (não muda nem se a
+// cirurgia for remarcada); atendimento+data identifica a internação; e
+// prontuário+data, o paciente naquele dia — o mais frouxo, porque dois
+// procedimentos no mesmo paciente e no mesmo dia colidiriam.
+export function chavesDedup(ficha) {
+  const chaves = [];
   const cir = String(ficha?.cirurgia_id ?? '').trim();
-  if (cir) return `cir:${cir}`;
   const at = String(ficha?.atendimento ?? '').trim();
+  const pr = String(ficha?.prontuario ?? '').trim();
   const dt = toISODate(ficha?.data_cirurgia);
-  if (!at || !dt) return null;
-  return `at:${at}|${dt}`;
+  if (cir) chaves.push(`cir:${cir}`);
+  if (at && dt) chaves.push(`at:${at}|${dt}`);
+  if (pr && dt) chaves.push(`pront:${pr}|${dt}`);
+  return chaves;
+}
+
+// Chave principal (a mais confiável disponível). Mantida para quem só precisa
+// de uma identidade estável da linha.
+export function chaveDedup(ficha) {
+  return chavesDedup(ficha)[0] || null;
 }
 
 // regras: quando fornecidas, filtram o que entra na vigilância. Sem regras
@@ -544,13 +566,15 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
       if (triagem.codigo_cve) ficha.codigo_cve = triagem.codigo_cve;
     }
 
-    const chave = chaveDedup(ficha);
+    const chaves = chavesDedup(ficha);
+    const chave = chaves[0] || null;
+    const casada = chaves.find(k => existentes.has(k)) || null;
     let status = 'nova';
     let complemento = null;
     if (erros.length) status = 'erro';
-    else if (chave && existentes.has(chave)) {
+    else if (casada) {
       // Só o Map sabe o que a ficha já tem; com Set, segue "duplicada" e pronto.
-      const atual = typeof existentes.get === 'function' ? existentes.get(chave) : null;
+      const atual = typeof existentes.get === 'function' ? existentes.get(casada) : null;
       const faltando = atual ? camposComplementaveis(atual, ficha) : {};
       if (Object.keys(faltando).length) {
         status = 'complementa';
@@ -558,10 +582,10 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
       } else {
         status = 'duplicada';
       }
-    } else if (chave && vistas.has(chave)) {
+    } else if (chaves.some(k => vistas.has(k))) {
       status = 'duplicada'; avisos.push('Linha repetida dentro do próprio arquivo');
     }
-    if (status === 'nova' && chave) vistas.add(chave);
+    if (status === 'nova') for (const k of chaves) vistas.add(k);
     return { linha: i + 2, status, ficha, erros, avisos, bruto, complemento, motivo: triagem?.motivo || null };
   });
 

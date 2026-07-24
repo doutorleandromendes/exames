@@ -152,6 +152,10 @@ export async function runIscMigrations(pool) {
     // Passo 0: confirmação de identidade antes de qualquer mensagem clínica.
     // pendente = ainda não perguntou/confirmou · confirmada = é o paciente ·
     // negada = número é de outra pessoa. Vale por PACIENTE (a ficha).
+    // Ficha do ATB criada a partir desta ISC confirmada. É o que torna a ponte
+    // idempotente: com ela preenchida, reclassificar não cria ficha duplicada
+    // (duplicata inflaria o numerador de IrAS do CVE).
+    ['atb_ficha_id', 'INTEGER'],
     ['identidade_status', `TEXT DEFAULT 'pendente'`],
     ['identidade_em', 'TIMESTAMPTZ'],
     ['identidade_por', 'TEXT'],
@@ -403,18 +407,46 @@ export async function runIscMigrations(pool) {
   // Perfil semeado do Tasy_Rel (mapeamento conferido coluna a coluna pelo SCIH).
   // Os índices são da PLANILHA, não do rótulo: no layout de impressão o título
   // fica na coluna errada — "Data Inicio" está na K, a data na I.
-  //   A=0 nº cirurgia · D=3 atend · F=5 procedimento · G=6 endereço+fone
+  //   A=0 nº CIRURGIA · D=3 PRONTUÁRIO · F=5 procedimento · G=6 endereço+fone
   //   I=8 data · N=13 duração · O=14 paciente · X=23 cirurgião · AA=26 anestesia
+  //
+  // O relatório tem LARGURA FIXA: cada coluna pedida entra no lugar de outra.
+  // Já circularam três combinações na coluna A/D, e é por isso que a dedup
+  // trabalha com lista de chaves (ver chavesDedup em isc-import.js):
+  //   v1  A=nº cirurgia   D=atendimento   (sem prontuário)
+  //   v2  A=prontuário    D=atendimento   (sem nº de cirurgia)
+  //   v3  A=nº cirurgia   D=prontuário    (sem atendimento)  ← atual
+  // O sentido de cada coluna foi confirmado por DISPERSÃO, não pelo rótulo: nº
+  // de cirurgia anda de 2 em 2 dentro do período; prontuário salta dezenas de
+  // milhares, por ser cadastro acumulado de anos.
+  const MAPA_TASY = {
+    0: 'cirurgia_id', 3: 'prontuario', 5: 'procedimento', 6: 'contato_blob',
+    8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome',
+    23: 'cirurgiao', 26: 'tipo_anestesia',
+  };
+  // Versões anteriores do seed — migradas se não tiverem sido customizadas.
+  const MAPAS_TASY_ANTIGOS = [
+    { 0: 'cirurgia_id', 3: 'atendimento', 5: 'procedimento', 6: 'contato_blob',
+      8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome', 23: 'cirurgiao', 26: 'tipo_anestesia' },
+    { 0: 'prontuario', 3: 'atendimento', 5: 'procedimento', 6: 'contato_blob',
+      8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome', 23: 'cirurgiao', 26: 'tipo_anestesia' },
+  ];
   await pool.query(`
     INSERT INTO isc_import_perfis (instituicao_id, nome, mapeamento, delim)
     SELECT i.id, 'Tasy_Rel — Relação das Cirurgias', $1::jsonb, E'\t'
       FROM atb_instituicoes i WHERE i.sigla = 'HUSF'
     ON CONFLICT (instituicao_id, nome) DO NOTHING
-  `, [JSON.stringify({
-    0: 'cirurgia_id', 3: 'atendimento', 5: 'procedimento', 6: 'contato_blob',
-    8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome',
-    23: 'cirurgiao', 26: 'tipo_anestesia',
-  })]);
+  `, [JSON.stringify(MAPA_TASY)]);
+
+  // Migração dos perfis já semeados com layout anterior. Só atualiza se o mapa
+  // estiver EXATAMENTE como foi semeado — se o operador ajustou alguma coluna à
+  // mão, a escolha dele vale mais que a nossa e nada é sobrescrito.
+  for (const antigo of MAPAS_TASY_ANTIGOS) {
+    await pool.query(
+      `UPDATE isc_import_perfis SET mapeamento = $1::jsonb, updated_at = now()
+        WHERE nome = 'Tasy_Rel — Relação das Cirurgias' AND mapeamento = $2::jsonb`,
+      [JSON.stringify(MAPA_TASY), JSON.stringify(antigo)]);
+  }
 
   await pool.query(`ALTER TABLE isc_import_lotes ADD COLUMN IF NOT EXISTS complementadas INTEGER DEFAULT 0`);
   // ── Regras de alerta (flag de possível ISC conforme as respostas) ─────────

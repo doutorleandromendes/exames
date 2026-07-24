@@ -16,7 +16,7 @@ import * as XLSX from 'xlsx';
 import { tenantFromReq, getTenantLogo, sanitizeSigla } from './atb-tenant.js';
 import {
   CAMPOS_IMPORTAVEIS, CAMPOS_COMPLEMENTAVEIS, parseTabular, adivinhaMapeamento,
-  montarPrevia, chaveDedup, detectaDelimitador,
+  montarPrevia, chaveDedup, chavesDedup, detectaDelimitador,
 } from './isc-import.js';
 import { toISODate, dataBR, janelasDe, recomputarEstado, CHECKLIST } from './isc-core.js';
 import { normalizaAoA } from './isc-import-relatorio.js';
@@ -104,15 +104,14 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
   // existente para saber o que dá para complementar. Guarda as duas formas de
   // chave — ficha antiga pode ter entrado sem o nº da cirurgia (cadastro manual).
   async function fichasExistentes(instId) {
-    const cols = ['id', 'cirurgia_id', 'atendimento', 'data_cirurgia', ...CAMPOS_COMPLEMENTAVEIS]
+    const cols = ['id', 'cirurgia_id', 'atendimento', 'prontuario', 'data_cirurgia', ...CAMPOS_COMPLEMENTAVEIS]
       .filter((c, i, a) => a.indexOf(c) === i).join(', ');
     const { rows } = await pool.query(
       `SELECT ${cols} FROM isc_fichas WHERE ($1::int IS NULL OR instituicao_id = $1)`, [instId]);
+    // Registra TODAS as chaves de cada ficha: ela pode ter sido criada por um
+    // layout do relatório e reencontrada por outro (ver chavesDedup).
     const m = new Map();
-    for (const r of rows) {
-      if (r.cirurgia_id) m.set(`cir:${String(r.cirurgia_id).trim()}`, r);
-      if (r.atendimento) m.set(`at:${String(r.atendimento).trim()}|${toISODate(r.data_cirurgia)}`, r);
-    }
+    for (const r of rows) for (const k of chavesDedup(r)) if (!m.has(k)) m.set(k, r);
     return m;
   }
 

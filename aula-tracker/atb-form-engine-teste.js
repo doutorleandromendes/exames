@@ -996,7 +996,8 @@
         case 'checkbox': { var p = primeira(); return p == null ? null : [p]; }
         case 'number': {
           var min = (f.min != null) ? Number(f.min) : 1;
-          return isNaN(min) ? 1 : min;
+          if (isNaN(min) || min <= 0) min = 1;   // 0 num campo de dose parece defeito
+          return min;
         }
         case 'date': {
           var d = new Date(); d.setDate(d.getDate() - 3);
@@ -1007,8 +1008,43 @@
           if (f.key === 'pac_nome') return 'ZZ_TESTE ' + Date.now().toString().slice(-6);
           if (f.key === 'prescritor_nome') return 'Teste Prescritor';
           return 'teste';
-        default: return null;   // sofa, dose_vanco, matrix: widgets próprios
+        default: return null;   // dose_vanco: calculadora própria
       }
+    }
+    // SOFA grava chaves PLANAS (sofa_suporte, sofa_pam, ...) fora do campo, e o
+    // sub-campo respiratório depende do suporte escolhido. Primeira opção de
+    // cada = pontuação zero, que é o dummy sensato.
+    function _dummySofa(nv) {
+      var sup = SOFA_RESP_SUPORTE[0];
+      nv['sofa_suporte'] = sup;
+      var sub = sup === SOFA_RESP_SUPORTE[0] ? 'spo2_aa'
+              : (sup === SOFA_RESP_SUPORTE[1] ? 'spo2_o2' : 'pf');
+      ['pam', 'plaq', 'bili', 'glasgow', 'creat', 'diurese', sub].forEach(function (k) {
+        var o = SOFA_OPC[k];
+        if (o && o.length && !nv['sofa_' + k]) nv['sofa_' + k] = o[0];
+      });
+    }
+    // Matriz: preenche as células vazias das linhas que existem (a linha da
+    // posologia é criada pelo sincronizaCom ao marcar o ATB). Colunas readonly
+    // (droga) ficam como estão. Genérico: usa o tipo/opções de cada coluna, sem
+    // depender de nomes — o schema de posologia mudou uma vez e vai mudar de novo.
+    function _dummyMatriz(f, atual) {
+      var linhas = Array.isArray(atual) ? atual.slice() : [];
+      if (!linhas.length && f.required) linhas = [{}];
+      if (!linhas.length) return null;
+      return linhas.map(function (row) {
+        if (!row || typeof row !== 'object') return row;
+        var nova = Object.assign({}, row);
+        (f.colunas || []).forEach(function (c) {
+          if (c.readonly) return;
+          var v = nova[c.key];
+          if (v != null && v !== '') return;
+          if (c.type === 'check') { nova[c.key] = true; return; }   // checkbox de célula
+          var d = _dummyValor({ type: c.type || 'text', options: c.options, min: c.min, key: c.key }, null);
+          if (d != null) nova[c.key] = d;
+        });
+        return nova;
+      });
     }
     function preencherDummy() {
       if (!schema) return;
@@ -1022,7 +1058,16 @@
               if (!avaliaCond(f.cond, nv)) return;
               var atual = nv[f.key];
               var vazio = atual == null || atual === '' || (Array.isArray(atual) && !atual.length);
-              if (!vazio) return;
+              // Matriz e SOFA são exceções ao "só se vazio": a linha da posologia
+              // já existe (criada pelo sincronizaCom) com as células em branco, e
+              // o SOFA vive em chaves fora do campo.
+              if (!vazio && f.type !== 'matrix' && f.type !== 'sofa') return;
+              if (f.type === 'sofa') { _dummySofa(nv); return; }
+              if (f.type === 'matrix') {
+                var lm = _dummyMatriz(f, atual);
+                if (lm) nv[f.key] = lm;
+                return;
+              }
               var v = _dummyValor(f, nv);
               if (v != null) nv[f.key] = v;
             });

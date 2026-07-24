@@ -559,7 +559,10 @@ export function chavesDedup(ficha) {
 // e nome+dia apontam para a mesma ficha, mas são cirurgias diferentes. Quando os
 // dois lados têm nº de cirurgia e eles DIVERGEM, a chave fraca é descartada:
 // coincidir paciente e dia não faz duas cirurgias virarem uma.
-export function acharExistente(ficha, existentes) {
+// `reivindicadas` = ids de ficha já tomados por outra linha desta mesma prévia.
+// Uma ficha só pode corresponder a UMA linha: duas cirurgias do mesmo paciente
+// no mesmo dia não podem colapsar numa ficha só.
+export function acharExistente(ficha, existentes, reivindicadas = null) {
   if (!existentes || typeof existentes.get !== 'function') {
     const k = chavesDedup(ficha).find(x => existentes?.has?.(x));
     return k ? { chave: k, atual: null } : null;
@@ -570,6 +573,7 @@ export function acharExistente(ficha, existentes) {
     if (!atual) continue;
     const cirAtual = String(atual?.cirurgia_id ?? '').trim();
     if (cirNovo && cirAtual && cirNovo !== cirAtual) continue;   // cirurgias distintas
+    if (reivindicadas && atual.id != null && reivindicadas.has(atual.id)) continue;
     return { chave: k, atual };
   }
   return null;
@@ -589,6 +593,11 @@ export function chaveDedup(ficha) {
 // quem só quer saber se já existe.
 export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regras = null) {
   const vistas = new Map();   // chave → ficha, para a trava de nº de cirurgia
+  // Fichas já reivindicadas nesta prévia. Sem isto, um paciente com DUAS
+  // cirurgias no mesmo dia (há 3 casos reais no mapa de julho) tem as duas
+  // linhas casando com a mesma ficha antiga pela ponte nome+data — e a segunda
+  // cirurgia simplesmente desaparece, sem virar ficha e sem aviso.
+  const reivindicadas = new Set();
   const usarTriagem = Array.isArray(regras) && regras.length > 0;
 
   const itens = linhas.map((colunas, i) => {
@@ -621,7 +630,7 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
 
     const chaves = chavesDedup(ficha);
     const chave = chaves[0] || null;
-    const achado = erros.length ? null : acharExistente(ficha, existentes);
+    const achado = erros.length ? null : acharExistente(ficha, existentes, reivindicadas);
     let status = 'nova';
     let complemento = null;
     let casouPor = null;
@@ -629,6 +638,7 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
     else if (achado) {
       casouPor = achado.chave;
       const atual = achado.atual;
+      if (atual?.id != null) reivindicadas.add(atual.id);
       const faltando = atual ? camposComplementaveis(atual, ficha) : {};
       if (Object.keys(faltando).length) {
         status = 'complementa';

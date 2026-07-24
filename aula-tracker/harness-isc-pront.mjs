@@ -249,6 +249,28 @@ const mesmaCirurgia = montarPrevia([['286355', '823269', '01/07/2026', 'ALINE AP
   { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exT, null);
 eq('mesmo nº de cirurgia casa', mesmaCirurgia.resumo.novas, 0);
 
+console.log('\n── Uma ficha só pode ser reivindicada por UMA linha ──');
+// No mapa de julho há 3 pacientes operados DUAS vezes no mesmo dia. Se a ficha
+// antiga (que só tem atendimento) casa por nome+data, as duas linhas apontariam
+// para ela — e a segunda cirurgia sumiria, sem virar ficha e sem aviso.
+await pool.query('TRUNCATE isc_fichas RESTART IDENTITY CASCADE');
+await pool.query(
+  `INSERT INTO isc_fichas (instituicao_id, atendimento, paciente_nome, data_cirurgia)
+   VALUES ($1,'4923400','AMANDA DORNELES BARROS','2026-07-13')`, [inst.id]);
+const { rows: rr } = await pool.query(
+  `SELECT id, cirurgia_id, atendimento, prontuario, paciente_nome, data_cirurgia FROM isc_fichas`);
+const exR = new Map();
+for (const r of rr) for (const k of chavesDedup(r)) exR.set(k, r);
+const duas = montarPrevia(
+  [['286728', '915188', '13/07/2026', 'Amanda Dorneles Barros'],
+   ['286721', '915188', '13/07/2026', 'Amanda Dorneles Barros']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exR, null);
+eq('1 complementa + 1 nova (nenhuma cirurgia some)', [duas.resumo.complementa, duas.resumo.novas], [1, 1]);
+eq('só a 1ª reivindica a ficha antiga', duas.itens[0].complemento.id, rr[0].id);
+t('a 2ª vira ficha própria', duas.itens[1].status === 'nova' && !duas.itens[1].complemento);
+t('e as duas mantêm nº de cirurgia distinto',
+  duas.itens[0].ficha.cirurgia_id !== duas.itens[1].ficha.cirurgia_id);
+
 // ── Arquivo real ─────────────────────────────────────────────────────────
 const REAL = '/mnt/user-data/uploads/mapa_pront_teste2.XLS';
 if (fs.existsSync(REAL)) {

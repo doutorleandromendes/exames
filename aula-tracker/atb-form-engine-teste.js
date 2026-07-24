@@ -973,6 +973,66 @@
       return obrig.length ? Math.round(preenchidos / obrig.length * 100) : 0;
     }, [visiveis, valores]);
 
+    // [form-teste-dummy] SÓ-TESTE. Preenche os campos VISÍVEIS que estão vazios
+    // com dados plausíveis, para chegar rápido ao que se quer testar.
+    // NUNCA promover para produção: um botão que despeja lixo num formulário de
+    // prescrição real é inaceitável.
+    //  • historia_clinica é sempre pulada (é o campo em teste).
+    //  • pac_nome vira ZZ_TESTE… — é assim que o hard-delete acha as fichas dummy.
+    //  • só campos vazios: o que você já digitou fica.
+    //  • duas passadas: campos que só aparecem depois de outros serem preenchidos
+    //    entram na segunda.
+    function _dummyValor(f, valores) {
+      var opts = f.options || [];
+      var primeira = function () {
+        for (var i = 0; i < opts.length; i++) {
+          var v = (opts[i] && typeof opts[i] === 'object') ? opts[i].v : opts[i];
+          if (v !== '' && v != null) return v;
+        }
+        return null;
+      };
+      switch (f.type) {
+        case 'select': case 'radio': return primeira();
+        case 'checkbox': { var p = primeira(); return p == null ? null : [p]; }
+        case 'number': {
+          var min = (f.min != null) ? Number(f.min) : 1;
+          return isNaN(min) ? 1 : min;
+        }
+        case 'date': {
+          var d = new Date(); d.setDate(d.getDate() - 3);
+          return d.toISOString().slice(0, 10);
+        }
+        case 'crm': return '123456';
+        case 'text': case 'textarea':
+          if (f.key === 'pac_nome') return 'ZZ_TESTE ' + Date.now().toString().slice(-6);
+          if (f.key === 'prescritor_nome') return 'Teste Prescritor';
+          return 'teste';
+        default: return null;   // sofa, dose_vanco, matrix: widgets próprios
+      }
+    }
+    function preencherDummy() {
+      if (!schema) return;
+      for (var passada = 0; passada < 2; passada++) {
+        setValores(function (prev) {
+          var nv = Object.assign({}, prev);
+          (schema.secoes || []).forEach(function (sec) {
+            if (!avaliaCond(sec.cond, nv)) return;
+            (sec.campos || []).forEach(function (f) {
+              if (f.key === 'historia_clinica') return;
+              if (!avaliaCond(f.cond, nv)) return;
+              var atual = nv[f.key];
+              var vazio = atual == null || atual === '' || (Array.isArray(atual) && !atual.length);
+              if (!vazio) return;
+              var v = _dummyValor(f, nv);
+              if (v != null) nv[f.key] = v;
+            });
+          });
+          return nv;
+        });
+      }
+      setErros({});
+    }
+
     function validar() {
       var novos = {};
       visiveis.forEach(function (sec) {
@@ -1200,9 +1260,18 @@
         e('p', null, 'A SCIH foi notificada e dará retorno em breve.'))
     );
 
+    var _btnDummy = window.ATB_TESTE
+      ? e('div', { style: { margin: '0 0 12px' } },
+          e('button', {
+            type: 'button', onClick: preencherDummy,
+            style: { padding: '8px 14px', border: '1px dashed #9aa0a6', borderRadius: '8px', background: '#fff', color: '#3c4043', cursor: 'pointer', font: 'inherit', fontSize: '13px' } },
+            '\u26a1 Preencher com dados de teste (exceto hist\u00f3ria)'))
+      : null;
+
     var num = 0;
     return e('div', null,
       cabecalho(schema, inst),
+      _btnDummy,
       visiveis.map(function (sec) {
         num++;
         var n = ('0' + num).slice(-2);

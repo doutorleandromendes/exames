@@ -100,10 +100,33 @@ export const INTERVENCOES = {
         "nota": "aviso + botao desabilitado durante a checagem"
       }
     ]
+  },
+  "form-teste-dummy": {
+    "nome": "form-teste-dummy",
+    "alvo": "atb-form-engine.js",
+    "promovivel": false,
+    "descricao": "SO-TESTE: botao que preenche os campos visiveis e vazios com dados plausiveis (pula historia_clinica; pac_nome vira ZZ_TESTE). NAO promover — um botao de lixo num formulario de prescricao real e inaceitavel.",
+    "transformacoes": [
+      {
+        "ancora": "    function validar() {",
+        "vira": "    // [form-teste-dummy] SÓ-TESTE. Preenche os campos VISÍVEIS que estão vazios\n    // com dados plausíveis, para chegar rápido ao que se quer testar.\n    // NUNCA promover para produção: um botão que despeja lixo num formulário de\n    // prescrição real é inaceitável.\n    //  • historia_clinica é sempre pulada (é o campo em teste).\n    //  • pac_nome vira ZZ_TESTE… — é assim que o hard-delete acha as fichas dummy.\n    //  • só campos vazios: o que você já digitou fica.\n    //  • duas passadas: campos que só aparecem depois de outros serem preenchidos\n    //    entram na segunda.\n    function _dummyValor(f, valores) {\n      var opts = f.options || [];\n      var primeira = function () {\n        for (var i = 0; i < opts.length; i++) {\n          var v = (opts[i] && typeof opts[i] === 'object') ? opts[i].v : opts[i];\n          if (v !== '' && v != null) return v;\n        }\n        return null;\n      };\n      switch (f.type) {\n        case 'select': case 'radio': return primeira();\n        case 'checkbox': { var p = primeira(); return p == null ? null : [p]; }\n        case 'number': {\n          var min = (f.min != null) ? Number(f.min) : 1;\n          return isNaN(min) ? 1 : min;\n        }\n        case 'date': {\n          var d = new Date(); d.setDate(d.getDate() - 3);\n          return d.toISOString().slice(0, 10);\n        }\n        case 'crm': return '123456';\n        case 'text': case 'textarea':\n          if (f.key === 'pac_nome') return 'ZZ_TESTE ' + Date.now().toString().slice(-6);\n          if (f.key === 'prescritor_nome') return 'Teste Prescritor';\n          return 'teste';\n        default: return null;   // sofa, dose_vanco, matrix: widgets próprios\n      }\n    }\n    function preencherDummy() {\n      if (!schema) return;\n      for (var passada = 0; passada < 2; passada++) {\n        setValores(function (prev) {\n          var nv = Object.assign({}, prev);\n          (schema.secoes || []).forEach(function (sec) {\n            if (!avaliaCond(sec.cond, nv)) return;\n            (sec.campos || []).forEach(function (f) {\n              if (f.key === 'historia_clinica') return;\n              if (!avaliaCond(f.cond, nv)) return;\n              var atual = nv[f.key];\n              var vazio = atual == null || atual === '' || (Array.isArray(atual) && !atual.length);\n              if (!vazio) return;\n              var v = _dummyValor(f, nv);\n              if (v != null) nv[f.key] = v;\n            });\n          });\n          return nv;\n        });\n      }\n      setErros({});\n    }\n\n    function validar() {",
+        "nota": "_dummyValor + preencherDummy"
+      },
+      {
+        "ancora": "    var num = 0;",
+        "vira": "    var _btnDummy = window.ATB_TESTE\n      ? e('div', { style: { margin: '0 0 12px' } },\n          e('button', {\n            type: 'button', onClick: preencherDummy,\n            style: { padding: '8px 14px', border: '1px dashed #9aa0a6', borderRadius: '8px', background: '#fff', color: '#3c4043', cursor: 'pointer', font: 'inherit', fontSize: '13px' } },\n            '\\u26a1 Preencher com dados de teste (exceto hist\\u00f3ria)'))\n      : null;\n\n    var num = 0;",
+        "nota": "botao so quando ATB_TESTE"
+      },
+      {
+        "ancora": "    var num = 0;\n    return e('div', null,\n      cabecalho(schema, inst),",
+        "vira": "    var num = 0;\n    return e('div', null,\n      cabecalho(schema, inst),\n      _btnDummy,",
+        "nota": "renderiza o botao apos o cabecalho"
+      }
+    ]
   }
 };
 
-export const ORDEM_INTERVENCOES = ["gatilho-ia-narrativa", "form-teste-schema-override", "isc-nudge"];
+export const ORDEM_INTERVENCOES = ["gatilho-ia-narrativa", "form-teste-schema-override", "isc-nudge", "form-teste-dummy"];
 
 export function listarIntervencoes() {
   return ORDEM_INTERVENCOES.map((nome) => ({ ...INTERVENCOES[nome], _nome: nome }));

@@ -20,7 +20,7 @@ import { registerIscRoutes } from './isc-routes.js';
 import { renderShell } from './ui-shell.js';
 import {
   criarFichaAtbDeIsc, validarValores, montarHistoriaClinica,
-  dataDoContatoQueAlertou, colunasReais, ALVO,
+  dataDoContatoQueAlertou, colunasReais, resolveCampoCirurgiaInfectada, ALVO,
 } from './isc-atb-bridge.js';
 import { PARECER_VEREDITOS } from './atb-parecer-edit-routes.js';
 import { IRAS_VALORES } from './atb-regras-routes.js';
@@ -38,7 +38,17 @@ await pool.query(`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email
 await runAtbMigrations(pool);
 await ensureRetroSchema(pool);
 await ensureFormSchemaTable(pool);
-await saveFormSchema(pool, 'HUSF', SEMENTE_HUSF);
+// O campo "data da cirurgia infectada" NÃO está na semente — foi criado no
+// editor de formulário. Aqui usamos uma chave DIFERENTE do nome que o filtro da
+// grade consulta, justamente para provar que a ponte resolve pelo schema em vez
+// de chutar: chutar criaria uma segunda coluna, sempre vazia.
+const SCHEMA_TESTE = JSON.parse(JSON.stringify(SEMENTE_HUSF));
+SCHEMA_TESTE.secoes[0].campos.push({ key: 'dt_cirurgia_infectada', type: 'date', label: 'Data da cirurgia infectada' });
+await saveFormSchema(pool, 'HUSF', SCHEMA_TESTE);
+await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS dt_cirurgia_infectada DATE`);
+// Resíduo de execuções antigas do harness: a coluna de nome "chutado" não pode
+// existir, senão o teste de que a ponte NÃO a usa perde o sentido.
+await pool.query(`ALTER TABLE atb_fichas DROP COLUMN IF EXISTS data_da_cirurgia_infectada`);
 await runIscMigrations(pool);
 await pool.query(`TRUNCATE atb_avaliacoes, atb_fichas RESTART IDENTITY CASCADE`);
 await pool.query(`TRUNCATE isc_envios, isc_contatos, isc_fichas RESTART IDENTITY CASCADE`);
@@ -61,6 +71,15 @@ ALVO.foco_infeccao = 'Foco Que Não Existe';
 const ruim = await validarValores(pool, 'HUSF');
 t('valor inventado é REPROVADO pela validação', !ruim.ok && /não está nas opções/.test(ruim.erros.join()));
 ALVO.foco_infeccao = original;
+
+console.log('\n── Nome da coluna vem do SCHEMA, não de chute ──');
+const resolvido = await resolveCampoCirurgiaInfectada(pool, 'HUSF');
+eq('resolve a chave criada no editor', [resolvido.key, resolvido.col], ['dt_cirurgia_infectada', 'dt_cirurgia_infectada']);
+t('e sabe que veio do schema', resolvido.doSchema === true);
+t('a validação reporta onde a data vai cair',
+  val.opcoes.data_cirurgia_infectada?.coluna === 'dt_cirurgia_infectada'
+  && val.opcoes.data_cirurgia_infectada?.colunaExiste === true,
+  JSON.stringify(val.opcoes.data_cirurgia_infectada));
 
 console.log('\n── História clínica ──');
 eq('formato pedido', montarHistoriaClinica({ procedimento: 'CRANIOTOMIA', data_cirurgia: '2026-07-13' }),
@@ -136,20 +155,25 @@ const { rows: [av] } = await pool.query(`SELECT * FROM atb_avaliacoes WHERE fich
 t('linha de avaliação criada', !!av);
 eq('iras = ISC', av.iras, 'ISC');
 eq('autoria registrada', av.avaliado_por, u.id);
+// etiol_iras nasceria nulo nas fichas da ponte; o nome da cirurgia dá contexto
+// imediato na grade e no relatório do CVE, que agrupa por etiologia.
+eq('etiologia = nome da cirurgia', av.etiol_iras, 'CRANIOTOMIA DESCOMPRESSIVA');
 
 console.log('\n── Datas ──');
-eq('data de referência = contato que alertou', r.dataReferencia, DCONT);
+eq('data de referência = data da cirurgia', r.dataReferencia, DC);
 const cols = await colunasReais(pool, 'atb_fichas');
-if (cols.has('data_referencia')) {
-  eq('gravou na coluna data_referencia', String(a.data_referencia).slice(0, 10), DCONT);
-} else {
-  eq('coluna ausente → foi para payload_raw', a.payload_raw.data_referencia, DCONT);
-}
-if (cols.has('data_da_cirurgia_infectada')) {
-  eq('gravou na coluna data_da_cirurgia_infectada', String(a.data_da_cirurgia_infectada).slice(0, 10), DC);
-} else {
-  eq('coluna promovida ausente → payload_raw, sem perder o dado', a.payload_raw.data_da_cirurgia_infectada, DC);
-}
+// As migrações do ISC garantem as duas colunas (são campos promovidos, fora do
+// CREATE TABLE base) — a ficha de ISC depende delas.
+t('coluna data_referencia garantida pela migração', cols.has('data_referencia'));
+const iso = d => (d ? new Date(d).toISOString().slice(0, 10) : null);
+// A prova: gravou na coluna que o SCHEMA define, não na que o nome sugeriria.
+eq('data da cirurgia foi para a coluna do schema', iso(a.dt_cirurgia_infectada), DC);
+t('e NÃO criou/usou uma coluna de nome chutado', !cols.has('data_da_cirurgia_infectada'));
+// O agrupamento por mês do CVE segue a DATA DA CIRURGIA: é onde está o
+// denominador. Se seguisse a data do contato, a ISC cairia no mês seguinte.
+eq('data_referencia = data da cirurgia (e não a do contato)', iso(a.data_referencia), DC);
+t('a data do contato que alertou é diferente, e não manda', DCONT !== DC);
+eq('mas fica registrada para rastreabilidade', a.payload_raw.origem_isc.data_contato_alerta, DCONT);
 
 console.log('\n── Rastreabilidade da origem ──');
 eq('payload_raw aponta para a ficha ISC', a.payload_raw.origem_isc.isc_ficha_id, f.id);
@@ -160,6 +184,16 @@ t('e o campo de nº de cirurgia existe na rastreabilidade',
   'cirurgia_id' in a.payload_raw.origem_isc);
 eq('ISC aponta de volta para a ficha ATB',
   (await pool.query('SELECT atb_ficha_id FROM isc_fichas WHERE id=$1', [f.id])).rows[0].atb_ficha_id, r.atbFichaId);
+
+console.log('\n── Como o CVE agrupa ──');
+const { rows: cve } = await pool.query(
+  `SELECT EXTRACT(MONTH FROM COALESCE(f.data_referencia, f.created_at))::int AS mes,
+          a.etiol_iras AS etiol, f.cirurgia
+     FROM atb_fichas f JOIN atb_avaliacoes a ON a.ficha_id = f.id
+    WHERE a.iras ILIKE '%ISC%' AND f.id = $1`, [r.atbFichaId]);
+eq('cai no mês da CIRURGIA', cve[0].mes, Number(DC.slice(5, 7)));
+eq('com a etiologia preenchida', cve[0].etiol, 'CRANIOTOMIA DESCOMPRESSIVA');
+eq('e a cirurgia no campo próprio', cve[0].cirurgia, 'CRANIOTOMIA DESCOMPRESSIVA');
 
 console.log('\n── ⚠ Idempotência: reclassificar NÃO duplica ──');
 // Duplicar aqui inflaria o numerador de IrAS do CVE. É o erro mais caro.

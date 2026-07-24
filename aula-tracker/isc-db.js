@@ -499,5 +499,28 @@ export async function runIscMigrations(pool) {
   await pool.query(`ALTER TABLE isc_fichas ADD COLUMN IF NOT EXISTS import_lote_id INTEGER REFERENCES isc_import_lotes(id) ON DELETE SET NULL`);
   await pool.query(`CREATE INDEX IF NOT EXISTS isc_fichas_lote_idx ON isc_fichas (import_lote_id)`);
 
+  // ── Coluna que a ponte ISC→ATB precisa ────────────────────────────────────
+  // `data_da_cirurgia_infectada` não está no CREATE TABLE base de atb_fichas:
+  // é um campo PROMOVIDO de payload_raw pelo editor de formulário, então pode
+  // ou não existir. O filtro "mês da cirurgia" da grade do ATB já a consulta
+  // (com guarda), e a ficha de ISC depende dela. Garantir aqui é idempotente e
+  // não altera nada em quem já a promoveu.
+  // `data_referencia` é a data que a grade e o CVE usam para agrupar por mês
+  // (COALESCE(data_referencia, ...)). Também é campo promovido — a rota de ficha
+  // retrospectiva do ATB já grava nela, então em produção existe; mas depender
+  // disso seria contar com sorte.
+  // Só `data_referencia`: é coluna de SISTEMA, com nome fixo em todo o código
+  // (a rota de ficha retrospectiva grava nela, o CVE agrupa por ela).
+  //
+  // `data da cirurgia infectada` NÃO entra aqui de propósito: é campo do
+  // formulário, e o nome da coluna sai da chave que quem criou escolheu. Criar
+  // com nome chutado produziria uma segunda coluna, sempre vazia, enquanto a de
+  // verdade seguiria sem receber nada. A ponte resolve o nome no schema vivo.
+  try {
+    await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS data_referencia DATE`);
+  } catch (e) {
+    console.warn('[isc-db] não foi possível garantir data_referencia:', e.message);
+  }
+
   console.log('[isc-db] migrações ISC concluídas');
 }

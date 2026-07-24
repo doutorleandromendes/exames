@@ -34,6 +34,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { getFormSchema } from './atb-form-schema.js';
+import { COLUNA_DE } from './atb-field-registry.js';
 import { PARECER_VEREDITOS } from './atb-parecer-edit-routes.js';
 import { IRAS_VALORES } from './atb-regras-routes.js';
 import { toISODate, dataBR, contatoTemAlerta } from './isc-core.js';
@@ -86,6 +87,16 @@ export async function validarValores(pool, sigla = 'HUSF') {
     erros.push(`'${ALVO.iras}' não está em IRAS_VALORES`);
   }
 
+  // Onde a data da cirurgia vai cair — útil no pré-voo, porque o nome vem do
+  // schema e pode ter sido definido por quem criou o campo.
+  try {
+    const cci = await resolveCampoCirurgiaInfectada(pool, sigla);
+    const cols = await colunasReais(pool, 'atb_fichas');
+    opcoes.data_cirurgia_infectada = {
+      campo: cci.key, coluna: cci.col, doSchema: cci.doSchema, colunaExiste: cols.has(cci.col),
+    };
+  } catch { /* diagnóstico opcional */ }
+
   return { ok: erros.length === 0, erros, opcoes };
 }
 
@@ -95,6 +106,27 @@ export async function colunasReais(pool, tabela = 'atb_fichas') {
   const { rows } = await pool.query(
     `SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [tabela]);
   return new Set(rows.map(r => r.column_name));
+}
+
+// "Data da cirurgia infectada" NÃO está na semente do formulário — foi criada
+// no editor. E o editor deriva o nome da coluna da CHAVE do campo no schema
+// (`COLUNA_DE[key] || key`), não do rótulo. Chutar o nome criaria uma segunda
+// coluna, sempre vazia, enquanto a de verdade continuaria sem receber nada.
+//
+// Então o nome é RESOLVIDO no schema vivo. Se o campo existe mas ainda não foi
+// promovido, o valor vai para payload_raw sob a MESMA chave — e a promoção,
+// quando acontecer, faz o backfill sozinha (ela lê de payload_raw->>'key').
+const RE_CIRURGIA_INFECTADA = /(data).*(cirurgia).*(infect)|(cirurgia).*(infect)/i;
+
+export async function resolveCampoCirurgiaInfectada(pool, sigla = 'HUSF') {
+  let schema = null;
+  try { schema = await getFormSchema(pool, sigla); } catch { /* sem schema, cai no padrão */ }
+  const campos = schema ? (schema.secoes || schema.blocos || []).flatMap(s => s.campos || []) : [];
+  const campo = campos.find(c => RE_CIRURGIA_INFECTADA.test(`${c.key} ${c.label || ''}`));
+  if (campo) return { key: campo.key, col: COLUNA_DE[campo.key] || campo.key, doSchema: true };
+  // Sem campo no schema: usa o nome que o filtro "mês da cirurgia" da grade já
+  // consulta (atb-grid-filters), para pelo menos falar a mesma língua que ele.
+  return { key: 'data_da_cirurgia_infectada', col: 'data_da_cirurgia_infectada', doSchema: false };
 }
 
 // ── História clínica ──────────────────────────────────────────────────────
@@ -193,9 +225,17 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
     const eqs = Array.isArray(r.equipe_ids) ? r.equipe_ids : [];
     return eqs.length === 0 || (f.equipe_id != null && eqs.map(Number).includes(Number(f.equipe_id)));
   });
-  const dataRef = dataDoContatoQueAlertou(contatos, f, regras);
-  const historia = montarHistoriaClinica(f);
   const dataCirurgia = toISODate(f.data_cirurgia);
+  // data_referencia é a data que a grade e o CVE usam para agrupar por mês
+  // (COALESCE(data_referencia, ...) em atb-cve-routes). Para ISC ela é a DATA DA
+  // CIRURGIA: a infecção conta no mês do ato cirúrgico, que é onde está o
+  // denominador. Usar a data do contato jogaria a ISC no mês seguinte e
+  // desalinharia numerador e denominador.
+  const dataRef = dataCirurgia || dataDoContatoQueAlertou(contatos, f, regras);
+  // A data do contato que acendeu o alerta continua registrada, só não manda
+  // no agrupamento — é rastreabilidade, não competência.
+  const dataAlerta = dataDoContatoQueAlertou(contatos, f, regras);
+  const historia = montarHistoriaClinica(f);
 
   const cols = await colunasReais(pool, 'atb_fichas');
 
@@ -229,7 +269,12 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
     if (cols.has(col)) campos[col] = valor; else extras[col] = valor;
   };
   opcional('data_referencia', dataRef);
-  opcional('data_da_cirurgia_infectada', dataCirurgia);
+  // Nome resolvido no schema vivo, não chutado (ver resolveCampoCirurgiaInfectada).
+  const campoCirInf = await resolveCampoCirurgiaInfectada(pool, f.inst_sigla || sigla);
+  if (dataCirurgia != null) {
+    if (cols.has(campoCirInf.col)) campos[campoCirInf.col] = dataCirurgia;
+    else extras[campoCirInf.key] = dataCirurgia;   // chave do schema → promoção faz o backfill
+  }
 
   // Rastreabilidade da origem, sempre em payload_raw (não depende de coluna).
   extras.origem_isc = {
@@ -242,6 +287,7 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
     isc_data_diagnostico: toISODate(f.isc_data_diagnostico),
     isc_patogeno: f.isc_patogeno || null,
     data_cirurgia: dataCirurgia,
+    data_contato_alerta: dataAlerta,
     procedimento: f.procedimento || null,
     equipe: f.equipe_nome || null,
     criado_em: new Date().toISOString(),
@@ -250,9 +296,10 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
   if (cols.has('criada_por')) campos.criada_por = userId;
 
   const nomes = Object.keys(campos);
+  const COLS_DATA = new Set(['data_referencia', campoCirInf.col]);
   const marcadores = nomes.map((n, i) =>
     (n === 'atb_solicitado' || n === 'recomendacao_scih' || n === 'payload_raw') ? `$${i + 1}::jsonb`
-    : (n === 'data_referencia' || n === 'data_da_cirurgia_infectada') ? `$${i + 1}::date`
+    : COLS_DATA.has(n) ? `$${i + 1}::date`
     : `$${i + 1}`);
   const valores = nomes.map(n => campos[n]);
 
@@ -261,11 +308,19 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
      VALUES (${marcadores.join(', ')}, now(), now()) RETURNING id`, valores);
 
   // IrAS vive em atb_avaliacoes (ficha_id UNIQUE) — INSERT separado.
+  // `etiol_iras` é texto livre. Para ISC vinda da vigilância ele nasceria nulo;
+  // preencher com o NOME DA CIRURGIA dá contexto imediato na grade e no
+  // relatório do CVE (que agrupa por etiol). Não substitui nada: nenhuma ficha
+  // criada por esta ponte tinha etiologia antes.
+  const etiol = String(f.procedimento ?? '').trim().slice(0, 200) || null;
   await pool.query(
-    `INSERT INTO atb_avaliacoes (ficha_id, iras, avaliado_por, created_at, updated_at)
-     VALUES ($1, $2, $3, now(), now())
-     ON CONFLICT (ficha_id) DO UPDATE SET iras = EXCLUDED.iras, updated_at = now()`,
-    [nova.id, ALVO.iras, userId]);
+    `INSERT INTO atb_avaliacoes (ficha_id, iras, etiol_iras, avaliado_por, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, now(), now())
+     ON CONFLICT (ficha_id) DO UPDATE
+       SET iras = EXCLUDED.iras,
+           etiol_iras = COALESCE(atb_avaliacoes.etiol_iras, EXCLUDED.etiol_iras),
+           updated_at = now()`,
+    [nova.id, ALVO.iras, etiol, userId]);
 
   await pool.query(`UPDATE isc_fichas SET atb_ficha_id = $2, updated_at = now() WHERE id = $1`,
     [iscFichaId, nova.id]);

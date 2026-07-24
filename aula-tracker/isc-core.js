@@ -84,6 +84,10 @@ export const POTENCIAL_CONTAMINACAO = [
 export const STATUS_VIGILANCIA = [
   ['em_vigilancia',    'Em vigilância'],
   ['concluida',        'Concluída'],
+  // Encerrada ANTES de cumprir todas as janelas porque a ISC foi confirmada.
+  // Separado de 'concluida' de propósito: o seguimento não foi completado, e
+  // somar os dois inflaria qualquer indicador de completude da vigilância.
+  ['encerrada',        'Encerrada por ISC'],
   ['perda_seguimento', 'Perda de seguimento'],
   ['obito',            'Óbito'],
   ['excluida',         'Excluída'],
@@ -291,6 +295,7 @@ export function alertasDe(respostas, regras = []) {
 //   'aberta'     → já venceu, dentro da tolerância, sem contato com sucesso
 //   'atrasada'   → passou a tolerância, sem contato com sucesso
 //   'sem_contato'→ tentativas registradas, todas sem sucesso, e já venceu tudo
+//   'dispensada' → não será executada: a ISC já foi confirmada antes dela
 export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO(), regrasAlerta = []) {
   const janelas = janelasDe(ficha, equipe);
   const dtCir = toISODate(ficha?.data_cirurgia);
@@ -338,6 +343,28 @@ export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO(), regr
     }
   }
 
+  // ── ISC confirmada encerra a vigilância ─────────────────────────────────
+  // A vigilância pós-alta existe para descobrir se houve ISC. Confirmado o
+  // desfecho, seguir ligando não acrescenta dado nenhum — só gera trabalho e
+  // incomoda um paciente que já foi diagnosticado e encaminhado.
+  //
+  // As janelas ainda não cumpridas viram 'dispensada', não 'concluida':
+  // ninguém as executou, e contá-las como cumpridas mentiria no indicador de
+  // completude do seguimento.
+  //
+  // A regra é DERIVADA, não gravada. Como recomputarEstado é puro e roda
+  // inteiro a cada sincronizarEstado, reclassificar para 'descartada' reabre
+  // as janelas sozinho. É por isso que 'encerrada' não entra em `terminais`.
+  const iscConfirmada = String(ficha?.isc_classificacao || '') === 'confirmada';
+  if (iscConfirmada) {
+    for (const dias of janelas) {
+      const e = estado[String(dias)];
+      if (e && e.status !== 'concluida') e.status = 'dispensada';
+    }
+    proximaJanela = null;
+    proximoEm = null;
+  }
+
   const ultimo = lista
     .map(c => c?.data_contato)
     .filter(Boolean)
@@ -350,7 +377,10 @@ export function recomputarEstado(ficha, contatos, equipe, hoje = hojeISO(), regr
   const terminais = new Set(['obito', 'perda_seguimento', 'excluida']);
   if (!terminais.has(status_vigilancia)) {
     const todasOk = janelas.length > 0 && janelas.every(d => estado[String(d)]?.status === 'concluida');
-    status_vigilancia = todasOk ? 'concluida' : 'em_vigilancia';
+    // 'concluida' tem precedência: se todas as janelas foram de fato cumpridas
+    // e a ISC apareceu na última, o seguimento ESTÁ completo — rotular de
+    // 'encerrada' perderia essa informação.
+    status_vigilancia = todasOk ? 'concluida' : (iscConfirmada ? 'encerrada' : 'em_vigilancia');
   }
 
   return {

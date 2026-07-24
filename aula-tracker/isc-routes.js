@@ -51,6 +51,9 @@ const BADGE_JANELA = {
   aberta:      ['#fff4e5', '#b06000', '!'],
   atrasada:    ['#fdecea', '#c0392b', '!!'],
   sem_contato: ['#f3e8fd', '#7b1fa2', '✕'],
+  // Janela que não será executada porque a ISC já foi confirmada. Neutra de
+  // propósito: não é falha de seguimento, é seguimento que perdeu o objeto.
+  dispensada:  ['#eceff1', '#546e7a', '–'],
 };
 
 export function registerIscRoutes(app, pool, scihRequired, renderShell) {
@@ -69,7 +72,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       <h1>Restrito ao médico do SCIH</h1>
       <p class="mut">A classificação de ISC é ato médico e alimenta os numeradores do CVE.
       Sua conta registra contatos e opera a vigilância, mas não classifica.</p>
-      <a href="/isc/admin/grid">← Voltar ao grid</a></div>`));
+      <a href="${urlGrid(req)}">← Voltar ao grid</a></div>`));
   }
   const medicoRequired = [scihRequired, ensureMedico];
 
@@ -188,7 +191,34 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       </div>`;
   }
 
-  const nav = (req) => `<a href="/isc/admin/grid">Grid</a><a href="/isc/admin/agenda">Agenda</a>`
+  // ── Estado do grid preservado entre navegações ────────────────────────────
+  // O grid grava a própria query string num cookie a cada render; os links
+  // "Grid" e "Voltar ao grid" a devolvem. Sem isso, classificar uma ficha e
+  // voltar jogava o usuário no grid sem filtro nenhum — e ele tinha de refazer
+  // a seleção a cada ficha.
+  //
+  // A whitelist é o que torna o cookie seguro de embutir num href: o valor vem
+  // do navegador e podia ter sido adulterado. Reconstruir por URLSearchParams
+  // percent-encoda tudo, então aspas e sinais de menor não sobrevivem.
+  const GRID_COOKIE = 'isc_grid_q';
+  const GRID_KEYS = ['equipe','classif','status','tipo','mes','de','ate','lote',
+                     'alerta','implante','pendente','busca','sort','dir','page'];
+  const gridQS = (fonte) => {
+    const u = new URLSearchParams();
+    for (const k of GRID_KEYS) {
+      const v = (fonte && typeof fonte.get === 'function') ? fonte.get(k) : fonte?.[k];
+      if (v != null && String(v) !== '') u.set(k, String(v));
+    }
+    return u.toString();
+  };
+  const urlGrid = (req) => {
+    let qs = '';
+    try { qs = gridQS(new URLSearchParams(String(req?.cookies?.[GRID_COOKIE] || ''))); }
+    catch { qs = ''; }                         // cookie corrompido → grid limpo
+    return '/isc/admin/grid' + (qs ? '?' + qs : '');
+  };
+
+  const nav = (req) => `<a href="${urlGrid(req)}">Grid</a><a href="/isc/admin/agenda">Agenda</a>`
     + `<a href="/isc/admin/nova">+ Nova ficha</a><a href="/isc/admin/importar">Importar mapa</a>`
     + (ehMedico(req) ? `<a href="/isc/admin/triagem">Triagem</a><a href="/isc/admin/alertas">Alertas</a>` : '')
     + `<a href="/isc/admin/templates">Mensagens</a>`;
@@ -249,6 +279,13 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     try {
       const { sigla, instId, travado } = await resolveInst(req);
       const q = req.query || {};
+
+      // Estado atual vira o destino dos links "Grid"/"Voltar ao grid". Grid sem
+      // filtro grava cookie vazio, então "Limpar" também limpa o retorno.
+      res.cookie(GRID_COOKIE, gridQS(q), {
+        httpOnly: true, sameSite: 'lax', path: '/isc',
+        secure: !!req.secure, maxAge: 12 * 60 * 60 * 1000,
+      });
 
       // Rotina de importação (segunda e quinta de manhã). Nunca derruba o grid:
       // se a consulta falhar, o banner simplesmente não aparece.
@@ -703,7 +740,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     } catch (e) {
       if (e.code === '23505') {
         return res.status(409).send(renderShell('ISC · Duplicata',
-          `<div class="card"><h1>Ficha já existe</h1><p class="mut">Já há ficha com este nº de cirurgia, ou com este prontuário nesta data.</p><a href="/isc/admin/grid">← Voltar ao grid</a></div>`));
+          `<div class="card"><h1>Ficha já existe</h1><p class="mut">Já há ficha com este nº de cirurgia, ou com este prontuário nesta data.</p><a href="${urlGrid(req)}">← Voltar ao grid</a></div>`));
       }
       erro(res, e);
     }

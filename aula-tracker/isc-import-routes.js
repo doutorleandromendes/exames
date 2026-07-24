@@ -290,7 +290,7 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
       const equipes = await equipesDe(instId);
       const existentes = await fichasExistentes(instId);
       const regras = b.sem_triagem === '1' ? null : await regrasDe(instId);
-      const { itens, resumo } = montarPrevia(linhas, mapa, equipes, existentes, regras);
+      const { itens, resumo, dedup } = montarPrevia(linhas, mapa, equipes, existentes, regras);
 
       const opts = i => `<option value="">— ignorar —</option>` + CAMPOS_IMPORTAVEIS.map(c =>
         `<option value="${c.key}" ${mapa[i] === c.key ? 'selected' : ''}>${safe(c.label)}${c.obrigatorio ? ' *' : ''}</option>`).join('');
@@ -316,8 +316,12 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
         const compl = it.complemento
           ? `<span style="color:#1a73e8">Vai preencher: <b>${safe(Object.keys(it.complemento.campos).map(k => rotulo[k] || k).join(', '))}</b></span>`
           : '';
+        // A chave é o que decide criar vs complementar — mostrá-la evita ter de
+        // adivinhar por que uma linha virou ficha nova.
+        const chaveTxt = (it.status === 'nova' && (it.chaves || []).length)
+          ? `<span class="sub">chave: <code>${safe(it.chaves.join(' · '))}</code></span>` : '';
         const msgs = [
-          compl,
+          compl, chaveTxt,
           it.motivo ? `<span style="color:#5f6368">${safe(it.motivo)}</span>` : '',
           ...it.erros.map(e => `<span style="color:#c0392b">${safe(e)}</span>`),
           ...it.avisos.map(a => `<span style="color:#b06000">${safe(a)}</span>`)].filter(Boolean).join('<br>');
@@ -342,6 +346,26 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${resumo.erros}</div><div class="ml">Com erro (puladas)</div></div>
           <div class="metric" style="border-left-color:#f0a500"><div class="mv" style="color:#b06000">${resumo.avisos}</div><div class="ml">Com aviso</div></div>
         </div>
+        ${(resumo.novas > 0 && dedup.casaram === 0 && dedup.fichasNoSistema > 0) ? `
+        <div class="card2" style="border-left:3px solid #f0a500;background:#fffaf2">
+          <b style="font-size:13px">Nenhuma linha casou com ficha existente</b>
+          <p class="sub" style="margin:6px 0 0;line-height:1.7">
+            Há <b>${dedup.fichasNoSistema}</b> ficha(s) no sistema e nenhuma foi reconhecida neste arquivo.
+            Isso é <b>esperado</b> se o período for outro; é <b>problema</b> se você esperava complementar as antigas.
+            <br>Chaves indexadas no sistema: <code>${safe(JSON.stringify(dedup.porTipoNoSistema))}</code>
+            <br>Chaves geradas por este arquivo: <code>${safe(JSON.stringify(dedup.porTipoNoArquivo))}</code>
+            <br><b>Só casa quem compartilha o mesmo TIPO de chave.</b>
+            <code>cir</code> = nº da cirurgia · <code>at</code> = atendimento+data · <code>pront</code> = prontuário+data.
+            Se os tipos não se cruzam, o layout do relatório mudou de coluna entre as importações — reimporte
+            no mesmo layout da vez anterior, ou complete o campo que falta.
+          </p>
+        </div>` : ''}
+        ${dedup.semChave > 0 ? `
+        <div class="card2" style="border-left:3px solid #e85d5d;background:#fdecea">
+          <b style="font-size:13px">${dedup.semChave} linha(s) sem chave de deduplicação</b>
+          <p class="sub" style="margin:6px 0 0">Sem nº de cirurgia, sem atendimento e sem prontuário+data, não há como
+          reconhecer a ficha numa próxima importação — ela seria recriada. Confira o mapeamento das colunas.</p>
+        </div>` : ''}
         ${regras ? `<p class="sub" style="margin:-6px 0 12px">Triagem ativa: <b>${regras.filter(x => x.vigiar).length} regra(s) de vigilância</b> e ${regras.filter(x => !x.vigiar).length} de exclusão. ${ehMedico(req) ? '<a href="/isc/admin/triagem">Ajustar regras</a>' : ''}</p>` : ''}
 
         <div class="card2" style="background:${diag.modo === 'relatorio' ? '#f2f7fd' : '#f8f9fa'};border-left:3px solid ${diag.modo === 'relatorio' ? '#3b6fd4' : '#dadce0'}">

@@ -136,6 +136,40 @@ for (const r of r2) for (const k of chavesDedup(r)) ex2.set(k, r);
 const outra = montarPrevia([['999999', '954386', '30/07/2026', 'MARGARETH']], M3, [], ex2, null);
 eq('mesma paciente, outra cirurgia/dia → ficha NOVA', outra.resumo.novas, 1);
 
+console.log('\n── Diagnóstico da dedup (o que explica "N fichas novas") ──');
+await pool.query('TRUNCATE isc_envios, isc_contatos, isc_fichas RESTART IDENTITY CASCADE');
+await pool.query(
+  `INSERT INTO isc_fichas (instituicao_id, cirurgia_id, atendimento, paciente_nome, data_cirurgia)
+   VALUES ($1,'286711','4923414','ANTIGA','2026-07-13')`, [inst.id]);
+const { rows: rd } = await pool.query(`SELECT id, cirurgia_id, atendimento, prontuario, data_cirurgia FROM isc_fichas`);
+const exD = new Map();
+for (const r of rd) for (const k of chavesDedup(r)) exD.set(k, r);
+
+// Linha de OUTRO período: não casa — e isso é o comportamento CORRETO.
+const outroPeriodo = montarPrevia([['287094', '954386', '23/07/2026', 'NOVA']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exD, null);
+eq('período diferente → ficha nova (correto)', outroPeriodo.resumo.novas, 1);
+eq('diagnóstico conta as fichas existentes', outroPeriodo.dedup.fichasNoSistema, 1);
+eq('e mostra os tipos de chave dos dois lados',
+  [Object.keys(outroPeriodo.dedup.porTipoNoSistema).sort(), Object.keys(outroPeriodo.dedup.porTipoNoArquivo).sort()],
+  [['at', 'cir'], ['cir', 'pront']]);
+eq('nenhuma casou', outroPeriodo.dedup.casaram, 0);
+t('a linha expõe sua chave, para conferência', outroPeriodo.itens[0].chaves.includes('cir:287094'));
+
+// Mesma cirurgia → casa, e o diagnóstico registra.
+const mesmo = montarPrevia([['286711', '954386', '13/07/2026', 'ANTIGA']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exD, null);
+eq('mesma cirurgia → complementa', [mesmo.resumo.novas, mesmo.resumo.complementa], [0, 1]);
+eq('diagnóstico registra que casou', mesmo.dedup.casaram, 1);
+
+// Linha válida mas sem NENHUM identificador: entra hoje e seria recriada na
+// próxima importação, porque não há como reconhecê-la. O diagnóstico avisa.
+const semChave = montarPrevia([['', '', '13/07/2026', 'SO NOME']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exD, null);
+eq('a linha é válida (vira ficha)', semChave.resumo.novas, 1);
+eq('mas é sinalizada como sem chave', semChave.dedup.semChave, 1);
+eq('e de fato não tem chave nenhuma', semChave.itens[0].chaves, []);
+
 // ── Arquivo real ─────────────────────────────────────────────────────────
 const REAL = '/mnt/user-data/uploads/mapa_pront_teste2.XLS';
 if (fs.existsSync(REAL)) {

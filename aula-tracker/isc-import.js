@@ -586,11 +586,31 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
       status = 'duplicada'; avisos.push('Linha repetida dentro do próprio arquivo');
     }
     if (status === 'nova') for (const k of chaves) vistas.add(k);
-    return { linha: i + 2, status, ficha, erros, avisos, bruto, complemento, motivo: triagem?.motivo || null };
+    return { linha: i + 2, status, ficha, erros, avisos, bruto, complemento, chaves,
+             motivo: triagem?.motivo || null };
   });
+
+  // Diagnóstico da deduplicação. Existe porque "110 fichas novas" numa
+  // reimportação é ambíguo: pode ser período novo (correto) ou chave que não
+  // casou (bug). Sem mostrar as chaves dos dois lados, não há como saber qual.
+  const tipos = k => k.split(':')[0];
+  const contarTipos = (lista) => lista.reduce((acc, k) => { acc[tipos(k)] = (acc[tipos(k)] || 0) + 1; return acc; }, {});
+  const chavesArquivo = itens.flatMap(i => i.chaves || []);
+  const chavesBanco = typeof existentes.keys === 'function' ? [...existentes.keys()] : [];
+  const dedup = {
+    fichasNoSistema: typeof existentes.get === 'function'
+      ? new Set([...existentes.values()].map(v => v?.id).filter(Boolean)).size
+      : existentes.size,
+    chavesIndexadas: chavesBanco.length,
+    porTipoNoSistema: contarTipos(chavesBanco),
+    porTipoNoArquivo: contarTipos(chavesArquivo),
+    semChave: itens.filter(i => !(i.chaves || []).length && i.status !== 'erro').length,
+    casaram: itens.filter(i => i.status === 'complementa' || i.status === 'duplicada').length,
+  };
 
   return {
     itens,
+    dedup,
     resumo: {
       total: itens.length,
       novas: itens.filter(x => x.status === 'nova').length,

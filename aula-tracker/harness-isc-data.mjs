@@ -129,7 +129,11 @@ r = await fetch(`${B}/isc/admin/importar/previa?inst=HUSF`, {
 });
 h = await r.text();
 t('prévia mostra a data em BR', h.includes(brCir), 'não achei');
-t('prévia não mostra ISO', !h.includes(CIR));
+// A chave de dedup (diagnóstico, em <code>) carrega a data ISO de propósito:
+// é a chave literal usada na comparação. O que não pode é a CÉLULA de data
+// da tabela sair em ISO.
+const semChaves = h.replace(/<code>[^<]*<\/code>/g, '');
+t('a célula de data não sai em ISO', !semChaves.includes(CIR));
 
 srv.close(); await pool.end();
 console.log(`\n${'═'.repeat(52)}\n${ok} passaram · ${fail} falharam\n`);

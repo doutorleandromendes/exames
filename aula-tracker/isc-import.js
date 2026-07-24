@@ -555,9 +555,13 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
         tipo_anestesia: bruto.tipo_anestesia || '',
       }, regras);
       if (!triagem || !triagem.vigiar) {
+        // `chaves` também aqui: sem isso a linha fora do recorte entrava no
+        // diagnóstico como "sem chave de deduplicação" e disparava um alarme
+        // vermelho falso — 425 linhas fora do recorte viravam 425 "sem chave".
         return {
           linha: i + 2, status: 'fora_recorte', ficha, erros: [], avisos: [],
-          bruto, motivo: triagem ? triagem.motivo : 'Nenhuma regra de vigilância casou',
+          bruto, chaves: chavesDedup(ficha),
+          motivo: triagem ? triagem.motivo : 'Nenhuma regra de vigilância casou',
         };
       }
       // A regra manda na equipe/implante — o mapa do Tasy não traz nem um nem outro.
@@ -604,7 +608,9 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
     chavesIndexadas: chavesBanco.length,
     porTipoNoSistema: contarTipos(chavesBanco),
     porTipoNoArquivo: contarTipos(chavesArquivo),
-    semChave: itens.filter(i => !(i.chaves || []).length && i.status !== 'erro').length,
+    // Só conta quem VAI virar ficha: linha fora do recorte não é gravada, então
+    // não ter chave nela é irrelevante — contá-la só gera alarme falso.
+    semChave: itens.filter(i => i.status === 'nova' && !(i.chaves || []).length).length,
     casaram: itens.filter(i => i.status === 'complementa' || i.status === 'duplicada').length,
   };
 

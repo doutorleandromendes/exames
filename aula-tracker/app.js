@@ -19,16 +19,7 @@ import { fileURLToPath } from 'url';
 import { runAtbMigrations } from './atb-db.js';        // ← ADICIONAR
 import { registerAtbRoutes } from './atb-routes.js';   // ← ADICIONAR
 import { registerCveNumeradoresRoutes } from './atb-cve-routes.js';   // ← ADICIONAR (numeradores CVE)
-import { registerNlqRoutes } from './atb-nlq-routes.js';   // ← ADICIONAR (pergunta em PT → SQL, admin, read-only)
-import { registerHistoriaRoutes } from './atb-historia-routes.js';   // ← ADICIONAR (nudge de história narrativa)
-import { registerHistoriaRevisaoRoutes } from './atb-historia-revisao-routes.js';   // ← ADICIONAR (revisão da qualidade do gatilho)
-import { registerIscDryrunRoutes } from './atb-historia-isc-dryrun.js';   // ← ADICIONAR (dry-run do classificador de ISC)
-import { registerIndicRoutes } from './atb-indic-routes.js';   // ← ADICIONAR (perguntas aos indicadores SCIH)
-import { registerFormTesteRoutes } from './atb-form-teste-routes.js';   // ← ADICIONAR (dry-run do form, admin)
-import { registerFormTransportadorRoutes } from './atb-form-transportador.js';   // ← ADICIONAR (promoção teste→produção)
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
-import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
-import { registerPavRoutes } from './pav-routes.js';    // ← ADICIONAR (form/grid de PAV)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
 import { registerIscImportRoutes } from './isc-import-routes.js';  // ← ADICIONAR (importador de mapa cirúrgico)
 import { runProntMigrations } from './pront-db.js';
@@ -46,7 +37,6 @@ import { registerAulasRoutes } from './aulas-routes.js';
 import { registerAulasAdminCursosRoutes } from './aulas-admin-cursos-routes.js';
 import { registerAulasAdminAlunosRoutes } from './aulas-admin-alunos-routes.js';
 import { registerAulasAdminRelatoriosRoutes } from './aulas-admin-relatorios-routes.js';
-import { registerAulasAdminUsuariosRoutes } from './aulas-admin-usuarios-routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -119,14 +109,6 @@ const migratorPool = new Pool({
   connectionString: DATABASE_URL_UNPOOLED || DATABASE_URL,
   ssl: __sslConfig
 });
-// Pool read-only dedicado ao NL→SQL (role atb_nlq_ro via DATABASE_URL_RO).
-// Fallback para o pool normal enquanto a RO não estiver setada — a rota roda
-// cada query em START TRANSACTION READ ONLY + statement_timeout, então não
-// escreve mesmo nesse fallback; configure DATABASE_URL_RO assim que der.
-const roPool = new Pool({
-  connectionString: process.env.DATABASE_URL_RO || SUPABASE_POOLER_URL || DATABASE_URL,
-  ssl: __sslConfig
-});
 // ====== HTML helpers / Auth / Utils (extraídos) ======
 // safe/renderShell -> ui-shell.js | middlewares -> auth-middlewares.js
 // normalizeDateStr/fmtDTLocal -> aulas-utils.js | R2 -> aulas-storage.js
@@ -140,7 +122,6 @@ const {
   medicoRequired,
   agendaRequired,
   secretariaRequired,
-  pavRequired,
 } = createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell });
 
 // ====== Migrações do domínio Aulas (aulas-db.js) ======
@@ -148,11 +129,9 @@ runAulasMigrations(migratorPool).catch(e=>console.error('migration error', e));
 
 runLabMigrations(migratorPool).catch(e => console.error('lab migration error', e)); // ← ADICIONAR
 // ISC depende de atb_instituicoes (FK): encadeia depois das migrações do ATB.
-// PAV também depende de atb_instituicoes e de users: encadeia depois do ISC.
 runAtbMigrations(migratorPool)                                                        // ← ADICIONAR
   .then(() => runIscMigrations(migratorPool))
-  .then(() => runPavMigrations(migratorPool))
-  .catch(e => console.error('atb/isc/pav migration error', e));
+  .catch(e => console.error('atb/isc migration error', e));
 runProntMigrations(migratorPool)
   .then(() => runAgendaMigrations(migratorPool))   // agenda depende de pront_pacientes
   .catch(e => console.error('pront/agenda migration error', e));
@@ -175,8 +154,6 @@ try { registerAulasAdminAlunosRoutes(app, pool, { authRequired, adminRequired })
 catch (e) { console.error('ERRO registerAulasAdminAlunosRoutes', e); }
 try { registerAulasAdminRelatoriosRoutes(app, pool, { authRequired, adminRequired }); }
 catch (e) { console.error('ERRO registerAulasAdminRelatoriosRoutes', e); }
-try { registerAulasAdminUsuariosRoutes(app, pool, { adminRequired }); }
-catch (e) { console.error('ERRO registerAulasAdminUsuariosRoutes', e); }
 try { registerLabRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabRoutes', e); }
 
@@ -189,26 +166,10 @@ try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerCveNumeradoresRoutes(app, pool); }
 catch (e) { console.error('ERRO registerCveNumeradoresRoutes', e); }
-try { registerNlqRoutes(app, roPool, { adminRequired }); }
-catch (e) { console.error('ERRO registerNlqRoutes', e); }
-try { registerHistoriaRoutes(app, pool); }
-catch (e) { console.error('ERRO registerHistoriaRoutes', e); }
-try { registerHistoriaRevisaoRoutes(app, pool, adminRequired); }
-catch (e) { console.error('ERRO registerHistoriaRevisaoRoutes', e); }
-try { registerIscDryrunRoutes(app, pool, adminRequired); }
-catch (e) { console.error('ERRO registerIscDryrunRoutes', e); }
-try { registerIndicRoutes(app, { adminRequired }); }
-catch (e) { console.error('ERRO registerIndicRoutes', e); }
-try { registerFormTesteRoutes(app, pool, adminRequired); }
-catch (e) { console.error('ERRO registerFormTesteRoutes', e); }
-try { registerFormTransportadorRoutes(app, pool, adminRequired); }
-catch (e) { console.error('ERRO registerFormTransportadorRoutes', e); }
 try { registerIscRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscRoutes', e); }
 try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscImportRoutes', e); }
-try { registerPavRoutes(app, pool, pavRequired, renderShell, scihRequired); }
-catch (e) { console.error('ERRO registerPavRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }

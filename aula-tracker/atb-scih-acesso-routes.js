@@ -110,20 +110,6 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       iscTriagem = rows[0]?.triagem || 0;
     } catch (e) { iscOk = false; }
 
-    // Triagens de IA aguardando julgamento. Mesma filosofia dos contadores do
-    // ISC: o número é o que faz o portal ser diário. Tenant-aware (checagens
-    // gravam a sigla em `inst`; linhas antigas sem inst contam como HUSF) e
-    // dentro de try/catch — a tabela pode não existir no primeiro boot.
-    let iaPend = 0;
-    try {
-      const { rows } = await pool.query(`
-        SELECT count(*)::int AS n
-          FROM atb_historia_checagens
-         WHERE narrativa = false AND revisao IS NULL
-           AND (inst = $1 OR (inst IS NULL AND $1 = 'HUSF'))`, [sigISC || 'HUSF']);
-      iaPend = rows[0]?.n || 0;
-    } catch { /* módulo ainda não migrado — segue sem badge */ }
-
     // Fase 1 do ISC é só HUSF (equipes, regras e perfil são semeados lá). Em
     // modo legado (sem tenant) também mostra. Some no SCMI até a fase 2.
     const mostrarISC = !sigISC || String(sigISC).toUpperCase() === 'HUSF';
@@ -154,9 +140,6 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <div class="hub">
           ${card('/atb/admin/adesao', '📈', 'Adesão aos pareceres')}
           ${card(VIG + '/atb_dots.html', '💊', 'Consumo de ATB (DOTs)', true)}
-          ${card('/atb/admin/pergunta', '💬', 'Pergunta ao banco (SQL)')}
-          ${card('/atb/admin/indicadores', '📉', 'Pergunta aos indicadores')}
-          ${card('/atb/admin/export', '📤', 'Exportar dados (CSV completo)')}
         </div>
 
         <div class="sec">Vigilância — relatórios HUSF</div>
@@ -176,17 +159,10 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/monitoramento', '🔁', 'Regras de monitoramento')}
           ${card('/atb/admin/form', '🧩', 'Editar opções do formulário')}
           ${card('/atb/admin/regras-form', '🔀', 'Regras do formulário')}
-          ${card('/atb/admin/historia/revisao', '🤖', 'Triagens de IA — revisão', false, iaPend || null)}
           ${card('/atb/admin/parecer-frases', '💬', 'Frases do Parecer')}
           ${card('/scih/solicitar', '✉️', 'Página de solicitação')}
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
           ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema')}
-        </div>
-
-        <div class="sec">Formulário — teste e promoção</div>
-        <div class="hub">
-          ${card('/atb/admin/form-teste', '🧪', 'Ambiente de teste')}
-          ${card('/atb/admin/form-transportador', '🚚', 'Transportador (promover)')}
         </div>
         ${mostrarISC ? `
         <div class="sec">Configuração — ISC</div>

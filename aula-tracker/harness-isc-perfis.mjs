@@ -63,7 +63,7 @@ t('abre a ficha', (await get(s, `/isc/admin/ficha/${f.id}?inst=HUSF`)).status ==
 t('cadastra ficha manual', (await get(s, '/isc/admin/nova?inst=HUSF')).status === 200);
 t('abre o importador', (await get(s, '/isc/admin/importar?inst=HUSF')).status === 200);
 t('edita mensagens', (await get(s, '/isc/admin/templates?inst=HUSF')).status === 200);
-let r = await post(s, `/isc/admin/ficha/${f.id}/contato?inst=HUSF`, { janela: '7', r_febre: 'Sim', responsavel: 'Ana' });
+let r = await post(s, `/isc/admin/ficha/${f.id}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_febre: 'Sim', responsavel: 'Ana' });
 t('REGISTRA CONTATO (o trabalho dela)', r.status === 302, `status=${r.status}`);
 t('o contato foi gravado', (await pool.query('SELECT count(*)::int n FROM isc_contatos WHERE ficha_id=$1', [f.id])).rows[0].n === 1);
 

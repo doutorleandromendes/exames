@@ -24,11 +24,13 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 import { tenantFromReq, getTenantLogo, sanitizeSigla } from './atb-tenant.js';
+import { criarFichaAtbDeIsc } from './isc-atb-bridge.js';
 import {
   CHECKLIST, RECOMENDACOES, MOTIVOS_INSUCESSO, CANAIS, ISC_TIPOS,
   ISC_CLASSIFICACOES, ISC_CRITERIOS, POTENCIAL_CONTAMINACAO, STATUS_VIGILANCIA,
   PLACEHOLDERS, recomputarEstado, normalizaTelefone, formataTelefone,
   linkWhatsApp, renderTemplate, toISODate, dataBR, addDays, diffDias, hojeISO, JANELA_IDENTIDADE,
+  statusImportacao, dataLocalISO,
   boolDe, enumDe, extraiRespostas, janelasDe, contatoTemAlerta, alertasDe,
 } from './isc-core.js';
 
@@ -247,6 +249,16 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     try {
       const { sigla, instId, travado } = await resolveInst(req);
       const q = req.query || {};
+
+      // Rotina de importação (segunda e quinta de manhã). Nunca derruba o grid:
+      // se a consulta falhar, o banner simplesmente não aparece.
+      let imp = { atrasada: false };
+      try {
+        const { rows: [ult] } = await pool.query(
+          `SELECT max(created_at) AS quando FROM isc_import_lotes
+            WHERE ($1::int IS NULL OR instituicao_id = $1)`, [instId]);
+        imp = statusImportacao(ult?.quando || null);
+      } catch (e) { imp = { atrasada: false }; }
       const w = [], p = [];
       const add = (sql, val) => { p.push(val); w.push(sql.replace('$?', '$' + p.length)); };
 
@@ -398,6 +410,15 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
       const html = `<div class="isc">
         ${chrome(sigla, 'Vigilância ISC', 'Busca ativa pós-alta · classificação · indicadores', nav(req) + `<a href="/isc/admin/export.csv?${new URLSearchParams(q)}">CSV</a>`)}
+        ${imp.atrasada ? `<div class="card2" style="border-left:3px solid #e85d5d;background:#fdecea">
+          <b style="font-size:13px">Importação do mapa cirúrgico atrasada</b>
+          <p class="sub" style="margin:6px 0 0;line-height:1.6">
+            A rotina é <b>toda segunda e quinta, pela manhã</b>. Não houve importação em <b>${dataBR(imp.esperado)}</b>${imp.diasAtraso > 0 ? ` — ${imp.diasAtraso} dia(s) atrás` : ' (o prazo era hoje ao meio-dia)'}.
+            ${imp.ultima ? `Última importação: <b>${dataBR(imp.ultima)}</b>.` : 'Nenhuma importação registrada ainda.'}
+            <br>Cirurgia que não entra pelo mapa não é vigiada — ninguém é contatado por ela.
+          </p>
+          <a class="btn" style="text-decoration:none;display:inline-block;margin-top:10px" href="/isc/admin/importar">Importar agora</a>
+        </div>` : ''}
         <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
           <div class="metric" style="border-left-color:#e85d5d"><div class="mv" style="color:#c0392b">${m.confirmadas || 0}</div><div class="ml">ISC confirmadas</div></div>
           <div class="metric" style="border-left-color:#5a9bf0"><div class="mv" style="color:#2c6fb5">${m.investigando || 0}</div><div class="ml">Em investigação</div></div>
@@ -536,6 +557,13 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
                      <form method="post" action="/isc/admin/ficha/${f.id}/identidade" style="display:inline">
                        <input type="hidden" name="inst" value="${safe(sigla || '')}"><input type="hidden" name="status" value="negada">
                        <button class="btn btn-sec" style="border-color:#e0a3a3;color:#c0392b" title="Não é o número do paciente">✗ Não é o paciente</button></form>` : ''}`
+                : identNegada
+                ? `<form method="post" action="/isc/admin/ficha/${f.id}/identidade" style="display:inline">
+                     <input type="hidden" name="inst" value="${safe(sigla || '')}"><input type="hidden" name="status" value="confirmada">
+                     <button class="btn btn-sec" style="border-color:#2bb673;color:#1e7e34" title="Marcou por engano, ou depois descobriu que é o paciente">✓ Na verdade é o paciente</button></form>
+                   <form method="post" action="/isc/admin/ficha/${f.id}/identidade" style="display:inline">
+                     <input type="hidden" name="inst" value="${safe(sigla || '')}"><input type="hidden" name="status" value="pendente">
+                     <button class="btn btn-sec" title="Voltar a perguntar">↺ Perguntar de novo</button></form>`
                 : `${enviada
                     ? `<form method="post" action="/isc/admin/envio/desmarcar" style="display:inline">
                          <input type="hidden" name="inst" value="${safe(sigla || '')}">
@@ -730,6 +758,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           <select name="r_${c.key}"><option value="">—</option><option>Sim</option><option>Não</option><option>Não sabe</option></select></div>`;
       }).join('');
 
+      const primeiraJanela = janelas.length ? Math.min(...janelas) : 7;
       const janelaOpts = janelas.map(d => {
         const e = est[String(d)] || {};
         const feito = e.status === 'concluida';
@@ -795,6 +824,9 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
                   <div><label class="l">Data do contato</label><input type="date" name="data_contato" value="${hoje}"></div>
                   <div><label class="l">Canal</label><select name="canal">${CANAIS.map(([v, l]) => `<option value="${v}">${safe(l)}</option>`).join('')}</select></div>
                   <div><label class="l">Responsável</label><input name="responsavel"></div>
+                  <div><label class="l">Prontuário${f.prontuario ? '' : ' <span style="color:#c0392b">*</span>'}</label>
+                    <input name="prontuario" value="${safe(f.prontuario || '')}" placeholder="nº do prontuário">
+                    <div class="sub" style="margin-top:3px">${f.prontuario ? 'Já registrado — corrija se estiver errado.' : `Obrigatório no 1º contato (${primeiraJanela}d): o mapa cirúrgico não traz prontuário, e ele é necessário para a ficha do ATB.`}</div></div>
                   <div style="grid-column:1/-1"><label class="chk"><input type="checkbox" name="sem_sucesso" value="1" id="ss"> <b>Tentativa sem sucesso</b> (não falou com o paciente)</label></div>
                   <div id="bx-motivo" style="display:none"><label class="l">Motivo</label><select name="motivo_insucesso">${MOTIVOS_INSUCESSO.map(([v, l]) => `<option value="${v}">${safe(l)}</option>`).join('')}</select></div>
                 </div>
@@ -819,6 +851,33 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
               </script>
             </div>
             <div class="card2"><h2>Histórico de contatos</h2><div class="tl">${tl}</div></div>
+          </div>
+
+          ${req.query.atb ? `<div class="card2" style="border-left:3px solid #2bb673;background:#f2fbf5">
+            <b style="font-size:13px">Ficha criada no ATB &nbsp;<a href="/atb/admin/ficha/${safe(String(req.query.atb))}" target="_blank" rel="noopener">abrir #${safe(String(req.query.atb))} ↗</a></b>
+            <p class="sub" style="margin:6px 0 0;line-height:1.6">Retrospectiva, IrAS = <b>ISC</b>, parecer <b>Audit_post</b>, foco <b>Infecção do sítio cirúrgico</b>. Confira setor e prontuário lá — o mapa cirúrgico não traz os dois.</p>
+          </div>` : ''}
+          ${req.query.atb_erro ? `<div class="card2" style="border-left:3px solid #e85d5d;background:#fdecea">
+            <b style="font-size:13px">A ficha do ATB NÃO foi criada</b>
+            <p class="sub" style="margin:6px 0 0;line-height:1.6">A classificação de ISC foi salva normalmente — só a ficha derivada falhou:<br><code>${safe(String(req.query.atb_erro))}</code><br>Você pode lançar a ficha à mão em <a href="/atb/admin/ficha-retrospectiva">ficha retrospectiva</a>.</p>
+          </div>` : ''}
+          ${f.atb_ficha_id && !req.query.atb ? `<p class="sub" style="margin:0 0 10px">Ficha correspondente no ATB: <a href="/atb/admin/ficha/${f.atb_ficha_id}" target="_blank" rel="noopener">#${f.atb_ficha_id} ↗</a></p>` : ''}
+          <div class="card2" style="border-left:3px solid ${f.identidade_status === 'confirmada' ? '#2bb673' : f.identidade_status === 'negada' ? '#c0392b' : '#f0a500'}">
+            <h2>Confirmação de identidade (passo 0)</h2>
+            <p class="sub" style="margin-top:-6px">
+              ${f.identidade_status === 'confirmada' ? `Confirmada${f.identidade_por ? ' por ' + safe(f.identidade_por) : ''}${f.identidade_em ? ' em ' + dataBR(f.identidade_em) : ''}.`
+                : f.identidade_status === 'negada' ? 'Marcada como <b>não sendo o paciente</b> — a busca ativa está bloqueada para esta ficha.'
+                : 'Ainda não confirmada. A mensagem clínica não sai antes disso.'}
+              Pode ser corrigida a qualquer momento.
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              ${['confirmada', 'negada', 'pendente'].filter(v => v !== f.identidade_status).map(v => `
+                <form method="post" action="/isc/admin/ficha/${f.id}/identidade" style="display:inline">
+                  <input type="hidden" name="inst" value="${safe(sigla || '')}"><input type="hidden" name="status" value="${v}">
+                  <button class="btn btn-sec" style="${v === 'confirmada' ? 'border-color:#2bb673;color:#1e7e34' : v === 'negada' ? 'border-color:#e0a3a3;color:#c0392b' : ''}">
+                    ${v === 'confirmada' ? '✓ É o paciente' : v === 'negada' ? '✗ Não é o paciente' : '↺ Voltar a pendente'}
+                  </button></form>`).join('')}
+            </div>
           </div>
 
           <div class="card2" style="border-left:3px solid #e85d5d">
@@ -876,6 +935,29 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
       const b = req.body || {};
       const semSucesso = boolDe(b.sem_sucesso) === true;
+
+      // Prontuário obrigatório no PRIMEIRO contato bem-sucedido. O mapa do Tasy
+      // não traz prontuário, e sem ele a ficha do ATB nasce sem identificação
+      // utilizável. Só exigido quando houve contato: numa tentativa sem sucesso
+      // ela não tem como obter o dado, e bloquear o registro da falha seria pior.
+      const janelasFicha = janelasDe(dados.ficha, dados.equipe);
+      const primeira = janelasFicha.length ? Math.min(...janelasFicha) : 7;
+      const prontuarioInformado = String(b.prontuario ?? '').trim();
+      const prontuarioAtual = String(dados.ficha.prontuario ?? '').trim();
+      const ehPrimeira = b.janela && Number(b.janela) === primeira;
+      if (ehPrimeira && !semSucesso && !prontuarioInformado && !prontuarioAtual) {
+        return res.status(400).send(renderShell('Prontuário obrigatório', `<div class="card">
+          <h1>Informe o prontuário</h1>
+          <p class="mut">No primeiro contato (${primeira} dias) o número do prontuário é obrigatório —
+          o mapa cirúrgico não traz esse dado e ele é necessário para gerar a ficha no ATB
+          caso a ISC seja confirmada.</p>
+          <a href="/isc/admin/ficha/${id}#contato">← Voltar e preencher</a></div>`));
+      }
+      if (prontuarioInformado && prontuarioInformado !== prontuarioAtual) {
+        await pool.query(`UPDATE isc_fichas SET prontuario = $2, updated_at = now() WHERE id = $1`,
+          [id, prontuarioInformado]);
+      }
+
       const respostas = semSucesso ? {} : extraiRespostas(b);
       const recs = semSucesso ? [] :
         (Array.isArray(b.recomendacoes) ? b.recomendacoes : (b.recomendacoes ? [b.recomendacoes] : []))
@@ -942,7 +1024,25 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
          b.classificado_por || null, obito, b.obito_data || null]);
 
       await sincronizarEstado(id);
-      res.redirect(`/isc/admin/ficha/${id}`);
+
+      // Ponte ISC → ATB: ISC confirmada é IrAS por definição. Cria a ficha
+      // retrospectiva no ATB já classificada, para não depender de redigitação.
+      //
+      // NÃO derruba a classificação se a ponte falhar: o registro clínico que o
+      // médico acabou de fazer é o dado primário; a ficha do ATB é derivada e
+      // pode ser criada depois. O erro fica no log e visível na tela da ficha.
+      let ponte = null;
+      if (enumDe(b.isc_classificacao, ISC_CLASSIFICACOES.map(x => x[0]), 'nao_avaliada') === 'confirmada') {
+        try {
+          ponte = await criarFichaAtbDeIsc(pool, id, { userId: req.user?.id || null });
+        } catch (e) {
+          console.error('[isc→atb] falha ao criar ficha ATB da ISC', id, e.message);
+          ponte = { criada: false, erro: e.message };
+        }
+      }
+      const qs = ponte?.criada ? `?atb=${ponte.atbFichaId}`
+               : ponte?.erro ? `?atb_erro=${encodeURIComponent(String(ponte.erro).slice(0, 200))}` : '';
+      res.redirect(`/isc/admin/ficha/${id}${qs}`);
     } catch (e) { erro(res, e); }
   });
 

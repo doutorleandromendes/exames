@@ -112,7 +112,7 @@ await post('/isc/admin/envio/marcar', { inst: 'HUSF', ficha_id: f1, janela: '7' 
 eq('1 linha só na fila', (await pool.query('SELECT count(*)::int n FROM isc_envios WHERE ficha_id=$1', [f1])).rows[0].n, 1);
 
 console.log('\n── Registrar a resposta tira da agenda ──');
-r = await post(`/isc/admin/ficha/${f1}/contato?inst=HUSF`, { janela: '7', r_febre: 'Não', responsavel: 'Ana' });
+r = await post(`/isc/admin/ficha/${f1}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_febre: 'Não', responsavel: 'Ana' });
 t('registra', r.status === 302);
 h = await pega(AG);
 t('MARIA sai da agenda (janela 7 fechada)', !h.includes('MARIA SILVA'));

@@ -133,16 +133,16 @@ const fNeuro = await mkFicha('JOAO NEURO', NEURO);
 // Recriar a regra de Febre (apagada acima) para testar o efeito.
 await post('/isc/admin/alertas', { inst: 'HUSF', nome: 'Febre',
   grupos: JSON.stringify([[{ campo: 'febre', valores: ['Sim'] }]]), equipe_ids: '[]' });
-await post(`/isc/admin/ficha/${fObst}/contato?inst=HUSF`, { janela: '7', r_febre: 'Sim', responsavel: 'Ana' });
+await post(`/isc/admin/ficha/${fObst}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_febre: 'Sim', responsavel: 'Ana' });
 t('febre acende (regra do banco)', (await pool.query('SELECT tem_alerta FROM isc_fichas WHERE id=$1', [fObst])).rows[0].tem_alerta === true);
 
 // Escopo: a regra de dreno é só de NEURO. Em Obstetrícia não pode acender.
 const fObst2 = await mkFicha('ANA OBST', OBST);
-await post(`/isc/admin/ficha/${fObst2}/contato?inst=HUSF`, { janela: '7', r_dreno: 'Sim', responsavel: 'Ana' });
+await post(`/isc/admin/ficha/${fObst2}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_dreno: 'Sim', responsavel: 'Ana' });
 t('dreno em OBSTETRÍCIA não acende (regra é só de neuro)',
   (await pool.query('SELECT tem_alerta FROM isc_fichas WHERE id=$1', [fObst2])).rows[0].tem_alerta === false);
 
-await post(`/isc/admin/ficha/${fNeuro}/contato?inst=HUSF`, { janela: '7', r_dreno: 'Sim', responsavel: 'Ana' });
+await post(`/isc/admin/ficha/${fNeuro}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_dreno: 'Sim', responsavel: 'Ana' });
 t('dreno em NEURO acende (dentro do escopo)',
   (await pool.query('SELECT tem_alerta FROM isc_fichas WHERE id=$1', [fNeuro])).rows[0].tem_alerta === true);
 

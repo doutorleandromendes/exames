@@ -236,7 +236,7 @@ t('perfil salvo é reaplicado', html.includes('Serão criadas'));
 
 console.log('\n── Desfazer lote ──');
 // Trabalha 1 ficha: contato registrado → não pode ser apagada.
-await post(`/isc/admin/ficha/${maria.id}/contato?inst=HUSF`, { janela: '7', r_febre: 'Não', responsavel: 'Ana' });
+await post(`/isc/admin/ficha/${maria.id}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_febre: 'Não', responsavel: 'Ana' });
 r = await post('/isc/admin/importar/lote/1/desfazer', { inst: 'HUSF' });
 t('desfazer redireciona', r.status === 302);
 ({ rows: fs } = await pool.query('SELECT * FROM isc_fichas WHERE import_lote_id=1'));

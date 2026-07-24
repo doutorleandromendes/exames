@@ -94,7 +94,7 @@ eq('entrou na fila', (await pool.query('SELECT count(*)::int n FROM isc_envios')
 
 console.log('\n── Identidade vale por PACIENTE: janela 30 não pede de novo ──');
 // Fecha a janela 7 e avança para a 30.
-await post(`/isc/admin/ficha/${f.id}/contato?inst=HUSF`, { janela: '7', r_febre: 'Não', responsavel: 'Ana' });
+await post(`/isc/admin/ficha/${f.id}/contato?inst=HUSF`, { janela: '7', prontuario: 'P-TESTE', r_febre: 'Não', responsavel: 'Ana' });
 r = await post('/isc/admin/envio/marcar', { inst: 'HUSF', ficha_id: f.id, janela: '30' });
 t('janela 30 não é barrada (identidade já confirmada)', r.status === 302, `status=${r.status}`);
 

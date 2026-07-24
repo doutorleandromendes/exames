@@ -123,6 +123,45 @@ export function diffDias(isoA, isoB) {
 
 export function hojeISO() { return new Date().toISOString().slice(0, 10); }
 
+// ── Rotina de importação do mapa cirúrgico ────────────────────────────────
+// O mapa é importado toda segunda e quinta de manhã. Se passou do meio-dia e
+// não veio, a vigilância começa a perder paciente — por isso o grid avisa.
+//
+// ⚠️ Aqui NÃO se usa hojeISO(): ele deriva de toISOString(), que é UTC, e
+// depois das 21h BRT devolve o dia seguinte (TZ=America/Sao_Paulo não afeta
+// toISOString). Dia da semana e hora-limite só fecham com métodos LOCais.
+export const DIAS_IMPORTACAO = [1, 4];          // 1=segunda, 4=quinta (getDay)
+export const HORA_LIMITE_IMPORTACAO = 12;
+
+export function dataLocalISO(d = new Date()) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// Último dia de importação já VENCIDO (passou do meio-dia). Olhar para trás —
+// e não só para hoje — é o que impede a segunda esquecida de sumir do radar na
+// terça: o alerta permanece até a importação acontecer.
+export function diaEsperadoImportacao(agora = new Date(), dias = DIAS_IMPORTACAO, hora = HORA_LIMITE_IMPORTACAO) {
+  const d = new Date(agora.getTime());
+  for (let i = 0; i < 8; i++) {
+    if (dias.includes(d.getDay()) && (i > 0 || agora.getHours() >= hora)) return dataLocalISO(d);
+    d.setDate(d.getDate() - 1);
+  }
+  return null;
+}
+
+// { atrasada, esperado, ultima, diasAtraso } — comparação por DIA.
+export function statusImportacao(ultimaImportacao, agora = new Date(), opts = {}) {
+  const esperado = diaEsperadoImportacao(agora, opts.dias, opts.hora);
+  if (!esperado) return { atrasada: false, esperado: null, ultima: toISODate(ultimaImportacao) || null };
+  const ultima = ultimaImportacao ? dataLocalISO(new Date(ultimaImportacao)) : null;
+  const atrasada = !ultima || ultima < esperado;
+  const diasAtraso = atrasada
+    ? Math.round((new Date(`${dataLocalISO(agora)}T00:00:00`) - new Date(`${esperado}T00:00:00`)) / 86400000)
+    : 0;
+  return { atrasada, esperado, ultima, diasAtraso };
+}
+
 // ── Exibição de data ──────────────────────────────────────────────────────
 // DD-MM-AAAA: é como o SCIH lê data. Só para TELA.
 //

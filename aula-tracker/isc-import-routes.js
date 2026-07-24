@@ -765,27 +765,33 @@ export function registerIscImportRoutes(app, pool, scihRequired, renderShell) {
 
       const html = `<div class="isc">
         ${chrome(sigla, 'Regras de alerta', 'Quando as respostas do paciente acendem suspeita de ISC', true)}
-        ${desatualizado ? `<div class="card2" style="border-left:3px solid #f0a500;background:#fffaf2">
-          <b style="font-size:13px">Os alertas já gravados ainda seguem as regras antigas</b>
+        <!-- O recálculo fica SEMPRE disponível. A primeira versão só mostrava o
+             botão quando o sistema já sabia estar desatualizado — e como o
+             carimbo de "regra mudou" nasce vazio, no primeiro uso não havia
+             botão nenhum. Ferramenta de conserto que só aparece depois do
+             problema não serve. O banner muda de tom; o botão não some. -->
+        <div class="card2" style="border-left:3px solid ${desatualizado ? '#f0a500' : '#dadce0'};background:${desatualizado ? '#fffaf2' : '#f8f9fa'}">
+          <b style="font-size:13px">${desatualizado ? 'Os alertas já gravados ainda seguem as regras antigas' : 'Recalcular alertas'}</b>
           <p class="sub" style="margin:6px 0 10px;line-height:1.6">
             O alerta de cada ficha é gravado quando ela é tocada — mudar uma regra <b>não</b> reprocessa
             o que já existe. Até reprocessar, o grid mostra uma mistura: ficha contatada depois da mudança
             segue a regra nova; ficha parada mantém a antiga.
+            ${desatualizado ? '<br><b>Há alteração de regra pendente de reprocessamento.</b>' : ''}
+            ${cfg?.alerta_recalc_em ? `<br>Último reprocessamento: <b>${dataBR(cfg.alerta_recalc_em)}</b>${cfg.alerta_recalc_mudou != null ? ` · ${cfg.alerta_recalc_mudou} ficha(s) mudaram` : ''}.` : '<br>Nunca reprocessado.'}
           </p>
-          <button class="btn" id="brecalc">Recalcular alertas de todas as fichas</button>
+          <button class="btn${desatualizado ? '' : ' btn-sec'}" id="brecalc">Recalcular alertas de todas as fichas</button>
           <span class="sub" id="mrecalc" style="margin-left:10px"></span>
-        </div>` : (cfg?.alerta_recalc_em ? `<p class="sub" style="margin:0 0 12px">Alertas reprocessados em ${dataBR(cfg.alerta_recalc_em)}${cfg.alerta_recalc_mudou != null ? ` · ${cfg.alerta_recalc_mudou} ficha(s) mudaram` : ''}. <a href="#" id="brecalc2">Recalcular de novo</a></p>` : '')}
+        </div>
         <script>
-          function recalcISC(btn){
-            var msg=document.getElementById('mrecalc')||{};
-            if(btn) btn.disabled=true; msg.textContent='Reprocessando…';
+          var b1=document.getElementById('brecalc');
+          if(b1) b1.addEventListener('click',function(){
+            var msg=document.getElementById('mrecalc');
+            b1.disabled=true; msg.textContent='Reprocessando…';
             fetch('/isc/admin/alertas/recalcular?inst=${encodeURIComponent(sigla || '')}',{method:'POST'})
               .then(function(r){return r.json()})
-              .then(function(j){ msg.textContent=(j.fichas||0)+' ficha(s) na fila — recarregue em alguns segundos.'; })
-              .catch(function(){ msg.textContent='Falhou. Tente de novo.'; if(btn) btn.disabled=false; });
-          }
-          var b1=document.getElementById('brecalc'); if(b1) b1.addEventListener('click',function(){recalcISC(b1)});
-          var b2=document.getElementById('brecalc2'); if(b2) b2.addEventListener('click',function(e){e.preventDefault();recalcISC(null)});
+              .then(function(j){ msg.textContent=(j.fichas||0)+' ficha(s) na fila — recarregue a página em alguns segundos.'; })
+              .catch(function(){ msg.textContent='Falhou. Tente de novo.'; b1.disabled=false; });
+          });
         </script>
         <div class="card2" style="background:#f8f9fa">
           <b style="font-size:13px">Como funciona</b>

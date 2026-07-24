@@ -177,7 +177,12 @@ const comAlerta = async () => (await pool.query('SELECT count(*)::int n FROM isc
 eq('as duas acendem por febre', await comAlerta(), 2);
 
 let hh = await pega('/isc/admin/alertas?inst=HUSF');
-t('sem mudança de regra, sem banner', !hh.includes('ainda seguem as regras antigas'));
+t('sem mudança de regra, sem alarme', !hh.includes('ainda seguem as regras antigas'));
+// Regressão: o botão precisa existir SEMPRE. A primeira versão só o mostrava
+// quando já havia mudança pendente — e como o carimbo nasce vazio, no primeiro
+// uso não havia botão nenhum.
+t('mas o botão de recalcular está lá desde o começo', hh.includes('Recalcular alertas de todas'));
+t('e diz que nunca foi reprocessado', hh.includes('Nunca reprocessado'));
 
 const { rows: [rFebre] } = await pool.query(
   `SELECT id FROM isc_alerta_regras WHERE nome='Febre' AND instituicao_id=$1`, [inst.id]);
@@ -194,8 +199,9 @@ eq('e diz quantas fichas entraram na fila', (await rr.json()).fichas, 2);
 await new Promise(s => setTimeout(s, 1200));
 eq('depois do reprocesso, nenhuma acende', await comAlerta(), 0);
 hh = await pega('/isc/admin/alertas?inst=HUSF');
-t('banner de desatualizado some', !hh.includes('ainda seguem as regras antigas'));
+t('alarme some', !hh.includes('ainda seguem as regras antigas'));
 t('e mostra quantas mudaram', hh.includes('ficha(s) mudaram'));
+t('botão continua disponível para rodar de novo', hh.includes('Recalcular alertas de todas'));
 
 // E o inverso: religar a regra e reprocessar traz os alertas de volta.
 await post(`/isc/admin/alertas/${rFebre.id}/toggle`, { inst: 'HUSF' });

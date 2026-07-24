@@ -232,6 +232,9 @@ export async function runAtbMigrations(pool) {
   //   false = telegráfica (só grava assim se a regra NÃO bloquear o envio)
   //   null  = não verificada (regra não se aplica, ou fail-open de infra)
   await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS historia_narrativa BOOLEAN`);
+  // Confirmação do prescritor no gatilho de ISC: true=confirmou, false=negou,
+  // null=não foi perguntado. É o rótulo de ouro do classificador.
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS isc_confirmada BOOLEAN`);
 
   console.log('[atb] migrations ok');
 }

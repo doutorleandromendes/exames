@@ -884,6 +884,11 @@
     var nudgeSt = useState(false), nudge = nudgeSt[0], setNudge = nudgeSt[1];
     var hCacheRef = React.useRef({});
     var hUltimoRef = React.useRef('');
+    // [isc-nudge] Confirmação de ISC do prescritor. Ref (não estado) porque
+    // precisa sobreviver ao re-render sem re-disparar o modal.
+    var iscRespRef = React.useRef(null);          // null = não perguntado · true/false = respondeu
+    var iscSt = useState(null), iscNudge = iscSt[0], setIscNudge = iscSt[1];
+    var iscMsgSt = useState(''), iscMsg = iscMsgSt[0], setIscMsg = iscMsgSt[1];
 
     var inst = window.ATB_INSTITUICAO || 'HUSF';
     var PREVIEW = new URLSearchParams(window.location.search).get('preview') === '1';
@@ -1020,6 +1025,39 @@
       if (window.ATB_TESTE) return { all: [ { campo: 'setor', op: 'in', valor: ['UTI', 'UTI C'] } ] };
       return null;
     }
+    // [isc-nudge] Gatilho de triagem de ISC: schema -> historia_clinica.iscCond.
+    // Sem regra configurada = inerte (mesma garantia da narrativa).
+    function regraIsc() {
+      var campo = null;
+      ((schema && schema.secoes) || []).forEach(function (s) {
+        (s.campos || []).forEach(function (c) { if (c.key === 'historia_clinica') campo = c; });
+      });
+      return (campo && campo.iscCond) ? campo.iscCond : null;
+    }
+    // Acha a opção de sítio cirúrgico ENTRE AS OPÇÕES DO PRÓPRIO SCHEMA. Não
+    // embute a string: se o rótulo mudar na tela, a regra do campo de data da
+    // cirurgia (que compara por igualdade) continua casando.
+    function opcaoIsc() {
+      var campo = null;
+      ((schema && schema.secoes) || []).forEach(function (s) {
+        (s.campos || []).forEach(function (c) { if (c.key === 'foco_infeccao') campo = c; });
+      });
+      var opts = (campo && campo.options) || [];
+      for (var i = 0; i < opts.length; i++) {
+        var v = (opts[i] && typeof opts[i] === 'object') ? opts[i].v : opts[i];
+        if (_normTxt(v).indexOf('sitio cirurgico') !== -1) return v;
+      }
+      return null;
+    }
+    // Quais rótulos as regras deste schema realmente usam — evita pagar pelas
+    // duas classificações quando só uma regra existe.
+    function _querRotulos() {
+      var q = [];
+      if (regraNarrativa()) q.push('narrativa');
+      if (regraIsc()) q.push('isc');
+      return q.length ? q : ['narrativa'];
+    }
+
     function checarHistoria(texto) {
       var t = String(texto || '').trim();
       if (t.length < 15) { setHistoriaAviso(null); return; }
@@ -1029,25 +1067,28 @@
       setHistoriaChecando(true);
       fetch('/atb/api/checar-historia', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ historia: t, inst: inst })
+        body: JSON.stringify({ historia: t, inst: inst, quer: _querRotulos() })
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           setHistoriaChecando(false);
           if (hUltimoRef.current !== t) return;
           if (d && d.disponivel) {
-            cache[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id };
+            cache[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id, isc: d.isc, indicios: d.indicios };
             setHistoriaAviso(d.narrativa === false ? cache[t] : null);
           } else { setHistoriaAviso(null); }
         })
         .catch(function () { setHistoriaChecando(false); setHistoriaAviso(null); });
     }
-    function postFicha(tagNarrativa) {
+    function postFicha(tagNarrativa, tagIsc) {
       setNudge(false);
+      setIscNudge(null);
       setEnviando(true);
       fetch('/atb/api/fichas', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instituicao: inst, dados: valores, historia_narrativa: (tagNarrativa === undefined ? null : tagNarrativa) })
+        body: JSON.stringify({ instituicao: inst, dados: valores,
+          historia_narrativa: (tagNarrativa === undefined ? null : tagNarrativa),
+          isc_confirmada: (tagIsc === undefined ? null : tagIsc) })
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
@@ -1064,30 +1105,46 @@
         if (primeiro) primeiro.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
-      var cond = regraNarrativa();
+      var condN = regraNarrativa();
+      var condI = regraIsc();
       var t = String(valores['historia_clinica'] || '').trim();
-      if (!cond || !avaliaCond(cond, valores)) return postFicha(null);
-      var r = (t.length >= 15) ? hCacheRef.current[t] : null;
-      if (r && r.narrativa === true)  return postFicha(true);
-      if (r && r.narrativa === false) { setNudge(true); return; }
+      var usaN = !!condN && avaliaCond(condN, valores);
+      var usaI = !!condI && avaliaCond(condI, valores);
+      if (!usaN && !usaI) return postFicha(null, null);
+
+      function decidir(r) {
+        if (!r) return postFicha(null, null);
+        var tagN = usaN && r.narrativa !== undefined ? r.narrativa : null;
+        // História telegráfica BLOQUEIA — precedência sobre a triagem de ISC.
+        if (usaN && r.narrativa === false) { setHistoriaAviso(r); setNudge(true); return; }
+        if (!usaI) return postFicha(tagN, null);
+        // Já respondeu nesta sessão: não pergunta de novo.
+        if (iscRespRef.current !== null) return postFicha(tagN, iscRespRef.current);
+        if (r.isc === true) { setIscNudge({ indicios: r.indicios || '', tagN: tagN }); return; }
+        return postFicha(tagN, r.isc === undefined ? null : r.isc);
+      }
+
+      var cached = (t.length >= 15) ? hCacheRef.current[t] : null;
+      if (cached) return decidir(cached);
+
       setHistoriaChecando(true);
       var ctrl = new AbortController();
       var to = setTimeout(function () { ctrl.abort(); }, 20000);
       fetch('/atb/api/checar-historia', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ historia: t, inst: inst }), signal: ctrl.signal
+        body: JSON.stringify({ historia: t, inst: inst, quer: _querRotulos() }), signal: ctrl.signal
       })
         .then(function (r2) { return r2.json(); })
         .then(function (d) {
           clearTimeout(to); setHistoriaChecando(false);
           if (d && d.disponivel) {
-            hCacheRef.current[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id };
-            if (d.narrativa === false) { setHistoriaAviso(hCacheRef.current[t]); setNudge(true); }
-            else postFicha(true);
-          } else { postFicha(null); }
+            hCacheRef.current[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id, isc: d.isc, indicios: d.indicios };
+            decidir(hCacheRef.current[t]);
+          } else { postFicha(null, null); }
         })
-        .catch(function () { clearTimeout(to); setHistoriaChecando(false); postFicha(null); });
+        .catch(function () { clearTimeout(to); setHistoriaChecando(false); postFicha(null, null); });
     }
+
     function modalNudge() {
       return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
         e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
@@ -1095,6 +1152,37 @@
           e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'História Clínica sem informações suficientes sobre a indicação do ATB. Descreva melhor o quadro antes de enviar.'),
           e('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: '14px' } },
             e('button', { onClick: function () { setNudge(false); var el = document.getElementById('campo-historia'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); } }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Revisar história')
+          )
+        )
+      );
+    }
+
+    // [isc-nudge] Confirmação de ISC. NÃO bloqueia — as duas respostas seguem.
+    // "Sim" move o Foco de Infecção e devolve o prescritor ao formulário: a
+    // mudança acende campos (data da cirurgia) que ele precisa preencher antes
+    // de enviar. Não revalidamos aqui de propósito — validar() leria o `valores`
+    // antigo do closure; quem revalida é o próximo clique em Enviar.
+    function modalIsc() {
+      var ind = (iscNudge && iscNudge.indicios) || '';
+      var tagN = iscNudge ? iscNudge.tagN : null;
+      function responder(sim) {
+        iscRespRef.current = sim;
+        setIscNudge(null);
+        if (!sim) return postFicha(tagN, false);
+        var opc = opcaoIsc();
+        if (!opc) return postFicha(tagN, true);
+        set('foco_infeccao', opc);
+        setIscMsg('Foco de infecção atualizado para “' + opc + '”. Confira os campos que apareceram e envie novamente.');
+      }
+      return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
+        e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '520px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
+          e('h3', { style: { margin: '0 0 8px', fontSize: '17px' } }, 'Infecção de sítio cirúrgico?'),
+          e('p', { style: { margin: '0 0 6px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'A história sugere infecção no sítio operatório.'),
+          ind ? e('p', { style: { margin: '0 0 12px', color: '#5f6368', fontSize: '13px', fontStyle: 'italic' } }, '\u201c' + ind + '\u201d') : null,
+          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px' } }, 'Confirma que se trata de infec\u00e7\u00e3o de s\u00edtio cir\u00fargico?'),
+          e('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px' } },
+            e('button', { onClick: function () { responder(false); }, style: { padding: '9px 16px', border: '1px solid #dadce0', borderRadius: '8px', background: '#fff', color: '#3c4043', cursor: 'pointer', font: 'inherit' } }, 'N\u00e3o \u00e9 ISC'),
+            e('button', { onClick: function () { responder(true); }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Sim, \u00e9 ISC')
           )
         )
       );
@@ -1138,9 +1226,11 @@
       }),
       e('div', { className: 'rodape' },
         e('span', { className: 'prog' }, progresso + '% preenchido · ' + inst),
-        e('button', { className: 'enviar', disabled: enviando, onClick: enviar },
-          enviando ? 'Enviando…' : 'Enviar solicitação →')),
-      nudge ? modalNudge() : null
+        e('button', { className: 'enviar', disabled: enviando || historiaChecando, onClick: enviar },
+          enviando ? 'Enviando…' : (historiaChecando ? 'Verificando história…' : 'Enviar solicitação →'))),
+      iscMsg ? e('div', { className: 'aviso-isc', style: { margin: '10px 0', padding: '10px 12px', background: '#e8f0fe', border: '1px solid #c6dafc', borderRadius: '8px', color: '#174ea6', fontSize: '13px' } }, iscMsg) : null,
+      nudge ? modalNudge() : null,
+      iscNudge ? modalIsc() : null
     );
   }
 

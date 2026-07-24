@@ -25,12 +25,12 @@ const { rows: [inst] } = await pool.query(`SELECT id FROM atb_instituicoes WHERE
 const { rows: [pf] } = await pool.query(
   `INSERT INTO isc_import_perfis (instituicao_id, nome, mapeamento, delim)
    VALUES ($1,'Tasy HUSF',$2,';') RETURNING id`,
-  [inst.id, JSON.stringify({ 0: 'paciente_nome', 1: 'atendimento', 2: 'data_cirurgia', 3: 'procedimento' })]);
+  [inst.id, JSON.stringify({ 0: 'paciente_nome', 1: 'cirurgia_id', 2: 'data_cirurgia', 3: 'procedimento' })]);
 
 const D = addDays(hojeISO(), -5), Dbr = D.split('-').reverse().join('/');
 // Procedimento DENTRO do recorte (cesariana), senão a triagem barra e o teste
 // mede a coisa errada.
-const CSV = `Paciente;Atendimento;Data;Procedimento\nMARIA SILVA;A1;${Dbr};OPERAÇÃO CESARIANA`;
+const CSV = `Paciente;Cirurgia;Data;Procedimento\nMARIA SILVA;A1;${Dbr};OPERAÇÃO CESARIANA`;
 
 function subir(usuario) {
   const app = express();
@@ -62,7 +62,7 @@ s.close();
 console.log('\n── Colaboradora: a prévia é read-only no mapeamento ──');
 s = subir(COLAB);
 h = await (await post(s, '/isc/admin/importar/previa', { inst: 'HUSF', texto: CSV, perfil_id: String(pf.id) })).text();
-t('mapeamento aplicado (mostra os campos)', h.includes('Nome do paciente') && h.includes('Atendimento'));
+t('mapeamento aplicado (mostra os campos)', h.includes('Nome do paciente') && h.includes('Nº da cirurgia'));
 t('NÃO tem <select class="mp"> editável', !h.includes('class="mp"'));
 t('NÃO tem botão Recalcular', !h.includes('Recalcular'));
 t('NÃO tem Salvar perfil', !h.includes('Salvar perfil'));
@@ -95,7 +95,7 @@ t('grava mesmo assim (não quebra o fluxo dela)', r.status === 302);
 const { rows: [f] } = await pool.query('SELECT * FROM isc_fichas ORDER BY id DESC LIMIT 1');
 eq('o NOME foi para paciente_nome (perfil venceu)', f.paciente_nome, 'MARIA SILVA');
 t('e NÃO virou procedimento', f.procedimento !== 'MARIA SILVA', `procedimento=${f.procedimento}`);
-eq('atendimento certo', f.atendimento, 'A1');
+eq('nº de cirurgia certo', f.cirurgia_id, 'A1');
 s.close();
 await pool.query('TRUNCATE isc_fichas RESTART IDENTITY CASCADE');
 
@@ -127,7 +127,7 @@ t('admin remapeia col1 para prontuário', h.includes('Prontuário'));
 // Admin salva perfil.
 await post(s, '/isc/admin/importar/previa', {
   inst: 'HUSF', texto: CSV, salvar_perfil: '1', perfil_nome: 'Perfil do Admin',
-  mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'atendimento', 2: 'data_cirurgia', 3: 'procedimento' }),
+  mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'cirurgia_id', 2: 'data_cirurgia', 3: 'procedimento' }),
 });
 eq('admin cria perfil normalmente', (await pool.query(`SELECT count(*)::int n FROM isc_import_perfis WHERE nome='Perfil do Admin'`)).rows[0].n, 1);
 s.close();

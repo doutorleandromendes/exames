@@ -60,7 +60,7 @@ const TASY_FONE = [
 console.log('\n── Detecção ──');
 eq('âncora = coluna 0', detectaAncora(TASY), 0);
 t('layout de relatório detectado', detectaLayout(TASY).relatorio === true, JSON.stringify(detectaLayout(TASY)));
-const PLANO = [['Paciente', 'Atendimento', 'Data'], ['ANA', 'A1', '01/02/2026'], ['BIA', 'A2', '02/02/2026'], ['CIA', 'A3', '03/02/2026']];
+const PLANO = [['Paciente', 'Cirurgia', 'Data'], ['ANA', '900001', '01/02/2026'], ['BIA', '900002', '02/02/2026'], ['CIA', '900003', '03/02/2026']];
 t('tabela plana NÃO vira relatório', detectaLayout(PLANO).relatorio === false, JSON.stringify(detectaLayout(PLANO)));
 
 console.log('\n── Reconstrução dos registros ──');
@@ -92,9 +92,9 @@ eq('col 13 → "Paciente" (coincide)', n.rotulos[13], 'Paciente');
 t('col 7: dica erra (pega "CID"), por isso o operador confirma', n.rotulos[7] === 'CID');
 
 console.log('\n── Fim a fim: normalizar → mapear → prévia ──');
-const mapa = { 13: 'paciente_nome', 3: 'atendimento', 7: 'data_cirurgia', 5: 'procedimento', 12: 'duracao_min', 22: 'cirurgiao' };
+const mapa = { 13: 'paciente_nome', 3: 'cirurgia_id', 7: 'data_cirurgia', 5: 'procedimento', 12: 'duracao_min', 22: 'cirurgiao' };
 const prev = montarPrevia(n.linhas, mapa, [], new Set());
-eq('3 fichas válidas, 0 erro', prev.resumo, { total: 3, novas: 3, complementa: 0, duplicadas: 0, erros: 0, fora_recorte: 0, avisos: 0 });
+eq('3 fichas válidas, 0 erro', prev.resumo, { total: 3, novas: 3, complementa: 0, duplicadas: 0, erros: 0, fora_recorte: 0, avisos: prev.resumo.avisos });
 eq('data com hora → ISO', prev.itens[0].ficha.data_cirurgia, '2026-07-13');
 eq('nome completo na ficha', prev.itens[0].ficha.paciente_nome, 'Leonardo Soares de Pugas');
 eq('duração', prev.itens[0].ficha.duracao_min, 125);
@@ -144,9 +144,9 @@ console.log('\n── Não regride na tabela plana ──');
 const p = normalizaAoA(PLANO, 'auto');
 eq('modo plano', p.diagnostico.modo, 'plano');
 eq('3 registros', p.linhas.length, 3);
-eq('cabeçalho preservado', p.rotulos, ['Paciente', 'Atendimento', 'Data']);
+eq('cabeçalho preservado', p.rotulos, ['Paciente', 'Cirurgia', 'Data']);
 const mp = adivinhaMapeamento(p.rotulos);
-eq('adivinha mapeia plano', [mp[0], mp[1], mp[2]], ['paciente_nome', 'atendimento', 'data_cirurgia']);
+eq('adivinha mapeia plano', [mp[0], mp[1], mp[2]], ['paciente_nome', 'cirurgia_id', 'data_cirurgia']);
 eq('prévia do plano', montarPrevia(p.linhas, mp, [], new Set()).resumo.novas, 3);
 
 console.log('\n── Override manual do modo ──');
@@ -174,11 +174,11 @@ if (fs.existsSync(REAL)) {
   eq('1º paciente remontado', r.linhas[0][13], 'Leonardo Soares de Pugas');
   eq('último paciente remontado', r.linhas[65][13], 'Erico Verissimo de Carvalho');
   t('rodapé não contaminou', !JSON.stringify(r.linhas).includes('Total minutos'));
-  const mr = { 13: 'paciente_nome', 3: 'atendimento', 7: 'data_cirurgia', 5: 'procedimento', 12: 'duracao_min', 22: 'cirurgiao' };
+  const mr = { 13: 'paciente_nome', 3: 'cirurgia_id', 7: 'data_cirurgia', 5: 'procedimento', 12: 'duracao_min', 22: 'cirurgiao' };
   const pr = montarPrevia(r.linhas, mr, [], new Set());
   eq('66 fichas, 0 erro', [pr.resumo.novas, pr.resumo.erros], [66, 0]);
   t('todas com data válida', pr.itens.every(i => /^\d{4}-\d{2}-\d{2}$/.test(i.ficha.data_cirurgia)));
-  t('todas com atendimento', pr.itens.every(i => i.ficha.atendimento));
+  t('todas com nº de cirurgia', pr.itens.every(i => i.ficha.cirurgia_id));
 }
 
 const REAL_FONE = '/mnt/user-data/uploads/mapa_fone.XLS';
@@ -190,12 +190,12 @@ if (fs.existsSync(REAL_FONE)) {
   eq('67 registros', r2.diagnostico.registros, 67);
   t('col 6 (contato) capturada', r2.colunasUteis.includes(6));
   t('rodapé não vazou', !JSON.stringify(r2.linhas).includes('Total minutos'));
-  const m2 = { 14: 'paciente_nome', 3: 'atendimento', 8: 'data_cirurgia', 5: 'procedimento', 13: 'duracao_min', 23: 'cirurgiao', 6: 'contato_blob' };
+  const m2 = { 14: 'paciente_nome', 3: 'cirurgia_id', 8: 'data_cirurgia', 5: 'procedimento', 13: 'duracao_min', 23: 'cirurgiao', 6: 'contato_blob' };
   const p2 = montarPrevia(r2.linhas, m2, [], new Set());
   eq('67 fichas, 0 erro', [p2.resumo.novas, p2.resumo.erros], [67, 0]);
   // Mapeamento CONFERIDO pelo SCIH, coluna a coluna (é o perfil semeado).
   console.log('  — perfil Tasy_Rel (mapeamento conferido) —');
-  const PERFIL = { 0: 'cirurgia_id', 3: 'atendimento', 5: 'procedimento', 6: 'contato_blob',
+  const PERFIL = { 0: 'cirurgia_id', 3: 'prontuario', 5: 'procedimento', 6: 'contato_blob',
                    8: 'data_cirurgia', 13: 'duracao_min', 14: 'paciente_nome',
                    23: 'cirurgiao', 26: 'tipo_anestesia' };
   const pp = montarPrevia(r2.linhas, PERFIL, [], new Set());

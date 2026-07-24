@@ -61,7 +61,7 @@ const D0 = addDays(hojeISO(), -35);   // cirurgia há 35 dias: 7d e 30d vencidos
 console.log('\n── Criação de ficha ──');
 let r = await post('/isc/admin/fichas?inst=HUSF', {
   paciente_nome: 'MARIA DAS DORES SILVA', paciente_iniciais: 'M.D.S.',
-  prontuario: '123456', atendimento: 'AT-9001', telefone: '(11) 91234-5678',
+  prontuario: '123456', cirurgia_id: '900123', telefone: '(11) 91234-5678',
   equipe_id: NEURO, procedimento: 'Craniotomia para tumor', cirurgiao: 'Dr. X',
   data_cirurgia: D0, implante: '1', janelas: '',
 });
@@ -78,10 +78,18 @@ t('estado sincronizado na criação', f.proxima_janela === 7, `proxima=${f.proxi
 t('próximo contato = D+7', f.proximo_contato_em.toISOString().slice(0, 10) === addDays(D0, 7));
 
 console.log('\n── Anti-duplicata ──');
+// O nº da cirurgia é único por construção (índice no banco): é a única chave
+// que pode barrar duplicata. Prontuário + data NÃO é único de propósito — no
+// mapa real há pacientes operados duas vezes no mesmo dia.
 r = await post('/isc/admin/fichas?inst=HUSF', {
-  paciente_nome: 'OUTRA PESSOA', atendimento: 'AT-9001', data_cirurgia: D0, equipe_id: NEURO, procedimento: 'x',
+  paciente_nome: 'OUTRA PESSOA', cirurgia_id: '900123', data_cirurgia: D0, equipe_id: NEURO, procedimento: 'x',
 });
-t('mesmo atendimento+data → 409', r.status === 409, `status=${r.status}`);
+t('mesmo nº de cirurgia → 409', r.status === 409, `status=${r.status}`);
+r = await post('/isc/admin/fichas?inst=HUSF', {
+  paciente_nome: 'MESMA PACIENTE 2A CIRURGIA', prontuario: '123456', cirurgia_id: '900124',
+  data_cirurgia: D0, equipe_id: NEURO, procedimento: 'reabordagem',
+});
+t('mesmo prontuário no mesmo dia, cirurgia diferente → PERMITE', r.status === 302, `status=${r.status}`);
 
 console.log('\n── Tentativa sem sucesso ──');
 r = await post(`/isc/admin/ficha/${fid}/contato?inst=HUSF`, {
@@ -235,8 +243,10 @@ t('cron responde JSON ok', (await r.json()).ok === true);
 await new Promise(s => setTimeout(s, 900));
 let { rows: env } = await pool.query('SELECT * FROM isc_envios');
 t('envio agendado na fila', env.length >= 1, `n=${env.length}`);
-t('corpo renderizado no snapshot', env[0] && env[0].corpo.includes('Jose'));
-t('status pendente', env[0]?.status === 'pendente');
+// Não depende da ORDEM da fila: basta existir um envio com o texto renderizado.
+t('corpo renderizado no snapshot', env.some(e => /Olá,\s*\w/.test(e.corpo || '')),
+  JSON.stringify(env.map(e => (e.corpo || '').slice(0, 24))));
+t('todos nascem pendentes', env.every(e => e.status === 'pendente'));
 await post('/isc/cron/agendar', {});
 await new Promise(s => setTimeout(s, 900));
 const { rows: env2 } = await pool.query('SELECT * FROM isc_envios');

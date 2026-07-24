@@ -16,7 +16,10 @@ import * as XLSX from 'xlsx';
 import { Pool } from 'pg';
 import { runIscMigrations } from './isc-db.js';
 import { normalizaAoA } from './isc-import-relatorio.js';
-import { montarPrevia, chaveDedup, chavesDedup, CAMPOS_COMPLEMENTAVEIS } from './isc-import.js';
+import {
+  montarPrevia, chaveDedup, chavesDedup, adivinhaMapeamento,
+  CAMPOS_COMPLEMENTAVEIS, CAMPOS_IMPORTAVEIS,
+} from './isc-import.js';
 import { toISODate } from './isc-core.js';
 
 const DB = process.env.ISC_TEST_DB || 'postgresql://postgres:x@localhost:5432/iscteste';
@@ -105,7 +108,7 @@ async function reimporta(fichaAntiga, mapaLinha) {
 }
 const M3 = { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' };
 const M2 = { 0: 'prontuario', 1: 'atendimento', 2: 'data_cirurgia', 3: 'paciente_nome' };
-const M1 = { 0: 'cirurgia_id', 1: 'atendimento', 2: 'data_cirurgia', 3: 'paciente_nome' };
+const M1 = { 0: 'cirurgia_id', 1: 'atendimento', 2: 'data_cirurgia', 3: 'paciente_nome' };  // 'atendimento' já não existe: será ignorado
 
 let p1 = await reimporta({ cirurgia_id: '287094', atendimento: '4929063' }, M3);
 eq('ficha v1 + linha v3 → complementa (casa pelo nº da cirurgia)', [p1.resumo.novas, p1.resumo.complementa], [0, 1]);
@@ -117,9 +120,11 @@ let p2 = await reimporta({ prontuario: '954386', atendimento: '4929063' }, M3);
 eq('ficha v2 + linha v3 → complementa (casa pelo prontuário+data)', [p2.resumo.novas, p2.resumo.complementa], [0, 1]);
 eq('e ganha o nº da cirurgia', Object.keys(p2.itens[0].complemento.campos), ['cirurgia_id']);
 
+// Layout v1 lido HOJE: casa pelo nº da cirurgia, mas nada a somar — a coluna de
+// atendimento é simplesmente ignorada, porque o campo foi aposentado.
 let p3 = await reimporta({ cirurgia_id: '287094', prontuario: '954386' }, M1);
-eq('ficha v3 + linha v1 → complementa (nº da cirurgia)', [p3.resumo.novas, p3.resumo.complementa], [0, 1]);
-eq('e ganha o atendimento', Object.keys(p3.itens[0].complemento.campos), ['atendimento']);
+eq('ficha v3 + linha v1 → reconhecida, nada a somar', [p3.resumo.novas, p3.resumo.duplicadas], [0, 1]);
+t('e o atendimento do arquivo antigo é ignorado', !p3.itens[0].ficha.atendimento);
 
 let p4 = await reimporta({ cirurgia_id: '287094', prontuario: '954386' }, M3);
 eq('mesmo layout duas vezes → nada a fazer', [p4.resumo.novas, p4.resumo.duplicadas], [0, 1]);
@@ -141,7 +146,7 @@ await pool.query('TRUNCATE isc_envios, isc_contatos, isc_fichas RESTART IDENTITY
 await pool.query(
   `INSERT INTO isc_fichas (instituicao_id, cirurgia_id, atendimento, paciente_nome, data_cirurgia)
    VALUES ($1,'286711','4923414','ANTIGA','2026-07-13')`, [inst.id]);
-const { rows: rd } = await pool.query(`SELECT id, cirurgia_id, atendimento, prontuario, data_cirurgia FROM isc_fichas`);
+const { rows: rd } = await pool.query(`SELECT id, cirurgia_id, atendimento, prontuario, paciente_nome, data_cirurgia FROM isc_fichas`);
 const exD = new Map();
 for (const r of rd) for (const k of chavesDedup(r)) exD.set(k, r);
 
@@ -152,7 +157,7 @@ eq('período diferente → ficha nova (correto)', outroPeriodo.resumo.novas, 1);
 eq('diagnóstico conta as fichas existentes', outroPeriodo.dedup.fichasNoSistema, 1);
 eq('e mostra os tipos de chave dos dois lados',
   [Object.keys(outroPeriodo.dedup.porTipoNoSistema).sort(), Object.keys(outroPeriodo.dedup.porTipoNoArquivo).sort()],
-  [['at', 'cir'], ['cir', 'pront']]);
+  [['at', 'cir', 'nome'], ['cir', 'nome', 'pront']]);
 eq('nenhuma casou', outroPeriodo.dedup.casaram, 0);
 t('a linha expõe sua chave, para conferência', outroPeriodo.itens[0].chaves.includes('cir:287094'));
 
@@ -162,13 +167,87 @@ const mesmo = montarPrevia([['286711', '954386', '13/07/2026', 'ANTIGA']],
 eq('mesma cirurgia → complementa', [mesmo.resumo.novas, mesmo.resumo.complementa], [0, 1]);
 eq('diagnóstico registra que casou', mesmo.dedup.casaram, 1);
 
-// Linha válida mas sem NENHUM identificador: entra hoje e seria recriada na
-// próxima importação, porque não há como reconhecê-la. O diagnóstico avisa.
-const semChave = montarPrevia([['', '', '13/07/2026', 'SO NOME']],
+// Sem nº de cirurgia e sem prontuário, nome+data ainda identifica a ficha —
+// é o último recurso, e o aviso na linha diz isso.
+const soNome = montarPrevia([['', '', '13/07/2026', 'SO NOME']],
   { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exD, null);
-eq('a linha é válida (vira ficha)', semChave.resumo.novas, 1);
-eq('mas é sinalizada como sem chave', semChave.dedup.semChave, 1);
-eq('e de fato não tem chave nenhuma', semChave.itens[0].chaves, []);
+eq('vira ficha', soNome.resumo.novas, 1);
+eq('e ainda tem chave (nome+data)', soNome.itens[0].chaves, ['nome:SO NOME|2026-07-13']);
+t('mas avisa que a identificação é fraca',
+  soNome.itens[0].avisos.some(a => /nome \+ data/.test(a)), JSON.stringify(soNome.itens[0].avisos));
+eq('não conta como sem chave', soNome.dedup.semChave, 0);
+
+// Regressão: linha FORA DO RECORTE também calcula chaves. Sem isso, um mapa
+// mensal com 425 procedimentos fora do recorte disparava um alarme vermelho
+// de "425 linhas sem chave de deduplicação" que não queria dizer nada.
+const regrasReais = (await pool.query('SELECT * FROM isc_triagem_regras WHERE ativo ORDER BY ordem, id')).rows;
+const comTriagem = montarPrevia(
+  [['286355', '823269', '01/07/2026', 'FULANO', 'PARTO NORMAL'],
+   ['286356', '823270', '01/07/2026', 'CICLANA', 'OPERAÇÃO CESARIANA']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome', 4: 'procedimento' },
+  [], new Map(), regrasReais);
+eq('1 entra, 1 fica fora', [comTriagem.resumo.novas, comTriagem.resumo.fora_recorte], [1, 1]);
+eq('linha fora do recorte NÃO conta como sem chave', comTriagem.dedup.semChave, 0);
+t('e ela tem chaves calculadas',
+  comTriagem.itens.find(i => i.status === 'fora_recorte').chaves.length === 3);
+
+console.log('\n── Atendimento aposentado da importação ──');
+// Foi o campo `atendimento` mapeável que permitiu o erro: a coluna "Unid atend"
+// (unidade + leito, "10 01") virou atendimento, e a chave virou `at:10 01|data`.
+t('atendimento NÃO é mais campo importável',
+  !CAMPOS_IMPORTAVEIS.some(c => c.key === 'atendimento'));
+const rot = [];
+[[0, 'Cirurgia'], [3, 'Pront.'], [5, 'Procedimento Principal'], [6, 'Procedimento Principal'],
+ [8, 'CID'], [13, 'Min'], [14, 'Paciente'], [17, 'Unid atend'], [19, 'Idade'], [20, 'Convênio'],
+ [23, 'Cirurgião'], [24, 'Anestesista'], [26, 'Tipo']].forEach(([i, r]) => { rot[i] = r; });
+const palpite = adivinhaMapeamento(rot);
+eq('"Cirurgia" → nº da cirurgia', palpite[0], 'cirurgia_id');
+eq('"Pront." → prontuário', palpite[3], 'prontuario');
+eq('"Min" → duração', palpite[13], 'duracao_min');
+t('"Unid atend" NÃO vira atendimento (nem nada)', !palpite[17], palpite[17]);
+t('nenhuma coluna vira atendimento', !Object.values(palpite).includes('atendimento'));
+
+console.log('\n── Ficha legada (só atendimento) é reconhecida e migrada ──');
+await pool.query('TRUNCATE isc_envios, isc_contatos, isc_fichas RESTART IDENTITY CASCADE');
+await pool.query(
+  `INSERT INTO isc_fichas (instituicao_id, paciente_nome, atendimento, data_cirurgia, procedimento)
+   VALUES ($1,'Sueli Cristina de Oliveira','4923427','2026-07-13','OPERAÇÃO CESARIANA COM LAQUEADURA TUBARIA')`,
+  [inst.id]);
+const { rows: rl } = await pool.query(
+  `SELECT id, cirurgia_id, atendimento, prontuario, paciente_nome, data_cirurgia FROM isc_fichas`);
+const exL = new Map();
+for (const r of rl) for (const k of chavesDedup(r)) exL.set(k, r);
+t('a ficha legada só tem chaves at: e nome:',
+  [...exL.keys()].every(k => /^(at|nome):/.test(k)), JSON.stringify([...exL.keys()]));
+
+const linhaNova = montarPrevia([['286798', '922514', '13/07/2026', 'Sueli Cristina de Oliveira']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exL, null);
+eq('reconhecida, não duplicada', [linhaNova.resumo.novas, linhaNova.resumo.complementa], [0, 1]);
+eq('casou pela ponte nome+data', linhaNova.itens[0].casouPor, 'nome:SUELI CRISTINA DE OLIVEIRA|2026-07-13');
+eq('e recebe os dois identificadores novos',
+  Object.keys(linhaNova.itens[0].complemento.campos).sort(), ['cirurgia_id', 'prontuario']);
+
+console.log('\n── TRAVA: mesmo paciente, mesmo dia, cirurgias diferentes ──');
+// No mapa de julho há 3 casos reais assim (ex.: cirurgias 286355 e 286333 na
+// mesma paciente, no mesmo dia). Sem a trava, a segunda seria engolida pela
+// primeira via prontuário+data ou nome+data.
+await pool.query('TRUNCATE isc_fichas RESTART IDENTITY CASCADE');
+await pool.query(
+  `INSERT INTO isc_fichas (instituicao_id, cirurgia_id, prontuario, paciente_nome, data_cirurgia)
+   VALUES ($1,'286355','823269','ALINE APARECIDA BUENO DE ALMEIDA','2026-07-01')`, [inst.id]);
+const { rows: rt } = await pool.query(
+  `SELECT id, cirurgia_id, atendimento, prontuario, paciente_nome, data_cirurgia FROM isc_fichas`);
+const exT = new Map();
+for (const r of rt) for (const k of chavesDedup(r)) exT.set(k, r);
+const outraCirurgia = montarPrevia([['286333', '823269', '01/07/2026', 'Aline Aparecida Bueno de Almeida']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exT, null);
+eq('cirurgia diferente NÃO é engolida', outraCirurgia.resumo.novas, 1);
+t('mesmo compartilhando prontuário e nome no mesmo dia',
+  exT.has('pront:823269|2026-07-01') && exT.has('nome:ALINE APARECIDA BUENO DE ALMEIDA|2026-07-01'));
+// E o inverso continua valendo: MESMO nº de cirurgia casa.
+const mesmaCirurgia = montarPrevia([['286355', '823269', '01/07/2026', 'ALINE APARECIDA BUENO DE ALMEIDA']],
+  { 0: 'cirurgia_id', 1: 'prontuario', 2: 'data_cirurgia', 3: 'paciente_nome' }, [], exT, null);
+eq('mesmo nº de cirurgia casa', mesmaCirurgia.resumo.novas, 0);
 
 // ── Arquivo real ─────────────────────────────────────────────────────────
 const REAL = '/mnt/user-data/uploads/mapa_pront_teste2.XLS';

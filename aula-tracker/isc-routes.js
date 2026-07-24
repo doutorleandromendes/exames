@@ -379,7 +379,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
           <td style="color:#bdc1c6;font-size:12px;text-align:center;width:34px">${(page - 1) * LIM + i + 1}</td>
           <td class="sticky-col">
             <a class="pac" href="/isc/admin/ficha/${f.id}">${safe(f.paciente_nome || f.paciente_iniciais || '(sem nome)')}</a>
-            <span class="sub">${safe(f.prontuario || '')}${f.atendimento ? ' · at. ' + safe(f.atendimento) : ''}</span>
+            <span class="sub">${f.prontuario ? 'pront. ' + safe(f.prontuario) : (f.atendimento ? 'at. ' + safe(f.atendimento) + ' (legado)' : '')}${f.cirurgia_id ? ' · cir. ' + safe(f.cirurgia_id) : ''}</span>
           </td>
           <td>${safe(f.equipe_sigla || f.especialidade || '—')}</td>
           <td style="white-space:normal;max-width:220px">${safe(f.procedimento || '—')}${f.implante ? ' <span class="pill" style="background:#eef2ff;color:#4c51bf">implante</span>' : ''}</td>
@@ -633,7 +633,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
             <div><label class="l">Iniciais</label><input name="paciente_iniciais" placeholder="J.S.M."></div>
             <div><label class="l">Data de nascimento</label><input type="date" name="paciente_dn"></div>
             <div><label class="l">Prontuário</label><input name="prontuario"></div>
-            <div><label class="l">Atendimento</label><input name="atendimento"></div>
+            <div><label class="l">Nº da cirurgia (Tasy)</label><input name="cirurgia_id" placeholder="ex.: 286798"></div>
             <div><label class="l">WhatsApp (com DDD)</label><input name="telefone" placeholder="(11) 91234-5678"></div>
             <div><label class="l">Contato alternativo</label><input name="contato_alternativo"></div>
           </div></div>
@@ -679,7 +679,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
       const { rows } = await pool.query(
         `INSERT INTO isc_fichas
-           (instituicao_id, paciente_nome, paciente_iniciais, paciente_dn, prontuario, atendimento,
+           (instituicao_id, paciente_nome, paciente_iniciais, paciente_dn, prontuario, cirurgia_id,
             telefone, telefone_raw, contato_alternativo, equipe_id, procedimento, cirurgiao,
             data_cirurgia, data_alta, implante, potencial_contaminacao, duracao_min, asa,
             antibioticoprofilaxia, janelas, observacao)
@@ -688,7 +688,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
                                          FROM isc_equipes WHERE id = $10), '[7,30]'::jsonb), $21)
          RETURNING id`,
         [instId, b.paciente_nome || null, b.paciente_iniciais || null, b.paciente_dn || null,
-         b.prontuario || null, b.atendimento || null, tel, b.telefone || null,
+         b.prontuario || null, b.cirurgia_id || null, tel, b.telefone || null,
          b.contato_alternativo || null, b.equipe_id ? Number(b.equipe_id) : null,
          b.procedimento || null, b.cirurgiao || null, b.data_cirurgia,
          b.data_alta || null, boolDe(b.implante) === true,
@@ -703,7 +703,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
     } catch (e) {
       if (e.code === '23505') {
         return res.status(409).send(renderShell('ISC · Duplicata',
-          `<div class="card"><h1>Ficha já existe</h1><p class="mut">Já há ficha para este atendimento nesta data de cirurgia.</p><a href="/isc/admin/grid">← Voltar ao grid</a></div>`));
+          `<div class="card"><h1>Ficha já existe</h1><p class="mut">Já há ficha com este nº de cirurgia, ou com este prontuário nesta data.</p><a href="/isc/admin/grid">← Voltar ao grid</a></div>`));
       }
       erro(res, e);
     }
@@ -785,7 +785,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
         <div class="card2">
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${badges}</div>
           <div class="ff" style="font-size:13px">
-            <div><span class="l">Prontuário</span>${safe(f.prontuario || '—')} · at. ${safe(f.atendimento || '—')}</div>
+            <div><span class="l">Prontuário</span>${safe(f.prontuario || '—')}${f.cirurgia_id ? ' · cirurgia nº ' + safe(f.cirurgia_id) : ''}${(!f.prontuario && f.atendimento) ? ` · <span title="Campo aposentado: o sistema identifica por prontuário + nº de cirurgia">at. ${safe(f.atendimento)} (legado)</span>` : ''}</div>
             <div><span class="l">Equipe</span>${safe(equipe?.nome || f.especialidade || '—')}</div>
             <div><span class="l">Procedimento</span>${safe(f.procedimento || '—')}${f.implante ? ' <span class="pill" style="background:#eef2ff;color:#4c51bf">implante</span>' : ''}</div>
             <div><span class="l">Cirurgião</span>${safe(f.cirurgiao || '—')}</div>
@@ -799,7 +799,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
               <div class="ff">
                 <div><label class="l">Nome</label><input name="paciente_nome" value="${safe(f.paciente_nome || '')}"></div>
                 <div><label class="l">Prontuário</label><input name="prontuario" value="${safe(f.prontuario || '')}"></div>
-                <div><label class="l">Atendimento</label><input name="atendimento" value="${safe(f.atendimento || '')}"></div>
+                <div><label class="l">Nº da cirurgia (Tasy)</label><input name="cirurgia_id" value="${safe(f.cirurgia_id || '')}"></div>
                 <div><label class="l">WhatsApp</label><input name="telefone" value="${safe(f.telefone_raw || formataTelefone(f.telefone) || '')}"></div>
                 <div><label class="l">Equipe</label><select name="equipe_id"><option value="">—</option>${equipes.map(e => `<option value="${e.id}" ${e.id === f.equipe_id ? 'selected' : ''}>${safe(e.nome)}</option>`).join('')}</select></div>
                 <div><label class="l">Procedimento</label><input name="procedimento" value="${safe(f.procedimento || '')}"></div>
@@ -1061,14 +1061,14 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
 
       await pool.query(
         `UPDATE isc_fichas SET
-           paciente_nome = COALESCE($2, paciente_nome), prontuario = $3, atendimento = $4,
+           paciente_nome = COALESCE($2, paciente_nome), prontuario = $3, cirurgia_id = $4,
            telefone = COALESCE($5, telefone), telefone_raw = COALESCE($6, telefone_raw),
            equipe_id = $7, procedimento = $8, cirurgiao = $9,
            data_cirurgia = COALESCE($10::date, data_cirurgia), data_alta = $11,
            implante = $12, janelas = COALESCE($13::jsonb, janelas),
            status_vigilancia = $14, updated_at = now()
          WHERE id = $1`,
-        [id, b.paciente_nome || null, b.prontuario || null, b.atendimento || null,
+        [id, b.paciente_nome || null, b.prontuario || null, b.cirurgia_id || null,
          tel, b.telefone || null, b.equipe_id ? Number(b.equipe_id) : null,
          b.procedimento || null, b.cirurgiao || null, b.data_cirurgia || null,
          b.data_alta || null, boolDe(b.implante) === true,
@@ -1403,7 +1403,7 @@ export function registerIscRoutes(app, pool, scihRequired, renderShell) {
       if (q.classif) { p.push(String(q.classif)); w.push(`f.isc_classificacao = $${p.length}`); }
 
       const { rows } = await pool.query(
-        `SELECT f.id, f.paciente_nome, f.paciente_iniciais, f.prontuario, f.atendimento,
+        `SELECT f.id, f.paciente_nome, f.paciente_iniciais, f.prontuario, f.cirurgia_id, f.atendimento,
                 e.nome AS equipe, f.procedimento, f.cirurgiao, f.data_cirurgia, f.data_alta,
                 f.implante, f.potencial_contaminacao, f.asa, f.duracao_min,
                 f.janelas, f.status_vigilancia, f.contatos_ok, f.tentativas_falhas,

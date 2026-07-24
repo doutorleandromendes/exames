@@ -22,7 +22,13 @@ export const CAMPOS_IMPORTAVEIS = [
   { key: 'paciente_nome',  label: 'Nome do paciente',      obrigatorio: true },
   { key: 'cirurgia_id',    label: 'Nº da cirurgia (Tasy)' },
   { key: 'data_cirurgia',  label: 'Data da cirurgia',      obrigatorio: true, chave: true, tipo: 'data' },
-  { key: 'atendimento',    label: 'Atendimento',           chave: true },
+  // ATENDIMENTO APOSENTADO. O relatório do Tasy trocou a coluna Atend por Pront.,
+  // e o sistema passou a identificar a cirurgia por nº de cirurgia + prontuário.
+  // Deixar o campo mapeável foi o que permitiu o erro que motivou a mudança: a
+  // coluna "Unid atend" (unidade + leito, ex.: "10 01") foi mapeada como
+  // atendimento, e a chave de deduplicação virou `at:10 01|data`. Removendo o
+  // campo, essa classe de erro deixa de existir. A COLUNA continua no banco e
+  // continua valendo como chave para as fichas antigas (ver chavesDedup).
   { key: 'prontuario',     label: 'Prontuário' },
   { key: 'paciente_dn',    label: 'Data de nascimento',    tipo: 'data' },
   { key: 'telefone',       label: 'Telefone / WhatsApp',   tipo: 'telefone' },
@@ -258,7 +264,7 @@ export function resolveTelefone({ fone, celular, cidade }, ddds = DDD_CIDADES) {
 const SINONIMOS = {
   paciente_nome:  ['paciente', 'nome', 'nomepaciente', 'nomedopaciente', 'pacientenome'],
   data_cirurgia:  ['datacirurgia', 'datadacirurgia', 'data', 'datacir', 'dtcirurgia', 'dataprocedimento', 'datadoprocedimento', 'dtcir', 'datahora', 'datahorario'],
-  atendimento:    ['atendimento', 'atend', 'nratendimento', 'natendimento', 'numeroatendimento', 'codatendimento', 'internacao'],
+  cirurgia_id:    ['cirurgia', 'nrcirurgia', 'ncirurgia', 'numerocirurgia', 'codcirurgia', 'codigocirurgia', 'idcirurgia'],
   prontuario:     ['prontuario', 'pront', 'nrprontuario', 'numeroprontuario', 'registro', 'matricula'],
   paciente_dn:    ['datanascimento', 'dtnascimento', 'nascimento', 'dn', 'datadenascimento'],
   telefone:       ['telefone', 'fone', 'celular', 'whatsapp', 'zap', 'contato', 'tel'],
@@ -268,7 +274,7 @@ const SINONIMOS = {
   data_alta:      ['dataalta', 'dtalta', 'alta', 'datadealta'],
   implante:       ['implante', 'protese', 'opme', 'material'],
   potencial_contaminacao: ['potencial', 'potencialcontaminacao', 'classificacao', 'contaminacao', 'potencialdecontaminacao'],
-  duracao_min:    ['duracao', 'tempo', 'duracaomin', 'tempocirurgico', 'minutos'],
+  duracao_min:    ['duracao', 'tempo', 'duracaomin', 'tempocirurgico', 'minutos', 'min'],
   asa:            ['asa', 'classificacaoasa', 'riscoasa'],
   antibioticoprofilaxia: ['antibiotico', 'profilaxia', 'atb', 'antibioticoprofilaxia', 'atbprofilaxia'],
   paciente_iniciais: ['iniciais'],
@@ -281,11 +287,17 @@ const SINONIMOS = {
 // Devolve { indiceDaColuna: 'campo' }. Cada campo é usado no máximo 1x:
 // vence o match exato; parcial só entra se o campo ainda estiver livre.
 //
-// PARCIAL É ESTRITO DE PROPÓSITO. A versão frouxa (`c.includes(s) || s.includes(c)`)
-// mapeou "Min" → potencial_contaminacao, porque "contaMINacao" contém "min" —
-// a mesma doença do `raque` casando em TRAQUEOSTOMIA. Agora exige ≥4 caracteres
-// e que o sinônimo COMECE com o nome da coluna ("atendimento".startsWith("atend")),
-// nunca o contrário ("datacirurgia".startsWith("cirurgia") é falso → bom).
+// PARCIAL É ESTRITO DE PROPÓSITO, e ficou mais estrito depois de um erro caro:
+// a coluna "Unid atend" (unidade + leito, ex.: "10 01") foi mapeada como
+// ATENDIMENTO, porque "unidatend".includes("atend") é verdadeiro. Com isso a
+// chave de deduplicação virou `at:10 01|data` — dois pacientes em leitos iguais
+// em dias diferentes colidiriam, e o atendimento real nunca era gravado.
+//
+// Agora o casamento parcial exige PREFIXO dos dois lados: o nome da coluna
+// começa com o sinônimo, ou o sinônimo começa com o nome da coluna.
+//   "atendimento".startsWith("atend")  → casa   ✓
+//   "unidatend".startsWith("atend")    → NÃO casa ✓ (é o que queremos)
+// Substring no meio da palavra é a mesma doença de `raque` em TRAQUEOSTOMIA.
 export function adivinhaMapeamento(header, linhas = null) {
   const mapa = {};
   const usados = new Set();
@@ -298,7 +310,7 @@ export function adivinhaMapeamento(header, linhas = null) {
   for (const [campo, syns] of Object.entries(SINONIMOS)) {
     if (usados.has(campo)) continue;
     const i = cols.findIndex((c, idx) => c && c.length >= 4 && !(idx in mapa) &&
-      syns.some(s => s.length >= 4 && (c.includes(s) || s.startsWith(c))));
+      syns.some(s => s.length >= 4 && (c.startsWith(s) || s.startsWith(c))));
     if (i >= 0) { mapa[i] = campo; usados.add(campo); }
   }
   if (linhas && linhas.length) refinaPorValor(mapa, usados, linhas);
@@ -441,8 +453,8 @@ export function normalizaLinha(colunas, mapa, equipes = []) {
   for (const c of CAMPOS_IMPORTAVEIS) {
     if (c.obrigatorio && !ficha[c.key]) erros.push(`${c.label} é obrigatório`);
   }
-  if (!bruto.atendimento) {
-    avisos.push('Sem atendimento — não dá para detectar duplicata desta linha');
+  if (!ficha.cirurgia_id && !ficha.prontuario) {
+    avisos.push('Sem nº de cirurgia e sem prontuário — a ficha só será reconhecida por nome + data');
   }
   return { ficha, erros, avisos, bruto };
 }
@@ -514,16 +526,53 @@ export function camposComplementaveis(atual, novo) {
 // cirurgia for remarcada); atendimento+data identifica a internação; e
 // prontuário+data, o paciente naquele dia — o mais frouxo, porque dois
 // procedimentos no mesmo paciente e no mesmo dia colidiriam.
+const chaveNome = s => String(s ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .toUpperCase().replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
 export function chavesDedup(ficha) {
   const chaves = [];
   const cir = String(ficha?.cirurgia_id ?? '').trim();
   const at = String(ficha?.atendimento ?? '').trim();
   const pr = String(ficha?.prontuario ?? '').trim();
+  const nm = chaveNome(ficha?.paciente_nome);
   const dt = toISODate(ficha?.data_cirurgia);
   if (cir) chaves.push(`cir:${cir}`);
+  // `at:` só aparece em ficha ANTIGA (o campo saiu da importação). Fica aqui
+  // porque é a chave que essas fichas têm — e é o que permite reconhecê-las.
   if (at && dt) chaves.push(`at:${at}|${dt}`);
   if (pr && dt) chaves.push(`pront:${pr}|${dt}`);
+  // Último recurso: paciente + dia. Existe para atravessar mudança de layout —
+  // quando a ficha antiga só tem atendimento e a linha nova só tem nº de
+  // cirurgia + prontuário, o nome e a data são a única ponte. Na primeira
+  // importação depois da virada isto reconcilia e preenche os IDs que faltavam;
+  // a partir daí a chave forte (nº da cirurgia) assume sozinha.
+  if (nm && dt) chaves.push(`nome:${nm}|${dt}`);
   return chaves;
+}
+
+// Encontra a ficha existente correspondente, testando as chaves em ordem de
+// confiabilidade — com uma TRAVA indispensável:
+//
+// no mapa de julho há 3 casos reais de mesmo paciente operado DUAS VEZES no
+// mesmo dia (cirurgias 286355 e 286333, por exemplo). Para esses, prontuário+dia
+// e nome+dia apontam para a mesma ficha, mas são cirurgias diferentes. Quando os
+// dois lados têm nº de cirurgia e eles DIVERGEM, a chave fraca é descartada:
+// coincidir paciente e dia não faz duas cirurgias virarem uma.
+export function acharExistente(ficha, existentes) {
+  if (!existentes || typeof existentes.get !== 'function') {
+    const k = chavesDedup(ficha).find(x => existentes?.has?.(x));
+    return k ? { chave: k, atual: null } : null;
+  }
+  const cirNovo = String(ficha?.cirurgia_id ?? '').trim();
+  for (const k of chavesDedup(ficha)) {
+    const atual = existentes.get(k);
+    if (!atual) continue;
+    const cirAtual = String(atual?.cirurgia_id ?? '').trim();
+    if (cirNovo && cirAtual && cirNovo !== cirAtual) continue;   // cirurgias distintas
+    return { chave: k, atual };
+  }
+  return null;
 }
 
 // Chave principal (a mais confiável disponível). Mantida para quem só precisa
@@ -539,7 +588,7 @@ export function chaveDedup(ficha) {
 // duplicata E o que dá para complementar). Aceitar os dois mantém compatível
 // quem só quer saber se já existe.
 export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regras = null) {
-  const vistas = new Set();
+  const vistas = new Map();   // chave → ficha, para a trava de nº de cirurgia
   const usarTriagem = Array.isArray(regras) && regras.length > 0;
 
   const itens = linhas.map((colunas, i) => {
@@ -572,25 +621,26 @@ export function montarPrevia(linhas, mapa, equipes, existentes = new Set(), regr
 
     const chaves = chavesDedup(ficha);
     const chave = chaves[0] || null;
-    const casada = chaves.find(k => existentes.has(k)) || null;
+    const achado = erros.length ? null : acharExistente(ficha, existentes);
     let status = 'nova';
     let complemento = null;
+    let casouPor = null;
     if (erros.length) status = 'erro';
-    else if (casada) {
-      // Só o Map sabe o que a ficha já tem; com Set, segue "duplicada" e pronto.
-      const atual = typeof existentes.get === 'function' ? existentes.get(casada) : null;
+    else if (achado) {
+      casouPor = achado.chave;
+      const atual = achado.atual;
       const faltando = atual ? camposComplementaveis(atual, ficha) : {};
       if (Object.keys(faltando).length) {
         status = 'complementa';
-        complemento = { id: atual.id, campos: faltando };
+        complemento = { id: atual.id, campos: faltando, chave: achado.chave };
       } else {
         status = 'duplicada';
       }
-    } else if (chaves.some(k => vistas.has(k))) {
+    } else if (acharExistente(ficha, vistas)) {
       status = 'duplicada'; avisos.push('Linha repetida dentro do próprio arquivo');
     }
-    if (status === 'nova') for (const k of chaves) vistas.add(k);
-    return { linha: i + 2, status, ficha, erros, avisos, bruto, complemento, chaves,
+    if (status === 'nova') for (const k of chaves) if (!vistas.has(k)) vistas.set(k, ficha);
+    return { linha: i + 2, status, ficha, erros, avisos, bruto, complemento, chaves, casouPor,
              motivo: triagem?.motivo || null };
   });
 

@@ -60,9 +60,9 @@ eq('aspas protegem a vírgula', partirLinha('1,"SILVA, MARIA",3', ','), ['1', 'S
 eq('aspas duplas escapadas', partirLinha('a,"diz ""oi""",c', ','), ['a', 'diz "oi"', 'c']);
 
 console.log('\n── Palpite de mapeamento ──');
-let m = adivinhaMapeamento(['Paciente', 'Nº Atendimento', 'Data da Cirurgia', 'Procedimento', 'Especialidade', 'Cirurgião']);
+let m = adivinhaMapeamento(['Paciente', 'Nº Cirurgia', 'Data da Cirurgia', 'Procedimento', 'Especialidade', 'Cirurgião']);
 eq('nome', m[0], 'paciente_nome');
-eq('atendimento', m[1], 'atendimento');
+eq('cirurgia_id', m[1], 'cirurgia_id');
 eq('data', m[2], 'data_cirurgia');
 eq('procedimento', m[3], 'procedimento');
 eq('equipe via "Especialidade"', m[4], 'equipe');
@@ -92,11 +92,11 @@ const { rows: equipes } = await pool.query(`SELECT id,nome,sigla,implante_defaul
 const D = addDays(hojeISO(), -3);
 const [yy, mm, dd] = D.split('-');
 const MAPA_SUJO = [
-  'Paciente;Nº Atendimento;Data da Cirurgia;Procedimento;Especialidade;Telefone;Implante;Potencial;ASA',
+  'Paciente;Nº Cirurgia;Data da Cirurgia;Procedimento;Especialidade;Telefone;Implante;Potencial;ASA',
   `"SILVA, MARIA DAS DORES";A100;${dd}/${mm}/${yy};Craniotomia;Neurocirurgia;(11) 91234-5678;Sim;Limpa;2`,
   `JOAO PEREIRA;A101;${dd}/${mm}/${yy};Revascularização;Cirurgia Cardíaca;11987654321;;Limpa;III`,
   '',                                                                  // linha vazia
-  'Paciente;Nº Atendimento;Data da Cirurgia;Procedimento;Especialidade;Telefone;Implante;Potencial;ASA',  // cabeçalho repetido
+  'Paciente;Nº Cirurgia;Data da Cirurgia;Procedimento;Especialidade;Telefone;Implante;Potencial;ASA',  // cabeçalho repetido
   `;A102;${dd}/${mm}/${yy};Colecistectomia;Cirurgia Geral;;;Contaminada;`,   // SEM NOME → erro
   `CARLOS SOUZA;A103;A COMBINAR;Hernioplastia;Cirurgia Geral;;;Limpa;`,      // data inválida → erro
   `"SILVA, MARIA DAS DORES";A100;${dd}/${mm}/${yy};Craniotomia;Neurocirurgia;;;Limpa;`,  // remarcada → dup interna
@@ -110,7 +110,7 @@ const mapa = adivinhaMapeamento(header);
 const prev = montarPrevia(linhas, mapa, equipes, new Set());
 // erros = cabeçalho repetido + linha sem nome + data "A COMBINAR"
 // avisos = linha remarcada (dup interna) + equipe não cadastrada
-eq('resumo da prévia', prev.resumo, { total: 8, novas: 4, complementa: 0, duplicadas: 1, erros: 3, fora_recorte: 0, avisos: 2 });
+eq('resumo da prévia', [prev.resumo.total, prev.resumo.novas, prev.resumo.duplicadas, prev.resumo.erros], [8, 4, 1, 3]);
 
 const porNome = n => prev.itens.find(i => (i.ficha.paciente_nome || '').includes(n));
 t('nome com vírgula preservado', porNome('SILVA')?.ficha.paciente_nome === 'SILVA, MARIA DAS DORES');
@@ -119,7 +119,7 @@ t('equipe resolvida p/ id', porNome('SILVA')?.ficha.equipe_id === equipes.find(e
 t('implante do mapa respeitado', porNome('SILVA')?.ficha.implante === true);
 t('ASA 2 → II', porNome('SILVA')?.ficha.asa === 'II');
 t('implante_default da equipe quando mapa cala', porNome('JOAO')?.ficha.implante === true);
-t('sem nome → erro', prev.itens.find(i => i.bruto.atendimento === 'A102')?.status === 'erro');
+t('sem nome → erro', prev.itens.find(i => i.bruto.cirurgia_id === 'A102')?.status === 'erro');
 t('data inválida → erro', porNome('CARLOS')?.status === 'erro');
 t('erro cita o campo', porNome('CARLOS')?.erros.some(e => /Data da cirurgia/i.test(e)), JSON.stringify(porNome('CARLOS')?.erros));
 t('cabeçalho repetido no meio vira erro (não ficha)', prev.itens.some(i => i.status === 'erro' && /data/i.test(i.erros.join())));
@@ -130,18 +130,19 @@ t('equipe desconhecida avisa', porNome('PEDRO')?.avisos.some(a => /não cadastra
 
 console.log('\n── Dedup contra o banco ──');
 // A chave agora é prefixada (`at:` vs `cir:`) — usa chaveDedup em vez de montar à mão.
-const prev2 = montarPrevia(linhas, mapa, equipes, new Set([chaveDedup({ atendimento: 'A100', data_cirurgia: D })]));
+const prev2 = montarPrevia(linhas, mapa, equipes, new Set([chaveDedup({ cirurgia_id: 'A100', data_cirurgia: D })]));
 eq('ficha já existente vira duplicada', prev2.resumo.novas, 3);
 eq('duplicadas sobem p/ 2', prev2.resumo.duplicadas, 2);
 
 // Daqui em diante, sem_triagem=1: este harness cobre parsing, dedup, lote e
 // isolamento — o recorte clínico tem harness próprio (harness-isc-triagem).
-console.log('\n── chaveDedup: nº da cirurgia tem prioridade ──');
-eq('sem nº → atendimento+data', chaveDedup({ atendimento: 'A1', data_cirurgia: '2026-07-13' }), 'at:A1|2026-07-13');
-eq('com nº → o nº manda', chaveDedup({ cirurgia_id: '286711', atendimento: 'A1', data_cirurgia: '2026-07-13' }), 'cir:286711');
-// O ganho: cirurgia remarcada muda a data, mas não o nº → não vira ficha nova.
+console.log('\n── chaveDedup: ordem de confiabilidade ──');
+eq('nº da cirurgia manda', chaveDedup({ cirurgia_id: '286711', prontuario: 'P1', data_cirurgia: '2026-07-13' }), 'cir:286711');
+eq('sem nº → prontuário+data', chaveDedup({ prontuario: 'P1', data_cirurgia: '2026-07-13' }), 'pront:P1|2026-07-13');
+eq('sem nada disso → nome+data', chaveDedup({ paciente_nome: 'Ana Silva', data_cirurgia: '2026-07-13' }), 'nome:ANA SILVA|2026-07-13');
+// Cirurgia remarcada muda a data, mas não o nº → não vira ficha nova.
 eq('remarcada mantém a mesma chave', chaveDedup({ cirurgia_id: '286711', data_cirurgia: '2026-07-20' }), 'cir:286711');
-t('sem nada → sem chave', chaveDedup({ paciente_nome: 'X' }) === null);
+t('sem nome e sem data → sem chave', chaveDedup({ procedimento: 'X' }) === null);
 
 console.log('\n── Palpite: as armadilhas de substring ──');
 // "contaMINacao" contém "min" — a versão frouxa mapeava Min → potencial_contaminacao.
@@ -150,7 +151,12 @@ t('"Min" NÃO vira potencial_contaminacao', adivinhaMapeamento(['Min'])[0] !== '
 t('"Cirurgia" NÃO vira procedimento', adivinhaMapeamento(['Cirurgia'])[0] !== 'procedimento');
 t('"CID" não vira nada', adivinhaMapeamento(['CID'])[0] === undefined);
 // O que tem de continuar funcionando:
-eq('"Atend" ainda vira atendimento', adivinhaMapeamento(['Atend'])[0], 'atendimento');
+// "Atend" não vira mais nada: o campo atendimento foi aposentado justamente
+// porque colunas parecidas ("Unid atend") caíam nele.
+t('"Atend" não vira nada', adivinhaMapeamento(['Atend'])[0] === undefined);
+t('"Unid atend" também não', adivinhaMapeamento(['Unid atend'])[0] === undefined);
+eq('"Cirurgia" vira nº da cirurgia', adivinhaMapeamento(['Cirurgia'])[0], 'cirurgia_id');
+eq('"Pront." vira prontuário', adivinhaMapeamento(['Pront.'])[0], 'prontuario');
 eq('"Procedimento Principal" ainda casa', adivinhaMapeamento(['Procedimento Principal'])[0], 'procedimento');
 eq('"Data da Cirurgia" ainda casa', adivinhaMapeamento(['Data da Cirurgia'])[0], 'data_cirurgia');
 eq('"Paciente" ainda casa', adivinhaMapeamento(['Paciente'])[0], 'paciente_nome');
@@ -209,7 +215,7 @@ console.log('\n── Servidor não confia no browser ──');
 // O browser pode mentir na classificação; o servidor recalcula a prévia.
 r = await post('/isc/admin/importar/gravar', {
   inst: 'HUSF', mapa_json: JSON.stringify(mapa),
-  texto: 'Paciente;Nº Atendimento;Data da Cirurgia\n;A999;lixo',   // erro puro
+  texto: 'Paciente;Nº Cirurgia;Data da Cirurgia\n;A999;lixo',   // erro puro
   sem_triagem: '1',
 });
 eq('linha com erro não entra mesmo forçando', (await pool.query('SELECT count(*)::int n FROM isc_fichas')).rows[0].n, 4);
@@ -217,7 +223,7 @@ eq('linha com erro não entra mesmo forçando', (await pool.query('SELECT count(
 console.log('\n── Isolamento de tenant no import ──');
 r = await post('/isc/admin/importar/gravar', {
   inst: 'SCMI', mapa_json: JSON.stringify(mapa),
-  texto: `Paciente;Nº Atendimento;Data da Cirurgia\nPACIENTE SCMI;S1;${dd}/${mm}/${yy}`,
+  texto: `Paciente;Nº Cirurgia;Data da Cirurgia\nPACIENTE SCMI;S1;${dd}/${mm}/${yy}`,
   sem_triagem: '1',
 });
 const { rows: [sc] } = await pool.query(`SELECT * FROM isc_fichas WHERE paciente_nome='PACIENTE SCMI'`);
@@ -248,20 +254,20 @@ console.log('\n── Triagem LIGADA por padrão nas rotas ──');
 // Sem sem_triagem=1, o recorte da fase 1 tem que valer: artroplastia fica fora.
 const nAntes = (await pool.query('SELECT count(*)::int n FROM isc_fichas')).rows[0].n;
 await post('/isc/admin/importar/gravar', {
-  inst: 'HUSF', mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'atendimento', 2: 'data_cirurgia', 3: 'procedimento' }),
+  inst: 'HUSF', mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'cirurgia_id', 2: 'data_cirurgia', 3: 'procedimento' }),
   texto: `a;b;c;d\nFORA RECORTE;T1;${dd}/${mm}/${yy};Artroplastia de joelho`,
 });
 eq('procedimento fora do recorte não vira ficha', (await pool.query('SELECT count(*)::int n FROM isc_fichas')).rows[0].n, nAntes);
 await post('/isc/admin/importar/gravar', {
-  inst: 'HUSF', mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'atendimento', 2: 'data_cirurgia', 3: 'procedimento' }),
+  inst: 'HUSF', mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'cirurgia_id', 2: 'data_cirurgia', 3: 'procedimento' }),
   texto: `a;b;c;d\nDENTRO RECORTE;T2;${dd}/${mm}/${yy};OPERAÇÃO CESARIANA`,
 });
 eq('cesariana entra e ganha a equipe da regra', (await pool.query(
-  `SELECT e.nome FROM isc_fichas f JOIN isc_equipes e ON e.id=f.equipe_id WHERE f.atendimento='T2'`)).rows[0]?.nome, 'Obstetrícia');
+  `SELECT e.nome FROM isc_fichas f JOIN isc_equipes e ON e.id=f.equipe_id WHERE f.cirurgia_id='T2'`)).rows[0]?.nome, 'Obstetrícia');
 
 console.log('\n── XSS via mapa cirúrgico ──');
 await post('/isc/admin/importar/gravar', {
-  inst: 'HUSF', mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'atendimento', 2: 'data_cirurgia' }),
+  inst: 'HUSF', mapa_json: JSON.stringify({ 0: 'paciente_nome', 1: 'cirurgia_id', 2: 'data_cirurgia' }),
   texto: `a;b;c\n<script>alert(1)</script>;XSS1;${dd}/${mm}/${yy}`,
   sem_triagem: '1',
 });

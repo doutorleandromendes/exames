@@ -155,6 +155,9 @@ console.log('\n── Rastreabilidade da origem ──');
 eq('payload_raw aponta para a ficha ISC', a.payload_raw.origem_isc.isc_ficha_id, f.id);
 eq('guarda o tipo de ISC', a.payload_raw.origem_isc.isc_tipo, 'orgao_cavidade');
 eq('guarda o patógeno', a.payload_raw.origem_isc.isc_patogeno, 'S. aureus');
+eq('guarda o prontuário', a.payload_raw.origem_isc.prontuario, 'P12345');
+t('e o campo de nº de cirurgia existe na rastreabilidade',
+  'cirurgia_id' in a.payload_raw.origem_isc);
 eq('ISC aponta de volta para a ficha ATB',
   (await pool.query('SELECT atb_ficha_id FROM isc_fichas WHERE id=$1', [f.id])).rows[0].atb_ficha_id, r.atbFichaId);
 

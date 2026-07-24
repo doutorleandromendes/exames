@@ -206,6 +206,8 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
     paciente_nome_raw: f.paciente_nome || null,
     prontuario: f.prontuario || null,
     setor: ALVO.setor,
+    // Aposentado no ISC; só vem preenchido em ficha legada. Mantido porque o
+    // ATB ainda usa atendimento e, quando existe, é informação boa de levar.
     atendimento: f.atendimento || null,
     historia_clinica: historia,
     foco_infeccao: ALVO.foco_infeccao,
@@ -232,6 +234,10 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
   // Rastreabilidade da origem, sempre em payload_raw (não depende de coluna).
   extras.origem_isc = {
     isc_ficha_id: f.id,
+    // Nº da cirurgia no Tasy: é o identificador que amarra a ficha do ATB de
+    // volta ao ato cirúrgico no prontuário eletrônico.
+    cirurgia_id: f.cirurgia_id || null,
+    prontuario: f.prontuario || null,
     isc_tipo: f.isc_tipo || null,
     isc_data_diagnostico: toISODate(f.isc_data_diagnostico),
     isc_patogeno: f.isc_patogeno || null,

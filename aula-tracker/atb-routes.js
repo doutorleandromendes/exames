@@ -932,7 +932,45 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       };
 
       const _colsGrid = await colunasReaisFichas(pool);
-      const { whereSql, params } = buildGridWhere(req.query, _colsGrid);
+      let { whereSql, params } = buildGridWhere(req.query, _colsGrid);
+
+      // Filtro "desfecho pendente" (link do alerta SCIH): restringe o grid às
+      // fichas com IrAS confirmada, sem desfecho, solicitadas há +72h. Estende
+      // whereSql/params ANTES de todas as queries, para total/contagem/lista
+      // ficarem coerentes com o que o banner promete.
+      const filtrarDesfPend = !!(req.user && req.user.scih) && req.query.desf_pend === '1';
+      if (filtrarDesfPend) {
+        whereSql += ` AND a.iras IS NOT NULL AND a.iras <> ''
+          AND a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post')
+          AND (a.desfecho_iras IS NULL OR a.desfecho_iras = '')
+          AND COALESCE(f.jotform_created_at, f.data_referencia, f.created_at) < now() - interval '72 hours'`;
+      }
+
+      // ── Alerta de desfecho pendente (só perfil SCIH) ──────────────────────
+      // A colaboradora do SCIH preenche o desfecho ~72h após a solicitação.
+      // Conta fichas com IrAS confirmada, sem desfecho_iras, cuja solicitação
+      // foi há mais de 72h. Não aparece para admin puro nem micro — a coluna
+      // segue visível/editável para todos, só o alerta é restrito ao SCIH.
+      // Só quem tem a flag scih (quem preenche o desfecho) vê o alerta.
+      // Super_admin e break-glass (adm) NÃO veem — não poluem a grid de admin.
+      const ehScih = !!(req.user && req.user.scih);
+      let desfPend = 0;
+      if (ehScih) {
+        try {
+          const dp = await pool.query(`
+            SELECT COUNT(*) AS n
+              FROM atb_fichas f
+              LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
+              LEFT JOIN atb_avaliacoes   a ON a.ficha_id = f.id
+             WHERE ${whereSql}
+               AND a.iras IS NOT NULL AND a.iras <> ''
+               AND a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post')
+               AND (a.desfecho_iras IS NULL OR a.desfecho_iras = '')
+               AND COALESCE(f.jotform_created_at, f.data_referencia, f.created_at)
+                     < now() - interval '72 hours'`, params);
+          desfPend = parseInt(dp.rows[0]?.n || 0, 10);
+        } catch { /* coluna ausente num boot novo — segue sem alerta */ }
+      }
 
       const { rows:[{total}] } = await pool.query(`
         SELECT COUNT(*) AS total FROM atb_fichas f
@@ -1081,6 +1119,18 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <div class="metric" style="border-left-color:#74c47d"><div class="mv" style="color:#3a8a4a">${vig.descartadas}</div><div class="ml">Descartadas</div></div>
           <div class="metric" style="border-left-color:#a9b0c7"><div class="mv" style="color:#5f6368">${vig.obitos}</div><div class="ml">Óbitos no recorte</div></div>
         </div>
+        ${ehScih && desfPend > 0 ? `
+        <a href="?${new URLSearchParams({ ...req.query, desf_pend: '1' }).toString()}"
+           style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:10px 14px;
+                  background:#fff7ed;border:1px solid #f5c884;border-left:4px solid #e08a1e;
+                  border-radius:8px;color:#7a4a08;text-decoration:none;font-size:13px">
+          <span style="font-size:16px">⏰</span>
+          <span><strong>${desfPend}</strong> ficha(s) com IrAS confirmada aguardam desfecho h\u00e1 mais de 72&nbsp;h.
+            <span style="text-decoration:underline">Ver s\u00f3 essas</span>.</span>
+        </a>` : ''}
+        ${ehScih && req.query.desf_pend === '1' ? `
+        <a href="?${new URLSearchParams(Object.fromEntries(Object.entries(req.query).filter(([k])=>k!=='desf_pend'))).toString()}"
+           style="display:inline-block;margin-bottom:12px;font-size:12px;color:#5b6472">← remover filtro de desfecho pendente</a>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}${tabSem}</div>
         ${gridControlsUI(req.query, pager, { tenantLocked: !!req.atbTenant, sigla: req.atbTenant || null })}
         <div class="grid-wrap">

@@ -48,6 +48,7 @@ import { ensureParecerFrasesTable, getParecerFrases, registerParecerFrasesRoutes
 import { registerFormTestRoutes } from './atb-form-test-routes.js';
 import { tenantLock, tenantMode, getTenantLogo } from './atb-tenant.js';
 import { registerGridMobileRoutes } from './atb-grid-mobile-routes.js';
+import { registerCvePainelRoutes } from './atb-cve-painel-routes.js';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerFormTesteSchemaRoutes(app, pool, adminRequired);
   registerPosologiaNormalizarRoutes(app, pool, adminRequired);
   registerGridMobileRoutes(app, pool, gridRequired);   // grade mobile (/atb/m)
+  registerCvePainelRoutes(app, pool, adminRequired);   // painel CVE (/atb/admin/cve-painel)
   registerAnexosRoutes(app, pool, adminRequired);
   registerParecerImagemRoutes(app, pool, adminRequired);
   registerFichaRetroRoutes(app, pool, adminRequired);

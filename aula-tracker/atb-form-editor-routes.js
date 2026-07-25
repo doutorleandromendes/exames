@@ -498,7 +498,10 @@ function clienteJS() {
       return '<span class="fe-tag">widget</span>';
     if (s && s.temColuna){
       var chips = '🗄'+(s.naGrade?' ▦':'')+(s.nasRegras?' ⚙':'');
-      return '<span class="fe-badge fe-ok">✓ Integrado</span> <span class="fe-key" title="Coluna'+(s.naGrade?' · Grade':'')+' · Regras">'+chips+'</span>';
+      // Mostra o nome REAL da coluna quando difere do key (ex.: equipe → equipe_responsavel),
+      // para poder referenciar direto em SQL/código. Quando igual, o key já basta.
+      var colDif = (s.col && s.col!==c.key) ? ' <span class="fe-key" title="Nome da coluna em atb_fichas">col: '+esc(s.col)+'</span>' : '';
+      return '<span class="fe-badge fe-ok">✓ Integrado</span> <span class="fe-key" title="Coluna'+(s.naGrade?' · Grade':'')+' · Regras">'+chips+'</span>'+colDif;
     }
     return '<span class="fe-badge fe-av">△ Extras</span> '
       + '<button type="button" onclick="promoverCampo(\''+esc(c.key)+'\')" title="Cria coluna real em atb_fichas e migra os dados já salvos no payload. Habilita o campo em regras, grade e filtros." style="font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid #cdd3db;background:#fff;color:#0c447c;cursor:pointer;font-weight:600">\u2191 Promover a coluna</button>';

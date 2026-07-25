@@ -1036,6 +1036,13 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         const nome = f.paciente_nome || f.paciente_nome_raw || '—';
         const _divPacs = nomeDivergePacs(f.paciente_nome_raw || f.paciente_nome, f._pacs_norm);
         const dd = f.desfecho_data ? String(f.desfecho_data).slice(0,10) : '';
+        // Gate de 72h para o desfecho (mesma lógica da Adesão): a colaboradora
+        // do SCIH só edita o desfecho depois de 72h da solicitação. Antes disso,
+        // o dropdown fica bloqueado com "aguardando 72h". Admin/super_admin não
+        // são gated — editam quando quiserem (ehScih já exclui super_admin).
+        const _dtSolic = f.jotform_created_at || f.data_referencia || f.created_at;
+        const _passou72h = _dtSolic ? (Date.now() - new Date(_dtSolic).getTime()) >= 72*3600*1000 : true;
+        const _desfBloq = ehScih && !_passou72h;
         const irasVal = (f.iras||'').split(/\n+/)[0];
         const anexos = (f.n_pdf>0?`<a href="/atb/admin/fichas/${f.id}" title="${f.n_pdf} PDF" style="text-decoration:none">📄${f.n_pdf}</a>`:'') +
                        (f.n_img>0?` <span title="${f.n_img} imagem" style="color:#9aa0a6">📷${f.n_img}</span>`:'');
@@ -1058,10 +1065,14 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <td class="edit"><input data-field="etiol_iras" value="${safe(f.etiol_iras||'')}" placeholder="—" style="width:90px"></td>
           <td class="edit"><input data-field="micro" value="${safe(f.micro||'')}" placeholder="—" style="width:150px"></td>
           <td class="edit"><input data-field="saps3" type="number" value="${f.saps3!=null?f.saps3:''}" placeholder="—" style="width:52px;text-align:center"></td>
-          <td class="edit"><select data-field="desfecho_iras" style="width:108px">
+          <td class="edit">${_desfBloq
+            ? `<span class="aguard72" title="A colaboradora do SCIH preenche o desfecho após 72h da solicitação" style="font-size:11px;color:#9098a6;white-space:nowrap">aguardando 72h</span>`
+            : `<select data-field="desfecho_iras" style="width:108px">
               ${DESFECHO_OPCOES.map(o=>`<option value="${o}" ${f.desfecho_iras===o?'selected':''}>${o||'—'}</option>`).join('')}
-            </select></td>
-          <td class="edit"><input data-field="desfecho_data" type="date" value="${dd}" style="width:120px"></td>
+            </select>`}</td>
+          <td class="edit">${_desfBloq
+            ? ''
+            : `<input data-field="desfecho_data" type="date" value="${dd}" style="width:120px">`}</td>
           ${renderExtraCells(f, cols, safe)}
           <td style="text-align:center;white-space:nowrap">
             ${f.instituicao==='SCMI'?`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" title="Exames / imagens">🔗</a>`:(f.link_exames?`<a href="${safe(f.link_exames)}" target="_blank" title="Exames">🔗</a>`:'')}

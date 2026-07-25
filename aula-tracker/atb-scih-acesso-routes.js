@@ -179,7 +179,23 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/parecer-frases', '💬', 'Frases do Parecer')}
           ${card('/scih/solicitar', '✉️', 'Página de solicitação')}
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
+        </div>
+
+        <div class="sec">Diagnóstico &amp; manutenção</div>
+        <div class="hub">
           ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema')}
+          ${card('/atb/admin/healthcheck/painel', '🩹', 'Healthcheck do formulário')}
+          ${card('/atb/admin/integridade/painel', '🛡️', 'Integridade dos dados')}
+        </div>
+
+        <div class="sec">Ferramentas &amp; checks</div>
+        <div class="hub">
+          ${card('/atb/admin/culturas', '🧫', 'Culturas — conferência')}
+          ${card('/atb/admin/hemocultura', '🩸', 'Hemoculturas')}
+          ${card('/atb/admin/mdr', '⚠️', 'Alertas MDR')}
+          ${card('/atb/admin/nomes/backcheck', '🔤', 'Backcheck de nomes')}
+          ${card('/atb/admin/pacs-nome/teste', '🖼️', 'Teste do worker PACS')}
+          ${card('/atb/admin/posologia/normalizar', '⚗️', 'Normalizar posologia')}
         </div>
 
         <div class="sec">Formulário — teste e promoção</div>

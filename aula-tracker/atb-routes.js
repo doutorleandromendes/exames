@@ -938,7 +938,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       // fichas com IrAS confirmada, sem desfecho, solicitadas há +72h. Estende
       // whereSql/params ANTES de todas as queries, para total/contagem/lista
       // ficarem coerentes com o que o banner promete.
-      const filtrarDesfPend = !!(req.user && req.user.scih) && req.query.desf_pend === '1';
+      const filtrarDesfPend = !!(req.user && req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1' && req.query.desf_pend === '1';
       if (filtrarDesfPend) {
         whereSql += ` AND a.iras IS NOT NULL AND a.iras <> ''
           AND a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post')
@@ -951,9 +951,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       // Conta fichas com IrAS confirmada, sem desfecho_iras, cuja solicitação
       // foi há mais de 72h. Não aparece para admin puro nem micro — a coluna
       // segue visível/editável para todos, só o alerta é restrito ao SCIH.
-      // Só quem tem a flag scih (quem preenche o desfecho) vê o alerta.
-      // Super_admin e break-glass (adm) NÃO veem — não poluem a grid de admin.
-      const ehScih = !!(req.user && req.user.scih);
+      // Só a colaboradora do SCIH (quem preenche o desfecho) vê o alerta.
+      // Exclui super_admin e break-glass (adm) mesmo que tenham a flag scih —
+      // é o mesmo padrão do soMicro logo acima. Assim a grid do admin fica limpa.
+      const ehScih = !!(req.user && req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
       let desfPend = 0;
       if (ehScih) {
         try {

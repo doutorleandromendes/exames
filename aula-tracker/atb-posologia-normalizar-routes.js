@@ -89,9 +89,9 @@ export function parseDose(txt, droga) {
   // mg/kg em todas as grafias: "mg/kg", "mg kg", "mgkg", "mgkgdose"
   let m = s.match(/^([\d.,]+)\s*mg\s*\/?\s*kg/);
   if (m) return { dose_valor: +m[1].replace(',', '.'), dose_unidade: 'mg/kg' };
-  // frasco-ampola / ampola / frascos
-  m = s.match(/^(\d{1,2})\s*(amp|ampola|fa|frasco)/);
-  if (m) return { dose_valor: +m[1], dose_unidade: 'amp' };
+  // 'amp' (ampola/frasco) foi removido como unidade — não é mais opção no select.
+  // Entradas com "ampola" caem na desambiguação por faixa da droga abaixo, em vez
+  // de gerar um dose_unidade órfão que não bate com nenhuma opção.
   // número + unidade (aceita U/UI para polimixina; "mk" é erro de digitação de mg)
   m = s.match(/^([\d.,]+)\s*(mg|mk|g|gr|ui|u)\b/);
   if (m) {

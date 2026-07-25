@@ -1282,12 +1282,12 @@
       return e('div', { style: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' } },
         e('div', { style: { background: '#fff', borderRadius: '12px', maxWidth: '520px', width: '100%', padding: '22px', boxShadow: '0 10px 40px rgba(0,0,0,.2)' } },
           e('h3', { style: { margin: '0 0 8px', fontSize: '17px' } }, 'Infecção de sítio cirúrgico?'),
-          e('p', { style: { margin: '0 0 6px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'A história sugere infecção no sítio operatório.'),
+          e('p', { style: { margin: '0 0 6px', color: '#3c4043', fontSize: '14px', lineHeight: 1.5 } }, 'A hist\u00f3ria sugere suspeita de infec\u00e7\u00e3o na cirurgia pr\u00e9via.'),
           ind ? e('p', { style: { margin: '0 0 12px', color: '#5f6368', fontSize: '13px', fontStyle: 'italic' } }, '\u201c' + ind + '\u201d') : null,
-          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px' } }, 'Confirma que se trata de infec\u00e7\u00e3o de s\u00edtio cir\u00fargico?'),
+          e('p', { style: { margin: '0 0 14px', color: '#3c4043', fontSize: '14px' } }, 'Confirma que se trata de suspeita de infec\u00e7\u00e3o de ferida/s\u00edtio cir\u00fargico?'),
           e('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px' } },
-            e('button', { onClick: function () { responder(false); }, style: { padding: '9px 16px', border: '1px solid #dadce0', borderRadius: '8px', background: '#fff', color: '#3c4043', cursor: 'pointer', font: 'inherit' } }, 'N\u00e3o \u00e9 ISC'),
-            e('button', { onClick: function () { responder(true); }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Sim, \u00e9 ISC')
+            e('button', { onClick: function () { responder(false); }, style: { padding: '9px 16px', border: '1px solid #dadce0', borderRadius: '8px', background: '#fff', color: '#3c4043', cursor: 'pointer', font: 'inherit' } }, 'N\u00e3o'),
+            e('button', { onClick: function () { responder(true); }, style: { padding: '9px 16px', border: 0, borderRadius: '8px', background: '#1a73e8', color: '#fff', cursor: 'pointer', font: 'inherit' } }, 'Sim')
           )
         )
       );

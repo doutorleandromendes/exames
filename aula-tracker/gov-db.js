@@ -13,8 +13,10 @@
 //                     Guardar o histórico permite reabrir exatamente o que o
 //                     comitê viu numa reunião de meses atrás — num painel de
 //                     conselho isso é requisito, não conveniência.
-//   gov_acesso_log  → quem abriu, qual competência, quando. Documento de
-//                     conselho tem rastro de leitura.
+//   gov_acesso_log  → quem abriu, qual competência, quando e POR QUAL VIA.
+//                     Documento de conselho tem rastro de leitura, e entrada
+//                     por break-glass (cookie adm) precisa ser distinguível de
+//                     usuario_id nulo por qualquer outro motivo.
 //
 // USERS: acrescenta o papel `gestao`. Deliberadamente SEPARADO de `scih`:
 // são comitês diferentes, com escopos diferentes. Quem faz controle de
@@ -56,12 +58,22 @@ export async function runGovMigrations(pool) {
       competencia TEXT,
       rota        TEXT,
       ip          TEXT,
+      via         TEXT NOT NULL DEFAULT 'sessao',
       em          TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+
+  // Bancos que já criaram a tabela antes desta coluna.
+  await pool.query(`ALTER TABLE gov_acesso_log ADD COLUMN IF NOT EXISTS via TEXT NOT NULL DEFAULT 'sessao'`);
 
   await pool.query(`
     CREATE INDEX IF NOT EXISTS gov_acesso_log_em_idx
       ON gov_acesso_log (em DESC)`);
+
+  // Entrada por break-glass num painel de conselho é evento raro e auditável:
+  // índice próprio para que a consulta de auditoria não varra a tabela toda.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS gov_acesso_log_bg_idx
+      ON gov_acesso_log (em DESC) WHERE via = 'break-glass'`);
 
   console.log('gov migrations ok');
 }

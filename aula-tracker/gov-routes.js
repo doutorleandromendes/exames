@@ -46,11 +46,16 @@ export function registerGovRoutes(app, pool, gestaoRequired, renderShell) {
 
   const inst = req => String(req.atbTenant || req.query.inst || 'HUSF');
 
+  // O gestaoRequired zera req.user quando a entrada é por break-glass (cookie
+  // adm, ADMIN_SECRET). Sem registrar a via, esse acesso ficaria com usuario_id
+  // nulo e indistinguível de um nulo por defeito — inaceitável num painel cujo
+  // log de leitura é peça de governança.
   function registrarAcesso(req, competencia) {
+    const via = req.cookies?.adm === '1' && !req.user?.id ? 'break-glass' : 'sessao';
     pool.query(
-      `INSERT INTO gov_acesso_log (usuario_id, competencia, rota, ip)
-       VALUES ($1,$2,$3,$4)`,
-      [req.user?.id ?? null, competencia, req.originalUrl, req.ip]
+      `INSERT INTO gov_acesso_log (usuario_id, competencia, rota, ip, via)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [req.user?.id ?? null, competencia, req.originalUrl, req.ip, via]
     ).catch(() => { /* log nunca derruba a requisição */ });
   }
 

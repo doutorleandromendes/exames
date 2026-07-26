@@ -5,8 +5,8 @@
 //  NEGATIVOS ("Não") emitidos há mais de 3 dias. Base dos indicadores mensais.
 //
 //  Para cada ficha da worklist, o SCIH preenche inline:
-//    • Desfecho da adesão: Mantido | Suspenso_troca | Suspenso_alta |
-//      Suspenso_semATB | Suspenso_obito
+//    • Desfecho da adesão: Mantido | Mantido_Transf | Suspenso_troca |
+//      Suspenso_alta | Suspenso_semATB | Suspenso_obito | Suspenso_Transf
 //    • ATB de troca (só quando Suspenso_troca)
 //
 //  Worklist = veredito "Não"  E  parecer há > 3 dias, escopada por mês
@@ -22,7 +22,7 @@
 //  refinada depois conforme orientação.
 // ════════════════════════════════════════════════════════════════════════════
 
-export const ADESAO_DESFECHOS = ['Mantido', 'Suspenso_troca', 'Suspenso_alta', 'Suspenso_semATB', 'Suspenso_obito'];
+export const ADESAO_DESFECHOS = ['Mantido', 'Mantido_Transf', 'Suspenso_troca', 'Suspenso_alta', 'Suspenso_semATB', 'Suspenso_obito', 'Suspenso_Transf'];
 
 // lista de ATB de troca (alfabética, com Levofloxacina incluída)
 export const ATB_TROCA = [
@@ -50,7 +50,9 @@ const ANTIFUNGICOS = new Set(['Anfotericina B', 'Micafungina']);
 export function classificarAdesao(desfecho, solicitados, troca) {
   if (!desfecho) return 'pendente';
   if (desfecho === 'Mantido') return 'nao_adesao';
+  if (desfecho === 'Mantido_Transf') return 'nao_adesao';   // mantido apesar da transferência = não seguiu
   if (desfecho === 'Suspenso_semATB') return 'adesao';
+  if (desfecho === 'Suspenso_Transf') return 'adesao';      // suspenso na transferência = seguiu
   if (desfecho === 'Suspenso_alta') return 'alta';
   if (desfecho === 'Suspenso_obito') return 'obito';
   if (desfecho === 'Suspenso_troca') {

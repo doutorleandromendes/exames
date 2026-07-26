@@ -7,6 +7,23 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Archivo:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+// Diagnóstico. Uma página de conselho que falha em branco é indiagnosticável:
+// qualquer falha de carregamento precisa virar texto legível, não tela vazia.
+window.__dg = { erros: [] };
+window.addEventListener('error', function (ev) {
+  var alvo = ev.target && ev.target.src;
+  window.__dg.erros.push(alvo ? ('não carregou: ' + alvo) : (ev.message || 'erro de script'));
+}, true);
+window.__dgFalhou = function (titulo, detalhe, extra) {
+  var r = document.getElementById('root');
+  if (!r) return;
+  r.innerHTML = '<main style="padding:60px 44px"><h1>' + titulo + '</h1>' +
+    '<p class="lede">' + detalhe + '</p>' +
+    (extra ? '<p class="lede" style="color:#7A7F86;font-family:\'Roboto Mono\',monospace;font-size:12px">'
+             + extra + '</p>' : '') + '</main>';
+};
+</script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.min.js"></script>
@@ -131,7 +148,11 @@ tbody tr:hover td{background:var(--panel2)}
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><main style="padding:60px 44px">
+  <h1>Carregando o painel…</h1>
+  <p class="lede" id="dg-msg">Buscando a competência mais recente.</p>
+  <noscript><p class="lede">Este painel precisa de JavaScript habilitado.</p></noscript>
+</main></div>
 <script>
 const e = React.createElement;
 const {ResponsiveContainer,LineChart,Line,AreaChart,Area,BarChart,Bar,ComposedChart,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ReferenceLine,Cell,PieChart,Pie} = Recharts;
@@ -544,6 +565,19 @@ ReactDOM.createRoot(document.getElementById('root')).render(e(App));
 
 // Servido pelo app no Render: os dados vêm da API autenticada.
 // Para desenvolvimento local, use ?local=1 e o JSON ao lado do arquivo.
+var faltando = [];
+if (typeof React === 'undefined')    faltando.push('React');
+if (typeof ReactDOM === 'undefined') faltando.push('ReactDOM');
+if (typeof Recharts === 'undefined') faltando.push('Recharts');
+if (faltando.length) {
+  window.__dgFalhou(
+    'Bibliotecas não carregadas',
+    'O painel depende de ' + faltando.join(', ') + ', servidos por unpkg.com. ' +
+    'A rede desta máquina parece estar bloqueando esse endereço.',
+    (window.__dg.erros.join(' · ') || 'sem detalhe do navegador'));
+  throw new Error('dependencias ausentes');
+}
+
 const LOCAL = new URLSearchParams(location.search).has('local');
 const COMP  = new URLSearchParams(location.search).get('competencia');
 const FONTE_DADOS = LOCAL ? 'data_governanca.json'
@@ -576,13 +610,30 @@ fetch(FONTE_DADOS, {cache:'no-store', credentials:'same-origin'})
     legado(err);
   });
 
+// Se em 12 s nada substituiu o placeholder, algo travou sem lançar erro.
+setTimeout(function () {
+  var r = document.getElementById('root');
+  if (r && /Carregando o painel/.test(r.innerHTML)) {
+    window.__dgFalhou('O painel não terminou de carregar',
+      'A página abriu, mas os dados ou as bibliotecas não chegaram em 12 segundos.',
+      (window.__dg.erros.join(' · ') || 'nenhum erro reportado pelo navegador'));
+  }
+}, 12000);
+
 function legado(err) {
-    document.getElementById('root').innerHTML =
-      '<main style="padding:60px 44px"><h1>Dados não carregados</h1>' +
-      '<p class="lede">O arquivo <code>' + FONTE_DADOS + '</code> não foi encontrado ao lado desta página. ' +
-      'Gere-o com <code>python3 gerar_governanca.py</code> e abra o painel por um servidor local ' +
-      '(<code>python3 -m http.server</code>), não por duplo clique no arquivo.</p>' +
-      '<p class="lede" style="color:#7A7F86">Detalhe técnico: ' + err.message + '</p></main>';
+  if (LOCAL) {
+    window.__dgFalhou('Dados não carregados',
+      'O arquivo <code>' + FONTE_DADOS + '</code> não foi encontrado ao lado desta página. ' +
+      'Gere-o com <code>python3 gerar_governanca.py</code> e abra por um servidor local ' +
+      '(<code>python3 -m http.server</code>), não por duplo clique no arquivo.',
+      err.message);
+  } else {
+    window.__dgFalhou('Dados não carregados',
+      'O painel não conseguiu ler <code>' + FONTE_DADOS + '</code>. ' +
+      'Se a competência já foi publicada, isto costuma ser sessão expirada ou instabilidade de rede — ' +
+      'recarregue a página.',
+      err.message + (window.__dg.erros.length ? ' · ' + window.__dg.erros.join(' · ') : ''));
+  }
 }
 
 </script>

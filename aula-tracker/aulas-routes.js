@@ -18,7 +18,8 @@ app.get('/', (req,res)=>{
   const right = `<div class="card">
   <h2>Acesso</h2>
   <p class="mut">Use o login/senha fornecidos pela coordenação.</p>
-  <p class="mut mt"><a href="/solicitar-acesso">Não tenho acesso — quero solicitar</a></p>
+  <p class="mut mt"><a href="/solicitar-acesso">Sou aluno — quero acesso a um curso</a></p>
+  <p class="mut mt"><a href="/acesso/solicitar">Sou da equipe — quero acesso a um sistema</a></p>
   <p class="mut mt"><a href="/admin${req.query.next ? `?next=${encodeURIComponent(safeNext(req.query.next))}` : ''}">Sou admin</a></p>
 </div>`;
 

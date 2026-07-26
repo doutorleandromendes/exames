@@ -275,13 +275,17 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         por quem coordena aquele módulo; ao ser aprovado, você recebe um link para
         definir a própria senha.</p>
         ${erro ? `<p class="erro">${esc(erro)}</p>` : ''}
-        <form method="POST" action="/solicitar" class="mt" id="frm">
+        <form method="POST" action="/acesso/solicitar" class="mt" id="frm">
           <div class="opts">${MODULOS.map(x => RADIO(x, sel)).join('')}</div>
           <label>Nome completo</label><input name="full_name" required>
           <label>E-mail</label><input name="email" type="email" required>
           ${just}
           <button class="mt">Enviar solicitação</button>
         </form>
+        <p class="mut mt" style="border-top:1px solid var(--bd);padding-top:14px;margin-top:20px">
+          Procura acesso a um curso do InfectoAulas? O pedido é outro:
+          <a href="/solicitar-acesso">solicitar acesso a curso</a>.
+        </p>
       </div>
       <style>
         .opts{display:grid;gap:10px;margin-bottom:18px}
@@ -312,16 +316,16 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       </script>`);
   }
 
-  app.get('/solicitar', (req, res) => {
+  app.get('/acesso/solicitar', (req, res) => {
     const sel = moduloPorChave(String(req.query.m || '')) ? String(req.query.m) : null;
     res.send(paginaSolicitar(sel, null));
   });
 
   // compatibilidade com os endereços antigos
-  app.get('/scih/solicitar',  (req, res) => res.redirect(302, '/solicitar?m=scih'));
-  app.get('/pront/solicitar', (req, res) => res.redirect(302, '/solicitar?m=pront'));
+  app.get('/scih/solicitar',  (req, res) => res.redirect(302, '/acesso/solicitar?m=scih'));
+  app.get('/pront/solicitar', (req, res) => res.redirect(302, '/acesso/solicitar?m=pront'));
 
-  app.post('/solicitar', async (req, res) => {
+  app.post('/acesso/solicitar', async (req, res) => {
     try {
       const mod = moduloPorChave(String(req.body?.modulo || ''));
       if (!mod) return res.status(400).send(paginaSolicitar(null, 'Escolha um sistema.'));
@@ -434,7 +438,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <div class="card">
           <h1>Acessos</h1>
           <p class="mut">Aprove os pedidos pendentes e gerencie quem tem acesso a cada sistema.
-             O formulário público fica em <a href="/solicitar">/solicitar</a>.</p>
+             O formulário público fica em <a href="/acesso/solicitar">/acesso/solicitar</a>.</p>
         </div>
 
         ${blocosPendentes}

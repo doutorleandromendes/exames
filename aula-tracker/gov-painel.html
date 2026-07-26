@@ -511,31 +511,9 @@ function Producao(){
             e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}}))))));
 }
 
-function Dados(){
-  const linhas = [
-    ['Permanência de Cuidados Intermediários-Neo','Valores entre 0 e 145 dias na mesma série anual','Denominador, correspondente às altas do setor, próximo de zero em vários meses','Suprimir o indicador quando houver menos de três altas no mês e publicar o paciente-dia absoluto'],
-    ['Permanência do Hospital Dia','17 a 61 dias','O conceito de alta não se aplica ao regime de hospital-dia','Substituir por número de comparecimentos por mês e taxa de absenteísmo'],
-    ['Aba CLÍN. MÉDICA','Erro #REF! na capacidade de janeiro de 2025','Referência de fórmula perdida na planilha derivada','Adotar a aba HUSF como fonte única; as abas por setor devem ser geradas a partir dela'],
-    ['Reinternação de julho de 2025','3,0%, contra cerca de 9% nas demais competências','Ausência de janela retrospectiva, com censura à esquerda','Sinalizar a primeira competência de cada extração como incompleta'],
-    ['Denominador de internações','1.262 no censo e 1.260 no relatório, em julho de 2025','Critérios de contagem distintos entre as duas extrações','Definir fonte única de contagem e conciliar a cada competência'],
-    ['Linhas “%” duplicadas','Dois campos denominados “%” no mesmo bloco de partos','Rótulo não distingue normal de cesárea','Renomear na origem para “% partos normais” e “% cesáreas”'],
-    ['Relatório de atendimentos','Nome, prontuário, médico e convênio em texto aberto','Arquivo distribuído por correio eletrônico','Pseudonimizar na origem; o painel consome apenas dados agregados']
-  ];
-  return e('section',{id:'dados'},
-    e('div',{className:'shead'}, e('span',{className:'n'},'07'), e('h2',null,'Qualidade do dado'),
-      e('span',{className:'hint'},'Inconsistências identificadas na apuração, com a causa provável e o encaminhamento proposto. A seção é revisada a cada competência.')),
-    e('div',{className:'card'},
-      e('table',null,
-        e('thead',null,e('tr',null,e('th',null,'Onde'),e('th',null,'O que se observa'),e('th',null,'Causa provável'),e('th',null,'Encaminhamento'))),
-        e('tbody',null,linhas.map((l,i)=>e('tr',{key:i},l.map((c,j)=>e('td',{key:j,style:j===0?{color:'#1B1F24'}:{color:'#4A4E52'}},c))))))),
-    e('div',{className:'note ok',style:{marginTop:14}},e('span',{className:'rot'},'Critério de publicação'),
-      'Cada indicador do painel declara numerador, denominador, fonte e responsável pela apuração. Indicador cuja composição não possa ser auditada é apresentado como nota, sem representação gráfica.'));
-}
-
 /* ============ app ============ */
 const SECOES=[['01','Panorama','panorama'],['02','Ocupação por unidade','pressao'],['03','Fluxo e permanência','fluxo'],
-  ['04','Desfechos','desfechos'],['05','Reinternação','reinternacao'],['06','Produção e abrangência','producao'],
-  ['07','Qualidade do dado','dados']];
+  ['04','Desfechos','desfechos'],['05','Reinternação','reinternacao'],['06','Produção e abrangência','producao']];
 
 function App(){
   const [ativo,setAtivo] = React.useState('panorama');
@@ -568,7 +546,7 @@ function App(){
           'Censo hospitalar 2025–2026',e('br'),
           'Reinternações jul/2025 a jun/2026',e('br'),
           e('b',null,num(M.length),' competências · ',num(K.intern.reduce((s,v)=>s+v,0)),' internações'))),
-      e(Panorama),e(Pressao),e(Fluxo),e(Desfechos),e(Reint),e(Producao),e(Dados)));
+      e(Panorama),e(Pressao),e(Fluxo),e(Desfechos),e(Reint),e(Producao)));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(e(App));
 

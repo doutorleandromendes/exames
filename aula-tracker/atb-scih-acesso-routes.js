@@ -12,7 +12,7 @@
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { tenantMode, tenantFromReq } from './atb-tenant.js';
-import { MODULOS, moduloPorChave } from './acesso-modulos.js';
+import { MODULOS, SOLICITAVEIS, moduloPorChave } from './acesso-modulos.js';
 
 const TOKEN_TTL_DIAS = 7;
 
@@ -67,6 +67,8 @@ export async function ensureScihAcessoSchema(pool) {
   await pool.query(`UPDATE users SET instituicao='HUSF'
                      WHERE instituicao IS NULL AND (scih=true OR micro=true)`);
   await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS instituicao TEXT`);
+  // dados adicionais pedidos por módulo (ver campos[] em acesso-modulos.js)
+  await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS dados JSONB`);
 }
 
 function novoToken() { return crypto.randomBytes(24).toString('hex'); }
@@ -261,13 +263,27 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       <span class="opt-d">${esc(m.descricao)}</span>
     </label>`;
 
+  // Campos que só aparecem quando o módulo correspondente está escolhido.
+  const CAMPO = (m, c) => {
+    const nome = `campo_${esc(m.chave)}_${esc(c.nome)}`;
+    const entrada = c.tipo === 'select'
+      ? `<select name="${nome}"><option value="">(selecione)</option>${
+          c.opcoes.map(([v, r]) => `<option value="${esc(v)}">${esc(r)}</option>`).join('')}</select>`
+      : `<input name="${nome}" placeholder="${esc(c.dica || '')}">`;
+    return `<label>${esc(c.rotulo)}</label>${entrada}`;
+  };
+
+  const EXTRAS = (sel) => SOLICITAVEIS.map(m => {
+    const partes = [];
+    if (m.justifica) partes.push(
+      `<label>${esc(m.justificaRotulo || 'Justificativa')}</label>` +
+      `<input name="justificativa_${esc(m.chave)}" placeholder="${esc(m.justificaDica || '')}">`);
+    (m.campos || []).forEach(c => partes.push(CAMPO(m, c)));
+    if (!partes.length) return '';
+    return `<div class="extra" data-para="${esc(m.chave)}" ${m.chave === sel ? '' : 'hidden'}>${partes.join('')}</div>`;
+  }).join('');
+
   function paginaSolicitar(sel, erro) {
-    const m = moduloPorChave(sel);
-    const just = MODULOS.filter(x => x.justifica).map(x => `
-      <div class="just" data-para="${esc(x.chave)}" ${m && m.chave === x.chave ? '' : 'hidden'}>
-        <label>${esc(x.justificaRotulo || 'Justificativa')}</label>
-        <input name="justificativa_${esc(x.chave)}" placeholder="${esc(x.justificaDica || '')}">
-      </div>`).join('');
     return page('Solicitar acesso', `
       <div class="card">
         <h1>Solicitar acesso</h1>
@@ -276,10 +292,10 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         definir a própria senha.</p>
         ${erro ? `<p class="erro">${esc(erro)}</p>` : ''}
         <form method="POST" action="/acesso/solicitar" class="mt" id="frm">
-          <div class="opts">${MODULOS.map(x => RADIO(x, sel)).join('')}</div>
+          <div class="opts">${SOLICITAVEIS.map(x => RADIO(x, sel)).join('')}</div>
           <label>Nome completo</label><input name="full_name" required>
           <label>E-mail</label><input name="email" type="email" required>
-          ${just}
+          ${EXTRAS(sel)}
           <button class="mt">Enviar solicitação</button>
         </form>
         <p class="mut mt" style="border-top:1px solid var(--bd);padding-top:14px;margin-top:20px">
@@ -297,19 +313,19 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         .opt-t{font-weight:600;font-size:15px}
         .opt-p{font-size:12px;color:var(--pri)}
         .opt-d{font-size:13px;color:var(--mut)}
-        .just label{margin-top:0}
+        select{width:100%;padding:12px;border-radius:10px;border:1px solid #cdd3db;background:#fff;font-size:14px}
+        .extra label:first-child{margin-top:10px}
         .erro{background:#fdeceb;border:1px solid #f0c0c0;color:#8a1414;
               border-radius:10px;padding:10px 12px;font-size:14px}
       </style>
       <script>
-        // marca visual da opção e exibição do campo de justificativa do módulo escolhido
         var f = document.getElementById('frm');
         f.addEventListener('change', function (ev) {
           if (ev.target.name !== 'modulo') return;
           Array.prototype.forEach.call(f.querySelectorAll('.opt'), function (o) {
             o.classList.toggle('sel', o.contains(ev.target));
           });
-          Array.prototype.forEach.call(f.querySelectorAll('.just'), function (j) {
+          Array.prototype.forEach.call(f.querySelectorAll('.extra'), function (j) {
             j.hidden = j.getAttribute('data-para') !== ev.target.value;
           });
         });
@@ -323,7 +339,15 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
 
   // compatibilidade com os endereços antigos
   app.get('/scih/solicitar',  (req, res) => res.redirect(302, '/acesso/solicitar?m=scih'));
-  app.get('/pront/solicitar', (req, res) => res.redirect(302, '/acesso/solicitar?m=pront'));
+  // O consultório não usa formulário público: o acesso é concedido diretamente.
+  app.get('/pront/solicitar', (req, res) => res.send(page('Acesso ao prontuário', `
+    <div class="card">
+      <h1>Acesso ao prontuário</h1>
+      <p class="mut">O acesso ao prontuário do consultório é concedido diretamente pelo
+      Dr. Leandro, sem formulário. Fale com ele.</p>
+      <p class="mut mt">Se você procurava acesso a um sistema do hospital,
+      o pedido é em <a href="/acesso/solicitar">/acesso/solicitar</a>.</p>
+    </div>`)));
 
   app.post('/acesso/solicitar', async (req, res) => {
     try {
@@ -340,12 +364,30 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         return res.status(400).send(paginaSolicitar(mod.chave,
           `Para ${mod.rotulo}, use um endereço @${dom}.`));
 
+      if (!mod.solicitavel)
+        return res.status(400).send(paginaSolicitar(null,
+          `${mod.rotulo} não aceita pedido por este formulário.`));
+
       const justificativa = mod.justifica
         ? String(req.body?.['justificativa_' + mod.chave] || '').trim()
         : '';
       if (mod.justifica && !justificativa)
         return res.status(400).send(paginaSolicitar(mod.chave,
           `${mod.justificaRotulo || 'Justificativa'}: campo obrigatório para ${mod.rotulo}.`));
+
+      // Campos adicionais do módulo. A lista vem do registro; o corpo só fornece
+      // valores, nunca nomes de campo nem de coluna.
+      const dados = {};
+      for (const c of (mod.campos || [])) {
+        const v = String(req.body?.[`campo_${mod.chave}_${c.nome}`] || '').trim();
+        if (c.obrigatorio && !v)
+          return res.status(400).send(paginaSolicitar(mod.chave,
+            `${c.rotulo}: campo obrigatório para ${mod.rotulo}.`));
+        if (c.tipo === 'select' && v && !c.opcoes.some(([op]) => op === v))
+          return res.status(400).send(paginaSolicitar(mod.chave,
+            `${c.rotulo}: valor inválido.`));
+        if (v) dados[c.nome] = v.slice(0, 120);
+      }
 
       // pedido pendente duplicado não gera segunda linha (resposta é a mesma,
       // para não revelar se aquele e-mail já pediu acesso)
@@ -355,9 +397,10 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       if (!dup.rowCount) {
         const inst = mod.vinculo ? (req.atbTenant || 'HUSF') : null;
         await pool.query(
-          `INSERT INTO access_requests(full_name,email,kind,justification,status,instituicao)
-           VALUES ($1,$2,$3,$4,'pending',$5)`,
-          [full_name, email, mod.chave, justificativa || mod.publico, inst]);
+          `INSERT INTO access_requests(full_name,email,kind,justification,status,instituicao,dados)
+           VALUES ($1,$2,$3,$4,'pending',$5,$6)`,
+          [full_name, email, mod.chave, justificativa || mod.publico, inst,
+           Object.keys(dados).length ? dados : null]);
       }
 
       res.send(page('Solicitação enviada', `
@@ -488,7 +531,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     try {
       await client.query('BEGIN');
       const r = (await client.query(
-        `SELECT id, full_name, email, kind, instituicao FROM access_requests
+        `SELECT id, full_name, email, kind, instituicao, dados FROM access_requests
           WHERE id=$1 AND status='pending' FOR UPDATE`, [id])).rows[0];
       if (!r) {
         await client.query('ROLLBACK');
@@ -511,19 +554,29 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       const expira = new Date(Date.now() + TOKEN_TTL_DIAS * 86400000);
       const flag = mod.flag;                     // vem do registro, nunca do corpo
 
+      // Colunas adicionais (ex.: categoria_pav, conselho). Os NOMES saem do
+      // registro; do pedido vêm apenas os valores.
+      const dados = r.dados || {};
+      const extras = (mod.campos || [])
+        .filter(c => c.coluna && dados[c.nome])
+        .map(c => ({ coluna: c.coluna, valor: String(dados[c.nome]).slice(0, 120) }));
+
       const existente = (await client.query('SELECT id FROM users WHERE email=$1', [email])).rows[0];
       if (existente) {
-        await client.query(
-          `UPDATE users SET full_name=COALESCE($1,full_name), ${flag}=true,
-                  instituicao=COALESCE(instituicao,$2), set_pw_token=$3, set_pw_expires=$4
-            WHERE id=$5`,
-          [r.full_name || null, inst, token, expira, existente.id]);
+        const sets = [`full_name=COALESCE($1,full_name)`, `${flag}=true`,
+                      `instituicao=COALESCE(instituicao,$2)`, `set_pw_token=$3`, `set_pw_expires=$4`];
+        const vals = [r.full_name || null, inst, token, expira];
+        extras.forEach(e => { vals.push(e.valor); sets.push(`${e.coluna}=$${vals.length}`); });
+        vals.push(existente.id);
+        await client.query(`UPDATE users SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
       } else {
         // sem password_hash: login impossível até a pessoa definir a senha pelo link
+        const cols = ['full_name', 'email', flag, 'instituicao', 'set_pw_token', 'set_pw_expires'];
+        const vals = [r.full_name, email, true, inst, token, expira];
+        extras.forEach(e => { cols.push(e.coluna); vals.push(e.valor); });
         await client.query(
-          `INSERT INTO users(full_name,email,${flag},instituicao,set_pw_token,set_pw_expires)
-           VALUES($1,$2,true,$3,$4,$5)`,
-          [r.full_name, email, inst, token, expira]);
+          `INSERT INTO users(${cols.join(',')}) VALUES(${vals.map((_, i) => '$' + (i + 1)).join(',')})`,
+          vals);
       }
 
       await client.query(`UPDATE access_requests SET status='approved', processed_at=now() WHERE id=$1`, [id]);

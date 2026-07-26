@@ -3,38 +3,93 @@
 // Registro dos módulos que aceitam solicitação de acesso.
 //
 // Mesma disciplina do array ROLES em aulas-admin-usuarios-routes.js: a página
-// de solicitação, a fila do admin e a rota de aprovação derivam DESTA lista.
+// pública, a fila do admin e a rota de aprovação derivam DESTA lista.
 // Acrescentar um módulo é acrescentar uma entrada — não copiar rota.
 //
-// Campos:
+// Campos da entrada:
 //   chave        valor gravado em access_requests.kind
 //   flag         coluna booleana em users concedida na aprovação
+//   solicitavel  false = não aparece no formulário público, mas continua
+//                aprovável (usado para módulos cujo acesso é concedido
+//                diretamente, e para não travar pedidos antigos pendentes)
 //   rotulo       nome do módulo como a pessoa o conhece
-//   publico      a quem se destina (aparece na escolha)
+//   publico      a quem se destina
 //   descricao    o que a pessoa passa a poder fazer
-//   aprovadoPor  quem revisa o pedido (aparece na confirmação)
+//   aprovadoPor  quem revisa o pedido
 //   destino      para onde a pessoa vai depois de definir a senha
 //   vinculo      grava a instituição do pedido (subdomínio) no usuário
 //   dominio      exige o domínio institucional de e-mail
-//   justifica    pede um campo de justificativa no formulário
+//   justifica    pede justificativa (vai para access_requests.justification)
+//   campos       dados adicionais pedidos no formulário. Guardados em
+//                access_requests.dados (JSONB) e, se `coluna` estiver
+//                preenchida, gravados nessa coluna de users na aprovação.
+//                A coluna vem SEMPRE daqui — nunca da requisição.
 // ──────────────────────────────────────────────────────────────────────────
 
 export const MODULOS = [
   {
     chave: 'scih',
     flag: 'scih',
-    rotulo: 'Controle de Antimicrobianos',
-    publico: 'Equipe do SCIH',
-    descricao: 'Pareceres, grade de monitoramento e indicadores de infecção relacionada à assistência.',
+    solicitavel: true,
+    rotulo: 'Sistemas do SCIH',
+    publico: 'Equipe do Serviço de Controle de Infecção Hospitalar',
+    descricao: 'Controle de antimicrobianos, vigilância pós-alta de infecção de sítio cirúrgico e indicadores do serviço.',
     aprovadoPor: 'coordenação do SCIH',
     destino: '/atb/admin/grid',
     vinculo: true,
     dominio: true,
     justifica: false,
+    campos: [],
   },
   {
+    chave: 'pav',
+    flag: 'pav',
+    solicitavel: true,
+    rotulo: 'Bundle de Prevenção de PAV',
+    publico: 'Fisioterapia e enfermagem das unidades de terapia intensiva',
+    descricao: 'Registro das verificações do bundle à beira-leito, por turno e por salão.',
+    aprovadoPor: 'coordenação do SCIH',
+    destino: '/pav',
+    vinculo: true,
+    dominio: true,
+    justifica: false,
+    // A flag sozinha não basta: a categoria decide os itens e o alcance de
+    // salão, e o conselho assina cada verificação. Sem isso o acesso nasce
+    // incompleto e a autoria do registro fica sem lastro.
+    campos: [
+      { nome: 'categoria_pav', coluna: 'categoria_pav', obrigatorio: true,
+        rotulo: 'Categoria profissional', tipo: 'select',
+        opcoes: [['fisio', 'Fisioterapia'], ['enf', 'Enfermagem']] },
+      { nome: 'conselho', coluna: 'conselho', obrigatorio: true,
+        rotulo: 'Registro no conselho', tipo: 'texto',
+        dica: 'CREFITO para fisioterapia, COREN para enfermagem.' },
+    ],
+  },
+  {
+    chave: 'gestao',
+    flag: 'gestao',
+    solicitavel: true,
+    rotulo: 'Painel de Governança',
+    publico: 'Membros do Comitê de Gestão Estratégica e Governança',
+    descricao: 'Indicadores assistenciais e operacionais da instituição, por competência.',
+    aprovadoPor: 'coordenação do comitê',
+    destino: '/gov',
+    vinculo: true,
+    dominio: true,
+    // Único módulo com justificativa obrigatória: o painel expõe mortalidade
+    // por unidade e reinternação ajustada. O vínculo declarado fica registrado.
+    justifica: true,
+    justificaRotulo: 'Vínculo com o comitê',
+    justificaDica: 'Ex.: membro titular indicado pela diretoria clínica em 12/2025.',
+    campos: [],
+  },
+  {
+    // Consultório. O acesso é concedido diretamente, não por formulário público.
+    // Permanece no registro para que pedidos antigos ainda pendentes continuem
+    // aprováveis pela fila do admin.
     chave: 'pront',
     flag: 'pront',
+    solicitavel: false,
     rotulo: 'Prontuário',
     publico: 'Equipe do consultório',
     descricao: 'Pacientes, consultas e emissão de documentos.',
@@ -43,25 +98,11 @@ export const MODULOS = [
     vinculo: false,
     dominio: true,
     justifica: false,
-  },
-  {
-    chave: 'gestao',
-    flag: 'gestao',
-    rotulo: 'Painel de Governança',
-    publico: 'Membros do Comitê de Gestão Estratégica e Governança',
-    descricao: 'Indicadores assistenciais e operacionais da instituição, por competência.',
-    aprovadoPor: 'coordenação do comitê',
-    destino: '/gov',
-    vinculo: true,
-    dominio: true,
-    // Diferente dos demais: o painel expõe mortalidade por unidade e reinternação
-    // ajustada. Quem pede precisa declarar o vínculo com o comitê, e fica registrado.
-    justifica: true,
-    justificaRotulo: 'Vínculo com o comitê',
-    justificaDica: 'Ex.: membro titular indicado pela diretoria clínica em 12/2025.',
+    campos: [],
   },
 ];
 
+export const SOLICITAVEIS = MODULOS.filter(m => m.solicitavel);
 export const CHAVES = MODULOS.map(m => m.chave);
 
 export function moduloPorChave(k) {

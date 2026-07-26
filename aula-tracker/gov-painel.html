@@ -24,9 +24,14 @@ window.__dgFalhou = function (titulo, detalhe, extra) {
              + extra + '</p>' : '') + '</main>';
 };
 </script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.min.js"></script>
+<!-- Ordem obrigatória. O UMD do Recharts resolve como Recharts = fn(window.React,
+     window.PropTypes): sem prop-types carregado antes, ele não se registra.
+     O arquivo é umd/Recharts.js — não existe Recharts.min.js publicado.
+     A versão 2.1.9 não declara suporte a React 18; a 2.15.4 declara. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2.15.4/umd/Recharts.js"></script>
 <style>
 :root{
   --paper:#E9E7E1; --panel:#F8F7F4; --panel2:#F1EFEA; --track:#DFDCD4;
@@ -568,6 +573,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(e(App));
 var faltando = [];
 if (typeof React === 'undefined')    faltando.push('React');
 if (typeof ReactDOM === 'undefined') faltando.push('ReactDOM');
+if (typeof PropTypes === 'undefined') faltando.push('PropTypes');
 if (typeof Recharts === 'undefined') faltando.push('Recharts');
 if (faltando.length) {
   window.__dgFalhou(

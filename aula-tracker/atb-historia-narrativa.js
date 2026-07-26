@@ -65,9 +65,27 @@ export function parseSaidaNarrativa(texto) {
   if (m) s = m[0];
   try {
     const o = JSON.parse(s);
-    if (typeof o.narrativa !== 'boolean') return null;
-    return { narrativa: o.narrativa, aviso: typeof o.aviso === 'string' ? o.aviso : '' };
+    // Parser TOLERANTE: o modelo às vezes devolve narrativa como string
+    // ("true"/"false"/"sim"/"não"), número (1/0) ou com espaços. Normaliza
+    // antes de desistir — desistir cedo demais era o furo do gate (uma
+    // resposta ilegível virava null e a história telegráfica passava).
+    const b = _coerceBool(o.narrativa);
+    if (b === null) return null;
+    return { narrativa: b, aviso: typeof o.aviso === 'string' ? o.aviso : '' };
   } catch {
     return null;
   }
+}
+
+// Converte várias formas frouxas para boolean. Retorna null se realmente
+// não der para decidir (aí o chamador trata como resposta ilegível).
+function _coerceBool(v) {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v === 1 ? true : (v === 0 ? false : null);
+  if (typeof v === 'string') {
+    const t = v.trim().toLowerCase();
+    if (['true', 't', 'sim', 's', '1', 'yes', 'y'].includes(t)) return true;
+    if (['false', 'f', 'nao', 'não', 'n', '0', 'no'].includes(t)) return false;
+  }
+  return null;
 }

@@ -33,6 +33,7 @@ const FILTROS = {
   pendentes: { rotulo: 'Sinalizadas pendentes', where: `narrativa = false AND revisao IS NULL` },
   sinalizadas: { rotulo: 'Todas as sinalizadas', where: `narrativa = false` },
   passou: { rotulo: 'Passaram (amostra)', where: `narrativa = true` },
+  ilegiveis: { rotulo: 'Ilegíveis (parse falhou)', where: `ilegivel = true` },
   errou: { rotulo: 'Marcadas como erro da IA', where: `revisao = 'errou'` },
   todas: { rotulo: 'Todas', where: `TRUE` },
 };
@@ -94,7 +95,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
       const revTrue = m.fn_ok + m.fn_erro;       // passadas já revisadas
 
       const { rows } = await pool.query(`
-        SELECT id, inst, historia, disponivel, narrativa, aviso, override, motivo,
+        SELECT id, inst, historia, disponivel, narrativa, aviso, override, motivo, bruto, ilegivel,
                revisao, revisado_em, created_at
           FROM atb_historia_checagens
          WHERE (${filtro.where}) AND ${escopoInst(1)}
@@ -111,9 +112,11 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
         const quando = r.created_at ? new Date(r.created_at).toLocaleString('pt-BR') : '—';
         const veredito = r.disponivel === false
           ? '<span class="pill off">indisponível (passou por fail-open)</span>'
-          : (r.narrativa === false
-              ? '<span class="pill" style="background:#fdecea;color:#b3261e">IA: telegráfica → bloqueou</span>'
-              : '<span class="pill" style="background:#e6f4ea;color:#1a7f37">IA: narrativa → passou</span>');
+          : (r.ilegivel
+              ? '<span class="pill" style="background:#fff4e5;color:#8a5000">IA ilegível → bloqueou (fail-safe)</span>'
+              : (r.narrativa === false
+                  ? '<span class="pill" style="background:#fdecea;color:#b3261e">IA: telegráfica → bloqueou</span>'
+                  : '<span class="pill" style="background:#e6f4ea;color:#1a7f37">IA: narrativa → passou</span>'));
         const jaRev = r.revisao
           ? `<span class="pill" style="background:${r.revisao === 'errou' ? '#fdecea;color:#b3261e' : '#e6f4ea;color:#1a7f37'}">revisado: IA ${esc(r.revisao)}</span>`
           : '';
@@ -131,6 +134,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
           </div>
           <div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border:1px solid var(--bd);border-radius:8px;white-space:pre-wrap;font-size:14px">${esc(r.historia || '(vazio)')}</div>
           ${r.aviso ? `<p class="nota" style="margin:8px 0 0">aviso do modelo: ${esc(r.aviso)}</p>` : ''}
+          ${r.bruto ? `<details style="margin-top:8px"><summary class="nota" style="cursor:pointer">resposta crua do modelo${r.ilegivel ? ' (não interpretada)' : ''}</summary><div style="margin-top:6px;padding:8px 10px;background:#fbfbfd;border:1px solid var(--bd);border-radius:6px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;color:#444">${esc(r.bruto)}</div></details>` : ''}
           ${r.override ? `<p class="nota" style="margin:6px 0 0">override do prescritor${r.motivo ? ': ' + esc(r.motivo) : ''}</p>` : ''}
           ${botoes}
         </div>`;

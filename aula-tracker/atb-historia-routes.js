@@ -108,8 +108,12 @@ async function chamarModelo(messages, responseFormat, tag) {
 async function classificar(historia) {
   const texto = DEID_ON ? deidentificar(historia) : historia;
   const r = await chamarModelo(montarMensagensNarrativa(texto), RESPONSE_FORMAT, 'narrativa');
-  if (r.erro) return null;
-  return parseSaidaNarrativa(r.conteudo);
+  if (r.erro) return { erro: r.erro };                      // LLM fora/timeout → fail-open
+  const o = parseSaidaNarrativa(r.conteudo);
+  if (o) return { ...o, bruto: r.conteudo };                // parse OK
+  // LLM respondeu, mas o parser não entendeu: NÃO é indisponibilidade.
+  // Devolve 'ilegivel' + o texto cru — o chamador trata como fail-SAFE (barra).
+  return { ilegivel: true, bruto: r.conteudo };
 }
 
 // Rótulo 2 — CONTEÚDO (indícios de ISC). Avaliação independente, prompt e
@@ -144,6 +148,8 @@ export function registerHistoriaRoutes(app, pool) {
     .then(() => Promise.all([
       pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS isc BOOLEAN`),
       pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS isc_indicios TEXT`),
+      pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS bruto TEXT`),
+      pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS ilegivel BOOLEAN DEFAULT false`),
     ]))
     .catch(e => console.error('[historia] migration', e));
 
@@ -199,28 +205,48 @@ async function ir(){
       querIsc ? classificarIsc(historia) : Promise.resolve(null),
     ]);
 
-    // Fail-open POR RÓTULO: se um falhar e o outro vier, usa-se o que veio.
-    const okNarrativa = querNarrativa && !!rn;
+    // Três estados possíveis da narrativa:
+    //   rn.erro      → LLM fora/timeout           → fail-OPEN (não trava o hospital)
+    //   rn.ilegivel  → LLM respondeu, parse falhou → fail-SAFE (barra, pede revisão)
+    //   rn ok        → veredito normal
+    const narrErro     = querNarrativa && (!rn || rn.erro);
+    const narrIlegivel = querNarrativa && rn && rn.ilegivel;
+    const okNarrativa  = querNarrativa && rn && !rn.erro && !rn.ilegivel;
     const okIsc = querIsc && !!ri && !ri.erro;
-    if (!okNarrativa && !okIsc) return res.json({ disponivel: false });
+
+    // Se a narrativa foi pedida e veio ILEGÍVEL, isso por si só é um resultado
+    // acionável (barrar) — não é indisponibilidade. Só caímos em disponivel=false
+    // quando NADA utilizável veio: narrativa fora E isc fora.
+    const narrTemResultado = okNarrativa || narrIlegivel;
+    if (!narrTemResultado && !okIsc) return res.json({ disponivel: false });
+
+    // Fail-safe: história ilegível é tratada como telegráfica (narrativa=false),
+    // com aviso próprio. O prescritor revisa; o SCIH vê no log (com o bruto).
+    const narrativaFinal = okNarrativa ? rn.narrativa : (narrIlegivel ? false : null);
+    const avisoFinal = okNarrativa
+      ? (rn.aviso || '')
+      : (narrIlegivel ? 'Não foi possível avaliar a história automaticamente. Revise e descreva o quadro em texto corrido antes de enviar.' : '');
+    // Resposta crua do LLM (para o log) — vem tanto do ok quanto do ilegível.
+    const brutoNarr = (rn && rn.bruto) ? String(rn.bruto).slice(0, 4000) : null;
 
     // Log (rótulo). Não deixa erro de log travar o fluxo.
     let checagem_id = null;
     try {
       const ins = await pool.query(
-        `INSERT INTO atb_historia_checagens (inst, historia, disponivel, narrativa, aviso, isc, isc_indicios)
-         VALUES ($1,$2,true,$3,$4,$5,$6) RETURNING id`,
+        `INSERT INTO atb_historia_checagens (inst, historia, disponivel, narrativa, aviso, isc, isc_indicios, bruto, ilegivel)
+         VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8) RETURNING id`,
         [inst, historia,
-         okNarrativa ? rn.narrativa : null, okNarrativa ? (rn.aviso || null) : null,
-         okIsc ? ri.isc : null, okIsc ? (ri.indicios || null) : null]);
+         narrTemResultado ? narrativaFinal : null,
+         narrTemResultado ? (avisoFinal || null) : null,
+         okIsc ? ri.isc : null, okIsc ? (ri.indicios || null) : null,
+         brutoNarr, !!narrIlegivel]);
       checagem_id = ins.rows[0].id;
     } catch (e) { console.error('[historia] log', e.message); }
 
-    // Rótulo não pedido ou que falhou vai como null — o cliente ignora nulos.
     return res.json({
       disponivel: true,
-      narrativa: okNarrativa ? rn.narrativa : null,
-      aviso: okNarrativa ? (rn.aviso || '') : '',
+      narrativa: narrTemResultado ? narrativaFinal : null,
+      aviso: narrTemResultado ? avisoFinal : '',
       isc: okIsc ? ri.isc : null,
       indicios: okIsc ? (ri.indicios || '') : '',
       checagem_id,

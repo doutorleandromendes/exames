@@ -132,7 +132,8 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     res.send(page('Portal do SCIH', `
       <div class="card">
         <h1>Portal do SCIH — HUSF</h1>
-        <p class="mut">Olá, ${esc(nome)}. Atalhos do sistema de ATB e dos relatórios de vigilância.</p>
+        <p class="mut">Olá, ${esc(nome)}. Atalhos dos sistemas do SCIH, dos relatórios de
+        vigilância e da gestão de acessos.</p>
       </div>
       <div class="card">
         <div class="sec" style="margin-top:0">Operação diária — ATB</div>
@@ -151,6 +152,12 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/isc/admin/nova', '➕', 'Nova ficha (manual)')}
           ${card('/isc/admin/importar', '📥', 'Importar mapa cirúrgico')}
         </div>` : ''}
+
+        <div class="sec">Bundle de prevenção — PAV</div>
+        <div class="hub">
+          ${card('/pav/admin/grid', '🫁', 'Grid do bundle')}
+          ${card('/pav/m', '📱', 'Coleta à beira-leito')}
+        </div>
 
         <div class="sec">Indicadores &amp; consumo</div>
         <div class="hub">
@@ -172,16 +179,22 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card(VIG + '/sciet.html', '🧭', 'Algoritmo empírico UTI', true)}
         </div>
 
+        <div class="sec">Gestão &amp; governança</div>
+        <div class="hub">
+          ${card('/gov', '🏛️', 'Painel do Comitê de Governança')}
+        </div>
+
         <div class="sec">Acessos &amp; configuração</div>
         <div class="hub">
-          ${card('/atb/admin/scih', '👥', 'Aprovar acessos do SCIH')}
+          ${card('/atb/admin/scih', '👥', 'Aprovar pedidos de acesso')}
+          ${card('/admin/usuarios', '🗂️', 'Usuários e papéis')}
           ${card('/atb/admin/regras', '🧠', 'Regras de triagem')}
           ${card('/atb/admin/monitoramento', '🔁', 'Regras de monitoramento')}
           ${card('/atb/admin/form', '🧩', 'Editar opções do formulário')}
           ${card('/atb/admin/regras-form', '🔀', 'Regras do formulário')}
           ${card('/atb/admin/historia/revisao', '🤖', 'Triagens de IA — revisão', false, iaPend || null)}
           ${card('/atb/admin/parecer-frases', '💬', 'Frases do Parecer')}
-          ${card('/scih/solicitar', '✉️', 'Página de solicitação')}
+          ${card('/acesso/solicitar', '✉️', 'Formulário público de solicitação')}
           ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
         </div>
 
@@ -274,11 +287,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
   };
 
   const EXTRAS = (sel) => SOLICITAVEIS.map(m => {
-    const partes = [];
-    if (m.justifica) partes.push(
-      `<label>${esc(m.justificaRotulo || 'Justificativa')}</label>` +
-      `<input name="justificativa_${esc(m.chave)}" placeholder="${esc(m.justificaDica || '')}">`);
-    (m.campos || []).forEach(c => partes.push(CAMPO(m, c)));
+    const partes = (m.campos || []).map(c => CAMPO(m, c));
     if (!partes.length) return '';
     return `<div class="extra" data-para="${esc(m.chave)}" ${m.chave === sel ? '' : 'hidden'}>${partes.join('')}</div>`;
   }).join('');
@@ -368,13 +377,6 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         return res.status(400).send(paginaSolicitar(null,
           `${mod.rotulo} não aceita pedido por este formulário.`));
 
-      const justificativa = mod.justifica
-        ? String(req.body?.['justificativa_' + mod.chave] || '').trim()
-        : '';
-      if (mod.justifica && !justificativa)
-        return res.status(400).send(paginaSolicitar(mod.chave,
-          `${mod.justificaRotulo || 'Justificativa'}: campo obrigatório para ${mod.rotulo}.`));
-
       // Campos adicionais do módulo. A lista vem do registro; o corpo só fornece
       // valores, nunca nomes de campo nem de coluna.
       const dados = {};
@@ -399,7 +401,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         await pool.query(
           `INSERT INTO access_requests(full_name,email,kind,justification,status,instituicao,dados)
            VALUES ($1,$2,$3,$4,'pending',$5,$6)`,
-          [full_name, email, mod.chave, justificativa || mod.publico, inst,
+          [full_name, email, mod.chave, mod.publico, inst,
            Object.keys(dados).length ? dados : null]);
       }
 
@@ -423,7 +425,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
     try {
       // Uma consulta só: as filas por módulo saem do registro, não de queries copiadas.
       const pendentes = (await pool.query(
-        `SELECT id, full_name, email, kind, justification, instituicao, created_at
+        `SELECT id, full_name, email, kind, instituicao, dados, created_at
            FROM access_requests
           WHERE status='pending' AND kind = ANY($1)
           ORDER BY created_at ASC`, [MODULOS.map(m => m.chave)])).rows;
@@ -441,7 +443,20 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           <tr>
             <td>${esc(r.full_name)}</td>
             <td>${esc(r.email)}</td>
-            <td class="mut">${esc(r.justification || '—')}${r.instituicao ? ` · ${esc(r.instituicao)}` : ''}</td>
+            <td class="mut">${(() => {
+              // dados específicos do módulo (ex.: categoria e conselho no PAV)
+              const d = r.dados || {};
+              const partes = (m.campos || [])
+                .filter(c => d[c.nome])
+                .map(c => {
+                  const v = c.tipo === 'select'
+                    ? (c.opcoes.find(([op]) => op === d[c.nome]) || [null, d[c.nome]])[1]
+                    : d[c.nome];
+                  return `${esc(c.rotulo)}: ${esc(v)}`;
+                });
+              if (r.instituicao) partes.push(esc(r.instituicao));
+              return partes.join(' · ') || '—';
+            })()}</td>
             <td class="mut">${new Date(r.created_at).toLocaleDateString('pt-BR')}</td>
             <td class="row">
               <form method="POST" action="/atb/admin/acesso/aprovar/${r.id}" class="inline"><button>Aprovar</button></form>
@@ -453,7 +468,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           <h2>Pedidos pendentes — ${esc(m.rotulo)}${fila.length ? ` <span class="pill on">${fila.length}</span>` : ''}</h2>
           <p class="mut" style="margin:-6px 0 12px;font-size:13px">${esc(m.publico)} · aprovação pela ${esc(m.aprovadoPor)}</p>
           <table>
-            <thead><tr><th>Nome</th><th>E-mail</th><th>Justificativa</th><th>Data</th><th>Ações</th></tr></thead>
+            <thead><tr><th>Nome</th><th>E-mail</th><th>Dados do pedido</th><th>Data</th><th>Ações</th></tr></thead>
             <tbody>${linhas}</tbody>
           </table>
         </div>`;

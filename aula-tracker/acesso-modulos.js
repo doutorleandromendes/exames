@@ -16,10 +16,8 @@
 //   publico      a quem se destina
 //   descricao    o que a pessoa passa a poder fazer
 //   aprovadoPor  quem revisa o pedido
-//   destino      para onde a pessoa vai depois de definir a senha
 //   vinculo      grava a instituição do pedido (subdomínio) no usuário
 //   dominio      exige o domínio institucional de e-mail
-//   justifica    pede justificativa (vai para access_requests.justification)
 //   campos       dados adicionais pedidos no formulário. Guardados em
 //                access_requests.dados (JSONB) e, se `coluna` estiver
 //                preenchida, gravados nessa coluna de users na aprovação.
@@ -35,10 +33,8 @@ export const MODULOS = [
     publico: 'Equipe do Serviço de Controle de Infecção Hospitalar',
     descricao: 'Controle de antimicrobianos, vigilância pós-alta de infecção de sítio cirúrgico e indicadores do serviço.',
     aprovadoPor: 'coordenação do SCIH',
-    destino: '/atb/admin/grid',
     vinculo: true,
     dominio: true,
-    justifica: false,
     campos: [],
   },
   {
@@ -49,10 +45,8 @@ export const MODULOS = [
     publico: 'Fisioterapia e enfermagem das unidades de terapia intensiva',
     descricao: 'Registro das verificações do bundle à beira-leito, por turno e por salão.',
     aprovadoPor: 'coordenação do SCIH',
-    destino: '/pav',
     vinculo: true,
     dominio: true,
-    justifica: false,
     // A flag sozinha não basta: a categoria decide os itens e o alcance de
     // salão, e o conselho assina cada verificação. Sem isso o acesso nasce
     // incompleto e a autoria do registro fica sem lastro.
@@ -73,14 +67,8 @@ export const MODULOS = [
     publico: 'Membros do Comitê de Gestão Estratégica e Governança',
     descricao: 'Indicadores assistenciais e operacionais da instituição, por competência.',
     aprovadoPor: 'coordenação do comitê',
-    destino: '/gov',
     vinculo: true,
     dominio: true,
-    // Único módulo com justificativa obrigatória: o painel expõe mortalidade
-    // por unidade e reinternação ajustada. O vínculo declarado fica registrado.
-    justifica: true,
-    justificaRotulo: 'Vínculo com o comitê',
-    justificaDica: 'Ex.: membro titular indicado pela diretoria clínica em 12/2025.',
     campos: [],
   },
   {
@@ -94,10 +82,8 @@ export const MODULOS = [
     publico: 'Equipe do consultório',
     descricao: 'Pacientes, consultas e emissão de documentos.',
     aprovadoPor: 'Dr. Leandro',
-    destino: '/pront',
     vinculo: false,
     dominio: true,
-    justifica: false,
     campos: [],
   },
 ];

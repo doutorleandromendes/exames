@@ -145,7 +145,7 @@ app.get('/inicio', async (req,res)=>{
   if(uid){
     try{
       const { rows } = await pool.query(
-        'SELECT id,full_name,scih,super_admin,micro,pront,agenda,recepcao FROM users WHERE id=$1',[uid]);
+        'SELECT id,full_name,scih,super_admin,micro,pront,agenda,recepcao,gestao FROM users WHERE id=$1',[uid]);
       user = rows[0]||null;
     }catch{}
   }
@@ -156,7 +156,7 @@ app.get('/inicio', async (req,res)=>{
   const ehAtb = sa || f('scih') || f('micro');
 
   // micro "puro" (sem outros papéis) mantém o atalho histórico direto ao grid
-  if (user && f('micro') && !sa && !f('scih') && !f('agenda') && !f('recepcao') && !f('pront'))
+  if (user && f('micro') && !sa && !f('scih') && !f('agenda') && !f('recepcao') && !f('pront') && !f('gestao'))
     return res.redirect('/atb/admin/grid');
 
   // o usuário tem alguma matrícula ativa em aulas?
@@ -182,6 +182,7 @@ app.get('/inicio', async (req,res)=>{
   add(sa || f('pront'), '/pront', '🩺', 'Prontuário', 'Pacientes, consultas e documentos');
   add(sa || f('agenda'), '/secretaria', '🧾', 'Secretaria', 'Orçamentos e documentos');
   add(sa || f('agenda'), '/estoque', '📦', 'Estoque', 'Testes rápidos');
+  add(sa || f('gestao'), '/gov', '🏛️', 'Governança', 'Painel do Comitê de Gestão Estratégica');
   add(temAulas, '/aulas', '🎓', 'Aulas', 'InfectoAulas');
 
   // atalhos secundários (mesmos do hub antigo, preservados para SCIH/admin)

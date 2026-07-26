@@ -188,6 +188,31 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     }catch{ return res.redirect('/'); }
   };
 
+  // Governança: exige login com flag gestao ou super_admin; adm é break-glass.
+  // Deliberadamente SEM `scih`: são comitês distintos. Controle de infecção não
+  // implica acesso a mortalidade institucional, letalidade por UTI e reinternação
+  // ajustada por unidade. Mesma disciplina de vínculo de instituição do
+  // scihRequired (super_admin e adm cruzam tudo).
+  const gestaoRequired = async (req,res,next)=>{
+    const adm = isAdmin(req);
+    const uid = req.cookies?.uid;
+    if(!uid){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+    try{
+      const { rows } = await pool.query('SELECT id,email,full_name,expires_at,scih,super_admin,gestao,instituicao FROM users WHERE id=$1',[uid]);
+      const user = rows[0];
+      if(!user){ if(adm){ req.user = null; return next(); } return res.redirect('/'); }
+      const exp = parseISO(user.expires_at);
+      if (exp && new Date() > exp) return res.send(renderShell('Acesso expirado', `<div class="card"><h1>Acesso expirado</h1><a href="/">Voltar</a></div>`));
+      req.user = user;
+      if(user.gestao || user.super_admin || adm){
+        if (!user.super_admin && !adm && req.atbTenant && user.instituicao && user.instituicao !== req.atbTenant)
+          return res.status(403).send(renderShell('Outra unidade', `<div class="card"><h1>Acesso de outra unidade</h1><p class="mut">Sua conta é vinculada a outra unidade hospitalar. Use o endereço da sua unidade.</p></div>`));
+        return next();
+      }
+      return res.status(403).send(renderShell('Sem acesso', `<div class="card"><h1>Acesso restrito ao Comitê de Governança</h1><p class="mut">Sua conta não tem permissão para esta área. Fale com a coordenação.</p><a href="/inicio">Início</a></div>`));
+    }catch{ return res.redirect('/'); }
+  };
+
   return {
     isAdmin,
     adminRequired,
@@ -199,5 +224,6 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     agendaRequired,
     secretariaRequired,
     pavRequired,
+    gestaoRequired,
   };
 }

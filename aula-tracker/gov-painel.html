@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>HUSF · Painel de Governança</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Archivo:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/recharts@2.1.9/umd/Recharts.min.js"></script>
+<style>
+:root{
+  --paper:#E9E7E1; --panel:#F8F7F4; --panel2:#F1EFEA; --track:#DFDCD4;
+  --rule:#D6D3CB; --rule2:#C3BFB5; --grid:#E0DDD5;
+  --ink:#1B1F24; --ink2:#4A4E52; --ink3:#7A7F86;
+  --azul:#14395F; --azul2:#5A7590; --azul3:#93A8B8; --vermelho:#9E2A2B;
+  --verde:#2F6B63; --ocre:#8A6F3E; --ameixa:#6E5A82;
+  --rail:238px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);
+  font-family:'Archivo',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{display:flex;min-height:100vh}
+a{color:inherit}
+.mono{font-family:'Roboto Mono',monospace;font-variant-numeric:tabular-nums}
+.disp{font-family:'Newsreader',Georgia,serif}
+
+/* ---------- rail ---------- */
+.rail{width:var(--rail);flex:0 0 var(--rail);background:var(--panel);border-right:1px solid var(--rule);
+  position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:28px 0 18px}
+.brand{padding:0 22px 20px;border-bottom:2px solid var(--azul)}
+.brand .mark{font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:21px;letter-spacing:-.01em;line-height:1.1;color:var(--azul)}
+.brand .sub{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3);margin-top:9px;font-family:'Roboto Mono',monospace}
+.nav{padding:14px 12px;display:flex;flex-direction:column;gap:1px;overflow-y:auto}
+.nav button{all:unset;cursor:pointer;display:flex;gap:11px;align-items:baseline;padding:9px 11px;
+  font-size:13.5px;color:var(--ink2);transition:background .15s,color .15s;border-left:2px solid transparent}
+.nav button:hover{background:var(--panel2);color:var(--ink)}
+.nav button:focus-visible{outline:2px solid var(--azul);outline-offset:1px}
+.nav button.on{background:var(--panel2);color:var(--azul);border-left-color:var(--azul);font-weight:500}
+.nav button.on .idx{color:var(--azul)}
+.idx{font-family:'Roboto Mono',monospace;font-size:10px;color:var(--ink3);letter-spacing:.06em}
+.railfoot{margin-top:auto;padding:16px 22px 0;border-top:1px solid var(--rule);font-size:10.5px;color:var(--ink3);line-height:1.8;font-family:'Roboto Mono',monospace}
+
+/* ---------- main ---------- */
+main{flex:1;min-width:0;padding:38px 44px 90px;max-width:1500px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;
+  margin-bottom:36px;padding-bottom:18px;border-bottom:2px solid var(--azul)}
+h1{font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:34px;letter-spacing:-.012em;margin:0 0 10px;color:var(--azul)}
+.lede{color:var(--ink2);font-size:14.5px;max-width:660px;line-height:1.65;margin:0}
+.stamp{font-family:'Roboto Mono',monospace;font-size:10.5px;color:var(--ink3);text-align:right;line-height:1.9}
+.stamp b{color:var(--azul);font-weight:500}
+
+section{margin-bottom:58px;scroll-margin-top:20px}
+.shead{display:flex;align-items:baseline;gap:14px;padding-bottom:10px;margin-bottom:20px;border-bottom:1px solid var(--rule2)}
+.shead .n{font-family:'Roboto Mono',monospace;font-size:11px;color:var(--azul2)}
+.shead h2{font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:22px;letter-spacing:-.01em;margin:0;color:var(--azul)}
+.shead .hint{margin-left:auto;font-size:12px;color:var(--ink3);text-align:right;max-width:430px;line-height:1.5}
+
+.grid{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g23{grid-template-columns:1.55fr 1fr}
+@media(max-width:1180px){.g4{grid-template-columns:repeat(2,1fr)}.g3,.g2,.g23{grid-template-columns:1fr}}
+@media(max-width:820px){body{display:block}.rail{position:static;width:100%;height:auto;flex:none}
+  .nav{flex-direction:row;flex-wrap:wrap}main{padding:24px 18px 60px}.g4{grid-template-columns:1fr 1fr}}
+
+.card{background:var(--panel);border:1px solid var(--rule);padding:16px 18px}
+.card.pad{padding:18px 20px 10px}
+.ctitle{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink3);font-family:'Roboto Mono',monospace;margin-bottom:14px}
+
+/* KPI tile */
+.kpi{background:var(--panel);border:1px solid var(--rule);border-left:2px solid var(--k,var(--azul2));padding:14px 17px 13px}
+.kpi .lab{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink3);font-family:'Roboto Mono',monospace}
+.kpi .val{font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:33px;letter-spacing:-.015em;line-height:1.15;margin-top:8px;font-variant-numeric:tabular-nums}
+.kpi .val small{font-size:14px;color:var(--ink3);margin-left:3px;letter-spacing:0;font-family:'Archivo',sans-serif}
+.kpi .foot{margin-top:7px;font-size:11px;color:var(--ink2);font-family:'Roboto Mono',monospace}
+.up{color:var(--vermelho)} .down{color:var(--verde)} .flat{color:var(--ink3)}
+
+/* ---- assinatura: régua de pressão ---- */
+.regua{display:flex;flex-direction:column;gap:1px;margin-top:4px}
+.rrow{display:grid;grid-template-columns:196px 1fr 62px;align-items:center;gap:14px;padding:5px 0}
+.rrow .nm{font-size:13px;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track{position:relative;height:18px;background:var(--track)}
+.track .bar{position:absolute;left:0;top:0;bottom:0;transition:width .5s cubic-bezier(.2,.7,.3,1)}
+.track .over{position:absolute;top:-2px;bottom:-2px;
+  background:repeating-linear-gradient(115deg,var(--vermelho) 0 4px,#6E1B1C 4px 8px)}
+.track .g100{position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--ink)}
+.track .g85{position:absolute;top:-1px;bottom:-1px;width:1px;background:var(--ocre)}
+.rrow .pv{font-family:'Roboto Mono',monospace;font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+.rscale{display:grid;grid-template-columns:196px 1fr 62px;gap:14px;margin-top:10px}
+.rscale .ticks{position:relative;height:14px;font-family:'Roboto Mono',monospace;font-size:9.5px;color:var(--ink3)}
+.rscale .ticks span{position:absolute;transform:translateX(-50%)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--ink3);font-family:'Roboto Mono',monospace;margin-top:14px}
+.legend i{display:inline-block;width:9px;height:9px;margin-right:6px;vertical-align:middle}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-family:'Roboto Mono',monospace;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink3);font-weight:400;padding:0 10px 9px 0;border-bottom:1px solid var(--rule2)}
+td{padding:9px 10px 9px 0;border-bottom:1px solid var(--grid);color:var(--ink)}
+td.n,th.n{text-align:right;font-family:'Roboto Mono',monospace;font-variant-numeric:tabular-nums}
+tbody tr:hover td{background:var(--panel2)}
+.chip{display:inline-block;padding:2px 7px;font-family:'Roboto Mono',monospace;font-size:11px}
+
+.note{background:var(--panel);border:1px solid var(--rule);border-left:2px solid var(--ocre);
+  padding:15px 18px;font-size:13.5px;line-height:1.65;color:var(--ink2)}
+.note .rot{display:block;font-family:'Roboto Mono',monospace;font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;margin-bottom:7px;color:var(--ocre)}
+.note.alert{border-left-color:var(--vermelho)} .note.alert .rot{color:var(--vermelho)}
+.note.ok{border-left-color:var(--verde)} .note.ok .rot{color:var(--verde)}
+.note.lim{border-left-color:var(--azul2)} .note.lim .rot{color:var(--azul2)}
+.notes{display:flex;flex-direction:column;gap:10px}
+.recharts-cartesian-axis-tick text{font-family:'Roboto Mono',monospace;font-size:10px;fill:#7A7F86}
+.recharts-default-tooltip{background:#F8F7F4!important;border:1px solid #C3BFB5!important;
+  font-family:'Roboto Mono',monospace!important;font-size:11.5px!important}
+.recharts-tooltip-label{color:#1B1F24!important;margin-bottom:5px!important}
+.seg{display:inline-flex;border:1px solid var(--rule2);overflow:hidden}
+.seg button{all:unset;cursor:pointer;padding:5px 11px;font-size:11.5px;font-family:'Roboto Mono',monospace;color:var(--ink2)}
+.seg button:hover{background:var(--panel2)} .seg button.on{background:var(--azul);color:var(--panel)}
+.seg button:focus-visible{outline:2px solid var(--azul);outline-offset:-2px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media print{
+  body{display:block;background:#fff}
+  .rail{display:none}
+  main{padding:0;max-width:none}
+  section{break-inside:avoid;margin-bottom:26px}
+  .card,.kpi,.note{border-color:#B9B5AB}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const e = React.createElement;
+const {ResponsiveContainer,LineChart,Line,AreaChart,Area,BarChart,Bar,ComposedChart,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ReferenceLine,Cell,PieChart,Pie} = Recharts;
+const C = {azul:'#14395F',ardosia:'#5A7590',nevoa:'#93A8B8',verde:'#2F6B63',ocre:'#8A6F3E',ameixa:'#6E5A82',vermelho:'#9E2A2B',oliva:'#7D8A6B',areia:'#A8825E',mut:'#9AA0A6',line:'#E0DDD5',panel:'#F8F7F4'};
+// compatibilidade com os nomes usados nos componentes
+C.blue=C.azul; C.clay=C.ardosia; C.teal=C.verde; C.sand=C.ocre; C.plum=C.ameixa; C.alert=C.vermelho;
+const MESLBL = {'01':'jan','02':'fev','03':'mar','04':'abr','05':'mai','06':'jun','07':'jul','08':'ago','09':'set','10':'out','11':'nov','12':'dez'};
+const lbl = ym => MESLBL[ym.slice(5,7)] + '/' + ym.slice(2,4);
+const num = (v,d=0) => v==null||isNaN(v) ? '–' : v.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+
+function serie(obj, meses){ return meses.map((m,i)=>{const o={m:lbl(m),ym:m};
+  Object.keys(obj).forEach(k=>o[k]=obj[k][i]); return o;}); }
+
+const grid = () => e(CartesianGrid,{stroke:C.line,strokeDasharray:'2 4',vertical:false});
+const xa = () => e(XAxis,{dataKey:'m',tickLine:false,axisLine:{stroke:C.line},interval:'preserveStartEnd',minTickGap:14});
+const ya = (p={}) => e(YAxis,Object.assign({tickLine:false,axisLine:false,width:44},p));
+const tip = (p={}) => e(Tooltip,Object.assign({cursor:{stroke:C.line}},p));
+</script>
+<script>
+function iniciar(DATA){
+/* ============ helpers ============ */
+const M = DATA.meses, LAST = M.length-1, K = DATA.kpi;
+const ult = a => a[LAST], pen = a => a[LAST-1];
+const delta = (a) => { const x=ult(a), y=pen(a); if(x==null||y==null) return null; return x-y; };
+const ytd = (a,n=12) => a.slice(-n).reduce((s,v)=>s+(v||0),0);
+
+function Kpi({lab,val,unit,dec=0,foot,cor,inv}){
+  return e('div',{className:'kpi',style:{'--k':cor||C.mut}},
+    e('div',{className:'lab'},lab),
+    e('div',{className:'val'},num(val,dec), unit?e('small',null,unit):null),
+    foot?e('div',{className:'foot'},foot):null);
+}
+function Trend({arr,dec=1,unit='',good='down'}){
+  const d = delta(arr); if(d==null) return null;
+  const cls = Math.abs(d)<1e-9?'flat':((d>0)===(good==='up')?'down':'up');
+  return e('span',{className:cls}, (d>0?'▲ +':'▼ ')+num(d,dec)+unit+' sobre a competência anterior');
+}
+
+/* ============ SIGNATURE: régua de pressão ============ */
+function Regua(){
+  const MAX=180;
+  const linhas = Object.keys(DATA.ocupacao)
+    .map(k=>({nm:k, v:ult(DATA.ocupacao[k])}))
+    .filter(o=>o.v!=null).sort((a,b)=>b.v-a.v);
+  const px = v => Math.min(v,MAX)/MAX*100;
+  return e('div',{className:'card pad'},
+    e('div',{className:'ctitle'},'Taxa de ocupação por unidade · '+lbl(M[LAST])),
+    e('div',{className:'regua'},
+      linhas.map(o=>{
+        const over = o.v>100;
+        const cor = o.v>=100?C.vermelho : o.v>=85?C.azul : o.v>=60?C.ardosia : C.nevoa;
+        return e('div',{className:'rrow',key:o.nm},
+          e('div',{className:'nm',title:o.nm},o.nm),
+          e('div',{className:'track'},
+            e('div',{className:'bar',style:{width:px(Math.min(o.v,100))+'%',background:cor}}),
+            over?e('div',{className:'over',style:{left:px(100)+'%',width:(px(o.v)-px(100))+'%'}}):null,
+            e('div',{className:'g85',style:{left:px(85)+'%'}}),
+            e('div',{className:'g100',style:{left:px(100)+'%'}})),
+          e('div',{className:'pv',style:{color:over?C.alert:'inherit'}},num(o.v,1)+'%'));
+      })),
+    e('div',{className:'rscale'}, e('div'), e('div',{className:'ticks'},
+        [0,25,50,75,100,125,150,175].map(t=>e('span',{key:t,style:{left:(t/MAX*100)+'%'}},t+'%'))), e('div')),
+    e('div',{className:'legend'},
+      e('span',null,e('i',{style:{background:C.nevoa}}),'até 60%'),
+      e('span',null,e('i',{style:{background:C.ardosia}}),'60% a 85%'),
+      e('span',null,e('i',{style:{background:C.azul}}),'85% a 100%'),
+      e('span',null,e('i',{style:{background:'repeating-linear-gradient(115deg,#9E2A2B 0 3px,#6E1B1C 3px 6px)'}}),'acima de 100%: excedente'),
+      e('span',null,e('i',{style:{background:C.ocre}}),'limiar de referência (85%)')));
+}
+
+/* ============ seções ============ */
+function Panorama(){
+  const d = serie({to:K.to,mp:K.mp,giro:K.giro,is:K.is_dias,pd:K.pac_dia,int:K.intern},M);
+  const mix = ['SUS','Convênio','Particular'].map((k,i)=>({name:k,value:ult(DATA.pagador[k]),
+     fill:[C.azul,C.ardosia,C.nevoa][i]}));
+  const totMix = mix.reduce((s,o)=>s+o.value,0);
+  return e('section',{id:'panorama'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'01'), e('h2',null,'Panorama'),
+      e('span',{className:'hint'},'Indicadores globais da competência corrente, acompanhados da série histórica.')),
+    e('div',{className:'grid g4',style:{marginBottom:14}},
+      e(Kpi,{lab:'Taxa de ocupação',val:ult(K.to),unit:'%',dec:1,cor:C.azul,
+        foot:e(Trend,{arr:K.to,unit:' p.p.',good:'down'})}),
+      e(Kpi,{lab:'Permanência média',val:ult(K.mp),unit:' d',dec:2,cor:C.ocre,
+        foot:e(Trend,{arr:K.mp,dec:2,unit:' d'})}),
+      e(Kpi,{lab:'Intervalo de substituição',val:ult(K.is_dias),unit:' d',dec:2,cor:C.ardosia,
+        foot:'tempo médio de leito desocupado'}),
+      e(Kpi,{lab:'Giro de leito',val:ult(K.giro),unit:'/mês',dec:2,cor:C.verde,
+        foot:e(Trend,{arr:K.giro,dec:2,good:'up'})})),
+    e('div',{className:'grid g4',style:{marginBottom:16}},
+      e(Kpi,{lab:'Internações',val:ult(K.intern),cor:C.azul,foot:num(ytd(K.intern),0)+' em doze meses'}),
+      e(Kpi,{lab:'Paciente-dia',val:ult(K.pac_dia),cor:C.ameixa,foot:e(Trend,{arr:K.pac_dia,good:'up'})}),
+      e(Kpi,{lab:'Cirurgias',val:ult(K.cirurgias),cor:C.verde,foot:num(ytd(K.cirurgias),0)+' em doze meses'}),
+      e(Kpi,{lab:'Atendimentos no PS',val:ult(K.ps),cor:C.ocre,foot:num(ult(K.conv_ps),1)+'% resultaram em internação'})),
+    e('div',{className:'grid g23'},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Ocupação, permanência e intervalo de substituição'),
+        e(ResponsiveContainer,{width:'100%',height:250},
+          e(ComposedChart,{data:d,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),
+            ya({yAxisId:'l',domain:[60,95],unit:'%'}), ya({yAxisId:'r',orientation:'right',domain:[0,6],width:34}),
+            tip(),
+            e(Area,{yAxisId:'l',type:'monotone',dataKey:'to',name:'Ocupação (%)',stroke:C.azul,fill:C.azul,fillOpacity:.10,strokeWidth:2}),
+            e(Line,{yAxisId:'r',type:'monotone',dataKey:'mp',name:'Permanência (d)',stroke:C.ocre,strokeWidth:1.8,dot:false}),
+            e(Line,{yAxisId:'r',type:'monotone',dataKey:'is',name:'Interv. substituição (d)',stroke:C.ardosia,strokeWidth:1.8,dot:false,strokeDasharray:'4 3'}),
+            e(ReferenceLine,{yAxisId:'l',y:85,stroke:C.ocre,strokeDasharray:'3 3'}),
+            e(Legend,{wrapperStyle:{fontSize:11,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Internações por fonte pagadora'),
+        e(ResponsiveContainer,{width:'100%',height:250},
+          e(PieChart,null,
+            e(Pie,{data:mix,dataKey:'value',nameKey:'name',innerRadius:58,outerRadius:88,paddingAngle:2,stroke:'#F8F7F4'},
+              mix.map(m=>e(Cell,{key:m.name,fill:m.fill}))),
+            tip({}), e(Legend,{wrapperStyle:{fontSize:11,fontFamily:'Roboto Mono'}}))),
+        e('div',{style:{textAlign:'center',marginTop:-6,fontSize:12,color:'#7A7F86',fontFamily:'Roboto Mono'}},
+          num(mix[0].value/totMix*100,1)+'% SUS'))),
+    e('div',{className:'notes',style:{marginTop:16}},
+      e('div',{className:'note alert'},e('span',{className:'rot'},'Ponto de atenção'),
+        'A taxa de ocupação passou de ',num(K.to[0],1),'% em janeiro de 2025 para ',num(ult(K.to),1),
+        '% em junho de 2026, com redução do intervalo de substituição de ',num(K.is_dias[0],2),' para ',
+        num(ult(K.is_dias),2),' dia. Nesse patamar, a capacidade disponível para absorver variação sazonal, surto ou bloqueio de leito por isolamento é reduzida.')));
+}
+
+function Pressao(){
+  const b = M.map((m,i)=>({m:lbl(m),cap:DATA.boarding.cap[i],pd:DATA.boarding.pd[i],
+     exc:(DATA.boarding.pd[i]||0)-(DATA.boarding.cap[i]||0)}));
+  const dias = 30;
+  return e('section',{id:'pressao'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'02'), e('h2',null,'Ocupação por unidade'),
+      e('span',{className:'hint'},'Razão entre paciente-dia e capacidade operacional. Valores acima de 100% indicam paciente-dia registrado além do número de leitos censitários da unidade.')),
+    e(Regua),
+    e('div',{className:'grid g23',style:{marginTop:14}},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Internação P.S.: paciente-dia e capacidade operacional'),
+        e(ResponsiveContainer,{width:'100%',height:230},
+          e(ComposedChart,{data:b,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({}),tip(),
+            e(Bar,{dataKey:'exc',name:'Excedente (pac.-dia)',fill:C.vermelho,radius:[0,0,0,0]}),
+            e(Line,{type:'monotone',dataKey:'cap',name:'Capacidade',stroke:C.mut,strokeWidth:1.5,dot:false,strokeDasharray:'4 3'}),
+            e(Line,{type:'monotone',dataKey:'pd',name:'Paciente-dia',stroke:C.azul,strokeWidth:2,dot:false}),
+            e(Legend,{wrapperStyle:{fontSize:11,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'notes'},
+        e('div',{className:'note alert'},e('span',{className:'rot'},'Ponto de atenção'),
+          'Em junho de 2026 a Internação P.S. registrou ',num(DATA.boarding.pd[LAST]),
+          ' paciente-dia para uma capacidade operacional de ',num(DATA.boarding.cap[LAST]),
+          ', taxa de ocupação de ',num(DATA.boarding.pd[LAST]/DATA.boarding.cap[LAST]*100,1),
+          '%. O excedente corresponde a ',num((DATA.boarding.pd[LAST]-DATA.boarding.cap[LAST])/dias,1),
+          ' pacientes por dia. A ocupação superou 100% nas 18 competências analisadas.'),
+        e('div',{className:'note lim'},e('span',{className:'rot'},'Limitação'),
+          'A ocupação excedente no pronto-socorro depende também da disponibilidade de leitos de retaguarda e do tempo até a alta nas unidades de internação. A identificação das causas requer dados de permanência no pronto-socorro e de motivo de retenção, não registrados no censo.'),
+        e('div',{className:'note ok'},e('span',{className:'rot'},'Encaminhamento'),
+          'Incorporar o intervalo entre a decisão de internação e a admissão no leito definitivo. O registro existe no Tasy e não é apurado atualmente.'))));
+}
+
+function Fluxo(){
+  const d = serie(DATA.permanencia,M);
+  const key = Object.keys(DATA.permanencia).filter(k=>k!=='MÉDIA');
+  const cores=[C.azul,C.ardosia,C.verde,C.ocre,C.ameixa,C.nevoa,C.oliva,C.areia,'#3F6E8C','#8C7A9E'];
+  const alta = serie({med:K.altas,ob:K.obitos,tr:K.transf_out,ev:K.evasao},M);
+  return e('section',{id:'fluxo'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'03'), e('h2',null,'Fluxo e permanência'),
+      e('span',{className:'hint'},'A permanência média determina a capacidade efetiva. Uma redução de 0,3 dia na média geral corresponde a cerca de 370 paciente-dia por mês, equivalentes a 12 leitos.')),
+    e('div',{className:'grid g23'},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Permanência média por unidade (dias)'),
+        e(ResponsiveContainer,{width:'100%',height:290},
+          e(LineChart,{data:d,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({domain:[0,12]}),tip(),
+            key.map((k,i)=>e(Line,{key:k,type:'monotone',dataKey:k,stroke:cores[i%cores.length],strokeWidth:1.6,dot:false})),
+            e(Line,{type:'monotone',dataKey:'MÉDIA',stroke:C.ink||'#1B1F24',strokeWidth:2.6,dot:false}),
+            e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Desfecho da saída'),
+        e(ResponsiveContainer,{width:'100%',height:290},
+          e(BarChart,{data:alta,margin:{top:6,right:8,left:0,bottom:0},stackOffset:'expand'},grid(),xa(),
+            ya({tickFormatter:v=>Math.round(v*100)+'%'}),tip({formatter:(v)=>num(v)}),
+            e(Bar,{dataKey:'med',name:'Alta médica',stackId:'a',fill:C.ardosia}),
+            e(Bar,{dataKey:'tr',name:'Transf. inter-hosp.',stackId:'a',fill:C.azul}),
+            e(Bar,{dataKey:'ob',name:'Óbito',stackId:'a',fill:C.alert}),
+            e(Bar,{dataKey:'ev',name:'Evasão',stackId:'a',fill:C.ocre}),
+            e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}}))))),
+    e('div',{className:'note lim',style:{marginTop:14}},e('span',{className:'rot'},'Limitação'),
+      'As transferências inter-hospitalares corresponderam a ',num(ult(K.transf_out)/ult(K.altas)*100,1),
+      '% das saídas em junho de 2026 e a ',num(ytd(K.transf_out)),' casos em doze meses. O censo não registra motivo nem destino, o que impede distinguir transferência por indisponibilidade interna de transferência por regulação de complexidade.'));
+}
+
+function Desfechos(){
+  const d = serie({mort:K.mort,inst:K.mort_inst},M);
+  const uti = serie(DATA.letalidade_uti,M);
+  const ob = serie(DATA.obitos_setor,M);
+  const obUlt = Object.keys(DATA.obitos_setor).map(k=>({nm:k,v:ytd(DATA.obitos_setor[k])}))
+    .filter(o=>o.v>0).sort((a,b)=>b.v-a.v);
+  const ces = serie({tx:K.tx_cesarea},M);
+  return e('section',{id:'desfechos'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'04'), e('h2',null,'Desfechos'),
+      e('span',{className:'hint'},'As taxas são brutas, sem ajuste por gravidade ou perfil de casos. Servem ao acompanhamento da série do próprio hospital e não permitem comparação direta com outras instituições.')),
+    e('div',{className:'grid g4',style:{marginBottom:14}},
+      e(Kpi,{lab:'Mortalidade geral',val:ult(K.mort),unit:'%',dec:2,cor:C.vermelho,foot:e(Trend,{arr:K.mort,dec:2,unit:' p.p.'})}),
+      e(Kpi,{lab:'Mortalidade institucional',val:ult(K.mort_inst),unit:'%',dec:2,cor:C.ardosia,foot:'exclui óbitos em menos de 24 h'}),
+      e(Kpi,{lab:'Óbitos < 24 h',val:ult(K.ob24),cor:C.ocre,foot:num(ult(K.ob24)/ult(K.obitos)*100,1)+'% do total de óbitos'}),
+      e(Kpi,{lab:'Óbito operatório ≤ 7 d',val:ult(K.ob_op),cor:C.ameixa,foot:num(ytd(K.ob_op))+' em doze meses'})),
+    e('div',{className:'grid g2'},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Mortalidade hospitalar, em proporção das saídas'),
+        e(ResponsiveContainer,{width:'100%',height:220},
+          e(LineChart,{data:d,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({domain:[0,8],unit:'%'}),tip(),
+            e(Line,{type:'monotone',dataKey:'mort',name:'Geral',stroke:C.vermelho,strokeWidth:2,dot:false}),
+            e(Line,{type:'monotone',dataKey:'inst',name:'Institucional',stroke:C.ardosia,strokeWidth:2,dot:false}),
+            e(Legend,{wrapperStyle:{fontSize:11,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Letalidade por unidade de terapia intensiva'),
+        e(ResponsiveContainer,{width:'100%',height:220},
+          e(LineChart,{data:uti,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({unit:'%'}),tip(),
+            Object.keys(DATA.letalidade_uti).map((k,i)=>
+              e(Line,{key:k,type:'monotone',dataKey:k,stroke:[C.azul,C.ardosia,C.vermelho,C.ameixa,C.ocre][i],strokeWidth:1.8,dot:false})),
+            e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}}))))),
+    e('div',{className:'grid g2',style:{marginTop:14}},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Óbitos por local de ocorrência, acumulado de doze meses'),
+        e(ResponsiveContainer,{width:'100%',height:250},
+          e(BarChart,{data:obUlt,layout:'vertical',margin:{top:4,right:20,left:0,bottom:0}},
+            e(CartesianGrid,{stroke:C.line,strokeDasharray:'2 4',horizontal:false}),
+            e(XAxis,{type:'number',tickLine:false,axisLine:false}),
+            e(YAxis,{type:'category',dataKey:'nm',width:140,tickLine:false,axisLine:false}),
+            tip(),e(Bar,{dataKey:'v',name:'óbitos',fill:C.vermelho,radius:[0,0,0,0]})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Taxa de cesárea'),
+        e(ResponsiveContainer,{width:'100%',height:250},
+          e(AreaChart,{data:ces,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({domain:[0,100],unit:'%'}),tip(),
+            e(Area,{type:'monotone',dataKey:'tx',name:'Cesárea',stroke:C.ameixa,fill:C.ameixa,fillOpacity:.12,strokeWidth:2}),
+            e(ReferenceLine,{y:45,stroke:C.ocre,strokeDasharray:'3 3',label:{value:'meta ANS 45%',fill:'#8A6F3E',fontSize:10}}))))),
+    e('div',{className:'notes',style:{marginTop:14}},
+      e('div',{className:'note alert'},e('span',{className:'rot'},'Ponto de atenção'),
+        'A taxa de cesárea foi de ',num(ult(K.tx_cesarea),1),'% em junho de 2026 e de ',
+        num(K.tx_cesarea.slice(-12).reduce((s,v)=>s+v,0)/12,1),
+        '% na média dos últimos doze meses. É o indicador do painel com maior distância em relação às referências nacionais.'),
+      e('div',{className:'note'},e('span',{className:'rot'},'Observação'),
+        'Os óbitos ocorridos em menos de 24 horas de internação corresponderam a ',
+        num(ult(K.ob24)/ult(K.obitos)*100,1),
+        '% do total em junho de 2026. A proporção é compatível com gravidade na admissão, hipótese cuja confirmação depende de revisão de série de casos.')));
+}
+
+function Reint(){
+  const R = DATA.reinternacao;
+  const d = R.meses.map((m,i)=>({m:lbl(m),tx30:R.tx30[i],tx7:R.tx7[i],husf:R.tx_husf[i],n:R.intern[i]}));
+  return e('section',{id:'reinternacao'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'05'), e('h2',null,'Reinternação'),
+      e('span',{className:'hint'},'Apurado a partir do relatório de atendimentos, com agregação prévia. O painel não armazena nem exibe dados que permitam identificar pacientes.')),
+    e('div',{className:'grid g4',style:{marginBottom:14}},
+      e(Kpi,{lab:'Reinternação ≤ 30 d',val:R.total.tx30_sem_jul,unit:'%',dec:2,cor:C.vermelho,
+        foot:num(R.total.r30)+' casos em '+num(R.total.intern)+' internações'}),
+      e(Kpi,{lab:'Reinternação ≤ 7 d',val:R.tx7.slice(1).reduce((s,v)=>s+v,0)/(R.tx7.length-1),unit:'%',dec:2,cor:C.ocre,
+        foot:'retorno em até sete dias'}),
+      e(Kpi,{lab:'Internações repetidas',val:R.alta_utilizacao.pac_4mais,cor:C.ameixa,
+        foot:'pacientes com 4 ou mais internações: '+R.alta_utilizacao.pct_volume+'% do volume'}),
+      e(Kpi,{lab:'Permanência média (relatório)',val:R.los.slice(-1)[0],unit:' d',dec:2,cor:C.ardosia,
+        foot:'apurada no relatório de atendimentos'})),
+    e('div',{className:'grid g23'},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Taxa de reinternação segundo três critérios'),
+        e(ResponsiveContainer,{width:'100%',height:250},
+          e(LineChart,{data:d,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({domain:[0,14],unit:'%'}),tip(),
+            e(Line,{type:'monotone',dataKey:'tx30',name:'30 dias (critério internacional)',stroke:C.vermelho,strokeWidth:2.2,dot:false}),
+            e(Line,{type:'monotone',dataKey:'husf',name:'3 a 30 dias (critério atual do HUSF)',stroke:C.ocre,strokeWidth:1.8,dot:false,strokeDasharray:'4 3'}),
+            e(Line,{type:'monotone',dataKey:'tx7',name:'7 dias',stroke:C.ardosia,strokeWidth:1.8,dot:false}),
+            e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Distribuição do intervalo até a reinternação'),
+        e(ResponsiveContainer,{width:'100%',height:250},
+          e(BarChart,{data:R.intervalo,margin:{top:6,right:8,left:0,bottom:0}},grid(),
+            e(XAxis,{dataKey:'faixa',tickLine:false,axisLine:{stroke:C.line},fontSize:9}),
+            ya({}),tip(),e(Bar,{dataKey:'n',name:'casos',fill:C.ardosia,radius:[0,0,0,0]}))))),
+    e('div',{className:'grid g2',style:{marginTop:14}},
+      e('div',{className:'card'},
+        e('div',{className:'ctitle'},'Reinternação por unidade de origem, doze meses'),
+        e('table',null,
+          e('thead',null,e('tr',null,e('th',null,'Unidade'),e('th',{className:'n'},'Internações'),
+            e('th',{className:'n'},'Reint. 30 d'),e('th',{className:'n'},'Taxa'),e('th',{className:'n'},'Permanência'))),
+          e('tbody',null,R.setor.map(s=>e('tr',{key:s.setor},
+            e('td',null,s.setor),e('td',{className:'n'},num(s.n)),e('td',{className:'n'},num(s.r30)),
+            e('td',{className:'n'},e('span',{className:'chip',style:{background:s.tx>=12?'rgba(158,42,43,.10)':s.tx>=9?'rgba(138,111,62,.12)':'transparent',
+               color:s.tx>=12?C.vermelho:s.tx>=9?C.ocre:'inherit'}},num(s.tx,1)+'%')),
+            e('td',{className:'n'},num(s.los,2)+' d'))))))
+      ,
+      e('div',{className:'card'},
+        e('div',{className:'ctitle'},'Reinternação por fonte pagadora e faixa etária'),
+        e('table',null,
+          e('thead',null,e('tr',null,e('th',null,'Estrato'),e('th',{className:'n'},'Internações'),e('th',{className:'n'},'Reint. 30 d'),e('th',{className:'n'},'Permanência'))),
+          e('tbody',null,
+            R.fonte.map(f=>e('tr',{key:f.fonte},e('td',null,f.fonte),e('td',{className:'n'},num(f.n)),
+              e('td',{className:'n'},num(f.tx,1)+'%'),e('td',{className:'n'},num(f.los,2)+' d'))),
+            R.faixa.map(f=>e('tr',{key:f.faixa},e('td',{style:{color:'#7A7F86'}},f.faixa),e('td',{className:'n'},num(f.n)),
+              e('td',{className:'n'},num(f.tx,1)+'%'),e('td',{className:'n'},num(f.los,2)+' d'))))))),
+    e('div',{className:'notes',style:{marginTop:14}},
+      e('div',{className:'note lim'},e('span',{className:'rot'},'Limitação metodológica'),
+        'A taxa institucional de 7,19% adota critério distinto do padrão internacional: exclui retornos com intervalo inferior a três dias e inclui julho de 2025, primeira competência da extração, que não dispõe de janela retrospectiva. Pelo critério de 30 dias, com exclusão da competência censurada, a taxa é de ',
+        num(R.total.tx30_sem_jul,2),'%.'),
+      e('div',{className:'note'},e('span',{className:'rot'},'Observação'),
+        'As maiores taxas concentram-se na Clínica Médica, na Clínica Cirúrgica e na Internação P.S., que reúnem também o maior volume de internações. Por fonte pagadora, a taxa é de ',
+        num(R.fonte.find(f=>f.fonte==='SUS').tx,1),'% no SUS e de ',
+        num(R.fonte.find(f=>f.fonte==='Convênio').tx,1),
+        '% em convênios. A diferença não está ajustada por perfil clínico nem por acesso à rede pós-alta.')));
+}
+
+function Producao(){
+  const p = serie(DATA.producao,M);
+  const cores=[C.azul,C.ardosia,C.verde,C.ocre,C.ameixa,C.nevoa,C.oliva];
+  const mun = Object.keys(DATA.municipio).map(k=>({nm:k,v:ytd(DATA.municipio[k])}))
+    .filter(o=>o.nm!=='TOTAL').sort((a,b)=>b.v-a.v);
+  const totM = mun.reduce((s,o)=>s+o.v,0);
+  const nasc = serie(DATA.nascimentos,M);
+  const ps = serie(DATA.ps_periodo,M);
+  return e('section',{id:'producao'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'06'), e('h2',null,'Produção e área de abrangência'),
+      e('span',{className:'hint'},'Volume por linha de serviço e distribuição geográfica da demanda, para subsidiar contratualização e dimensionamento da oferta.')),
+    e('div',{className:'grid g2'},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Serviços de apoio diagnóstico e terapêutico'),
+        e(ResponsiveContainer,{width:'100%',height:260},
+          e(LineChart,{data:p,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({scale:'log',domain:[100,'auto']}),tip(),
+            Object.keys(DATA.producao).map((k,i)=>e(Line,{key:k,type:'monotone',dataKey:k,stroke:cores[i%7],strokeWidth:1.7,dot:false})),
+            e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Internações por município de origem, doze meses'),
+        e(ResponsiveContainer,{width:'100%',height:260},
+          e(BarChart,{data:mun,layout:'vertical',margin:{top:4,right:24,left:0,bottom:0}},
+            e(CartesianGrid,{stroke:C.line,strokeDasharray:'2 4',horizontal:false}),
+            e(XAxis,{type:'number',tickLine:false,axisLine:false}),
+            e(YAxis,{type:'category',dataKey:'nm',width:150,tickLine:false,axisLine:false}),
+            tip(),e(Bar,{dataKey:'v',name:'internações',fill:C.nevoa,radius:[0,0,0,0]},
+              mun.map(m=>e(Cell,{key:m.nm,fill:m.nm==='Bragança Paulista'?C.azul:C.nevoa}))))),
+        e('div',{style:{marginTop:6,fontSize:12,color:'#7A7F86',fontFamily:'Roboto Mono'}},
+          num(mun[0].v/totM*100,1)+'% Bragança Paulista, '+num(100-mun[0].v/totM*100,1)+'% demais municípios'))),
+    e('div',{className:'grid g2',style:{marginTop:14}},
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Atendimentos no pronto-socorro por período'),
+        e(ResponsiveContainer,{width:'100%',height:220},
+          e(AreaChart,{data:ps,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({}),tip(),
+            Object.keys(DATA.ps_periodo).map((k,i)=>e(Area,{key:k,type:'monotone',dataKey:k,stackId:'1',
+              stroke:[C.azul,C.ardosia,C.nevoa][i],fill:[C.azul,C.ardosia,C.nevoa][i],fillOpacity:.16,strokeWidth:1.6})),
+            e(Legend,{wrapperStyle:{fontSize:10,fontFamily:'Roboto Mono'}})))),
+      e('div',{className:'card pad'},
+        e('div',{className:'ctitle'},'Nascimentos'),
+        e(ResponsiveContainer,{width:'100%',height:220},
+          e(ComposedChart,{data:nasc,margin:{top:6,right:8,left:0,bottom:0}},grid(),xa(),ya({}),tip(),
+            e(Bar,{dataKey:'Total',name:'Nascidos',fill:'#DFDCD4',radius:[0,0,0,0]}),
+            e(Line,{type:'monotone',dataKey:'Prematuros',stroke:C.ocre,strokeWidth:2,dot:false}),
+            e(Line,{type:'monotone',dataKey:'Baixo peso',stroke:C.ardosia,strokeWidth:2,dot:false}),
+            e(Line,{type:'monotone',dataKey:'Natimortos',stroke:C.vermelho,strokeWidth:2,dot:false}),
+            e(Legend,{wrapperStyle:{fontSize:10.5,fontFamily:'Roboto Mono'}}))))));
+}
+
+function Dados(){
+  const linhas = [
+    ['Permanência de Cuidados Intermediários-Neo','Valores entre 0 e 145 dias na mesma série anual','Denominador, correspondente às altas do setor, próximo de zero em vários meses','Suprimir o indicador quando houver menos de três altas no mês e publicar o paciente-dia absoluto'],
+    ['Permanência do Hospital Dia','17 a 61 dias','O conceito de alta não se aplica ao regime de hospital-dia','Substituir por número de comparecimentos por mês e taxa de absenteísmo'],
+    ['Aba CLÍN. MÉDICA','Erro #REF! na capacidade de janeiro de 2025','Referência de fórmula perdida na planilha derivada','Adotar a aba HUSF como fonte única; as abas por setor devem ser geradas a partir dela'],
+    ['Reinternação de julho de 2025','3,0%, contra cerca de 9% nas demais competências','Ausência de janela retrospectiva, com censura à esquerda','Sinalizar a primeira competência de cada extração como incompleta'],
+    ['Denominador de internações','1.262 no censo e 1.260 no relatório, em julho de 2025','Critérios de contagem distintos entre as duas extrações','Definir fonte única de contagem e conciliar a cada competência'],
+    ['Linhas “%” duplicadas','Dois campos denominados “%” no mesmo bloco de partos','Rótulo não distingue normal de cesárea','Renomear na origem para “% partos normais” e “% cesáreas”'],
+    ['Relatório de atendimentos','Nome, prontuário, médico e convênio em texto aberto','Arquivo distribuído por correio eletrônico','Pseudonimizar na origem; o painel consome apenas dados agregados']
+  ];
+  return e('section',{id:'dados'},
+    e('div',{className:'shead'}, e('span',{className:'n'},'07'), e('h2',null,'Qualidade do dado'),
+      e('span',{className:'hint'},'Inconsistências identificadas na apuração, com a causa provável e o encaminhamento proposto. A seção é revisada a cada competência.')),
+    e('div',{className:'card'},
+      e('table',null,
+        e('thead',null,e('tr',null,e('th',null,'Onde'),e('th',null,'O que se observa'),e('th',null,'Causa provável'),e('th',null,'Encaminhamento'))),
+        e('tbody',null,linhas.map((l,i)=>e('tr',{key:i},l.map((c,j)=>e('td',{key:j,style:j===0?{color:'#1B1F24'}:{color:'#4A4E52'}},c))))))),
+    e('div',{className:'note ok',style:{marginTop:14}},e('span',{className:'rot'},'Critério de publicação'),
+      'Cada indicador do painel declara numerador, denominador, fonte e responsável pela apuração. Indicador cuja composição não possa ser auditada é apresentado como nota, sem representação gráfica.'));
+}
+
+/* ============ app ============ */
+const SECOES=[['01','Panorama','panorama'],['02','Ocupação por unidade','pressao'],['03','Fluxo e permanência','fluxo'],
+  ['04','Desfechos','desfechos'],['05','Reinternação','reinternacao'],['06','Produção e abrangência','producao'],
+  ['07','Qualidade do dado','dados']];
+
+function App(){
+  const [ativo,setAtivo] = React.useState('panorama');
+  React.useEffect(()=>{
+    const obs = new IntersectionObserver(es=>{
+      es.forEach(x=>{ if(x.isIntersecting) setAtivo(x.target.id); });
+    },{rootMargin:'-15% 0px -70% 0px'});
+    SECOES.forEach(s=>{const el=document.getElementById(s[2]); if(el) obs.observe(el);});
+    return ()=>obs.disconnect();
+  },[]);
+  const ir = id => document.getElementById(id)?.scrollIntoView({behavior:'smooth',block:'start'});
+  return e(React.Fragment,null,
+    e('nav',{className:'rail'},
+      e('div',{className:'brand'},
+        e('div',{className:'mark'},'Governança'),
+        e('div',{className:'sub'},'HUSF · Bragança Paulista')),
+      e('div',{className:'nav'}, SECOES.map(s=>
+        e('button',{key:s[2],className:ativo===s[2]?'on':'',onClick:()=>ir(s[2])},
+          e('span',{className:'idx'},s[0]), e('span',null,s[1])))),
+      e('div',{className:'railfoot'},
+        'Competência',e('br'),lbl(M[LAST]).toUpperCase(),e('br'),e('br'),
+        'Série ',lbl(M[0]),'–',lbl(M[LAST]),e('br'),
+        'Versão preliminar')),
+    e('main',null,
+      e('div',{className:'top'},
+        e('div',null,
+          e('h1',null,'Painel do Comitê de Gestão Estratégica e Governança'),
+          e('p',{className:'lede'},'Indicadores assistenciais e operacionais do Hospital Universitário São Francisco, apurados a partir do censo hospitalar e do relatório de atendimentos. A série cobre 18 competências, de janeiro de 2025 a junho de 2026.')),
+        e('div',{className:'stamp'},
+          'Censo hospitalar 2025–2026',e('br'),
+          'Reinternações jul/2025 a jun/2026',e('br'),
+          e('b',null,num(M.length),' competências · ',num(K.intern.reduce((s,v)=>s+v,0)),' internações'))),
+      e(Panorama),e(Pressao),e(Fluxo),e(Desfechos),e(Reint),e(Producao),e(Dados)));
+}
+ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+}
+
+// Servido pelo app no Render: os dados vêm da API autenticada.
+// Para desenvolvimento local, use ?local=1 e o JSON ao lado do arquivo.
+const LOCAL = new URLSearchParams(location.search).has('local');
+const COMP  = new URLSearchParams(location.search).get('competencia');
+const FONTE_DADOS = LOCAL ? 'data_governanca.json'
+                          : '/gov/api/dados' + (COMP ? '/' + COMP : '');
+
+fetch(FONTE_DADOS, {cache:'no-store', credentials:'same-origin'})
+  .then(r => {
+    if (r.status === 401) throw new Error('sessao');
+    if (r.status === 403) throw new Error('permissao');
+    if (r.status === 404) throw new Error('vazio');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  })
+  .then(iniciar)
+  .catch(err => {
+    const M = {
+      sessao:    ['Sessão expirada', 'Entre novamente para abrir o painel.',
+                  '<a href="/?next=/gov">Ir para o login</a>'],
+      permissao: ['Sem permissão', 'Sua conta está autenticada, mas não tem o papel de governança. Fale com a coordenação.',
+                  'Solicite liberação ao coordenador do comitê.'],
+      vazio:     ['Nenhuma competência publicada', 'O painel está no ar, mas ainda não recebeu dados.',
+                  'Rode <code>python3 gerar_governanca.py</code> e depois <code>python3 publicar.py</code>.']
+    }[err.message];
+    if (M) {
+      document.getElementById('root').innerHTML =
+        '<main style="padding:60px 44px"><h1>' + M[0] + '</h1>' +
+        '<p class="lede">' + M[1] + '</p><p class="lede">' + M[2] + '</p></main>';
+      return;
+    }
+    legado(err);
+  });
+
+function legado(err) {
+    document.getElementById('root').innerHTML =
+      '<main style="padding:60px 44px"><h1>Dados não carregados</h1>' +
+      '<p class="lede">O arquivo <code>' + FONTE_DADOS + '</code> não foi encontrado ao lado desta página. ' +
+      'Gere-o com <code>python3 gerar_governanca.py</code> e abra o painel por um servidor local ' +
+      '(<code>python3 -m http.server</code>), não por duplo clique no arquivo.</p>' +
+      '<p class="lede" style="color:#7A7F86">Detalhe técnico: ' + err.message + '</p></main>';
+}
+
+</script>
+</body>
+</html>

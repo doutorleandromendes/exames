@@ -29,6 +29,8 @@ import { registerFormTransportadorRoutes } from './atb-form-transportador.js';  
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
 import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
 import { registerPavRoutes } from './pav-routes.js';    // ← ADICIONAR (form/grid de PAV)
+import { runGovMigrations } from './gov-db.js';         // ← ADICIONAR (painel de governança)
+import { registerGovRoutes } from './gov-routes.js';    // ← ADICIONAR (painel de governança)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
 import { registerIscImportRoutes } from './isc-import-routes.js';  // ← ADICIONAR (importador de mapa cirúrgico)
 import { runProntMigrations } from './pront-db.js';
@@ -141,6 +143,7 @@ const {
   agendaRequired,
   secretariaRequired,
   pavRequired,
+  gestaoRequired,
 } = createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell });
 
 // ====== Migrações do domínio Aulas (aulas-db.js) ======
@@ -158,6 +161,9 @@ runProntMigrations(migratorPool)
   .catch(e => console.error('pront/agenda migration error', e));
 
 runEstoqueMigrations(migratorPool).catch(e => console.error('estoque migration error', e));
+
+// Governança: sem FK para atb_instituicoes, corre solta.
+runGovMigrations(migratorPool).catch(e => console.error('gov migration error', e));
 
 
 
@@ -209,6 +215,8 @@ try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscImportRoutes', e); }
 try { registerPavRoutes(app, pool, pavRequired, renderShell, scihRequired); }
 catch (e) { console.error('ERRO registerPavRoutes', e); }
+try { registerGovRoutes(app, pool, gestaoRequired, renderShell); }
+catch (e) { console.error('ERRO registerGovRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }
 catch (e) { console.error('ERRO registerProntRoutes', e); }
 try { registerAgendaRoutes(app, pool, agendaRequired, renderShell); }

@@ -3,7 +3,7 @@
 // (progresso, matrículas, CSV), este é o gerenciador de PESSOAS por papel, sem herança
 // de curso. Não substitui /admin/alunos — coexiste, no mesmo padrão do lab-emissor.
 //
-// Papéis editáveis pela UI: is_admin, scih, micro, pront, agenda, recepcao.
+// Papéis editáveis pela UI: is_admin, scih, micro, pront, agenda, recepcao, pav, gestao.
 // super_admin é READ-ONLY na tela (só via SQL) — evita escalonamento acidental.
 
 import bcrypt from 'bcrypt';
@@ -21,6 +21,7 @@ const ROLES = [
   { key: 'agenda',   label: 'Agenda/Secretaria', desc: 'Consultas e orçamentos' },
   { key: 'recepcao', label: 'Recepção',   desc: 'Check-in na agenda' },
   { key: 'pav',      label: 'PAV (bundle)', desc: 'Coleta do bundle de PAV à beira-leito' },
+  { key: 'gestao',   label: 'Governança', desc: 'Painel do Comitê de Gestão Estratégica' },
   { key: 'treino',   label: 'Conta de treino', desc: 'Dados marcados p/ exclusão pós-trial' },
 ];
 const ROLE_KEYS = ROLES.map(r => r.key);

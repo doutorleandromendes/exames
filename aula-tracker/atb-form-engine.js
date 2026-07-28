@@ -729,6 +729,95 @@
     return r;
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  // Auxílio de dose — Sulfametoxazol/Trimetoprim (Bactrim). HUSF-only.
+  // Dose baseada no TMP: 15 mg/kg/dia (teto 20), ampola 400/80 (80 mg TMP).
+  //  • Arredonda POR DOSE para cima (não se faz meia ampola em adulto).
+  //  • Fraciona em 8/8h (3x) ou 6/6h (4x) para manter <=4 ampolas/dose.
+  //  • Foco = ITU não usa este cálculo (dose padrão) — o campo nem aparece.
+  //  • Correção renal (Sanford): ClCr>30 sem ajuste; 15-30 -> 50% (12/12 ou 24/24h);
+  //    <15 (internado) -> 50% em 24/24h; diálise -> como <15, administrar após HD.
+  var BACTRIM_TMP_AMP = 80;          // mg de TMP por ampola (400/80)
+  var BACTRIM_MGKG_DIA = 15;         // alvo mg/kg/dia (TMP)
+  var BACTRIM_MGKG_TETO = 20;        // teto mg/kg/dia
+  function _bNum(v) { var n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) ? n : NaN; }
+
+  function computeBactrim(peso, clcr, foco, dialise, setor) {
+    var r = { ok:false, avisos:[] };
+    var pesoN = _bNum(peso), clcrN = _bNum(clcr);
+    r.pesoOk = isFinite(pesoN) && pesoN > 0;
+    r.clcrOk = isFinite(clcrN) && clcrN >= 0;
+
+    // Foco ITU não usa o helper (a condição do campo já o esconde, mas guarda dupla).
+    r.ehITU = /trato urin|\bITU\b/i.test(String(foco || ''));
+    if (r.ehITU) { r.itu = true; return r; }
+
+    if (!r.pesoOk) { r.faltaPeso = true; return r; }
+
+    var hd = dialise === 'Sim' || /hemodial/i.test(String(setor || ''));
+    r.hd = hd;
+
+    // Dose diária alvo (TMP) e teto.
+    var tmpDia = BACTRIM_MGKG_DIA * pesoN;
+    var tetoDia = BACTRIM_MGKG_TETO * pesoN;
+
+    // Fator + intervalos conforme função renal.
+    var fator = 1, intervalosRenais = null, notaRenal = '';
+    if (hd) {
+      fator = 0.5; intervalosRenais = [{ lbl:'24/24h', n:1 }];
+      notaRenal = 'Diálise: 50% da dose, 24/24h — administrar APÓS a sessão de HD.';
+      r.renal = true;
+    } else if (!r.clcrOk || clcrN > 30) {
+      fator = 1; r.renal = false;
+    } else if (clcrN >= 15) {
+      fator = 0.5; intervalosRenais = [{ lbl:'12/12h', n:2 }, { lbl:'24/24h', n:1 }];
+      notaRenal = 'ClCr 15–30: 50% da dose diária (12/12h ou 24/24h).';
+      r.renal = true;
+    } else {
+      fator = 0.5; intervalosRenais = [{ lbl:'24/24h', n:1 }];
+      notaRenal = 'ClCr < 15 (internado): 50% da dose diária, 24/24h.';
+      r.renal = true;
+    }
+    r.notaRenal = notaRenal;
+    var tmpDiaAj = tmpDia * fator;
+
+    // Escolhe intervalo e arredonda POR DOSE (ceil), respeitando <=4 amp/dose e teto.
+    var esquema = null;
+    var candidatos = intervalosRenais || [{ lbl:'8/8h', n:3 }, { lbl:'6/6h', n:4 }];
+    for (var i = 0; i < candidatos.length; i++) {
+      var c = candidatos[i];
+      var ampDose = Math.ceil((tmpDiaAj / c.n) / BACTRIM_TMP_AMP);
+      if (ampDose < 1) ampDose = 1;
+      var mgkgDia = (ampDose * c.n * BACTRIM_TMP_AMP) / pesoN;
+      // Sem ajuste renal, respeita <=4 amp/dose e teto 20; com ajuste, aceita o esquema renal.
+      if (r.renal) { esquema = { lbl:c.lbl, n:c.n, ampDose:ampDose, mgkgDia:mgkgDia }; break; }
+      if (ampDose <= 4 && mgkgDia <= BACTRIM_MGKG_TETO) { esquema = { lbl:c.lbl, n:c.n, ampDose:ampDose, mgkgDia:mgkgDia }; break; }
+    }
+    // Fallback (sem renal): usa 6/6h; baixa a dose se estourar o teto de 20.
+    if (!esquema) {
+      var n4 = 4, ad = Math.ceil((tmpDiaAj / n4) / BACTRIM_TMP_AMP);
+      while ((ad * n4 * BACTRIM_TMP_AMP) / pesoN > BACTRIM_MGKG_TETO && ad > 1) ad--;
+      esquema = { lbl:'6/6h', n:n4, ampDose:ad, mgkgDia:(ad * n4 * BACTRIM_TMP_AMP) / pesoN };
+      r.avisos.push('Peso alto: mesmo em 6/6h a dose passa de 4 ampolas por administração. Confira o volume/infusão.');
+    }
+
+    r.ampDose = esquema.ampDose;
+    r.intervalo = esquema.lbl;
+    r.ndoses = esquema.n;
+    r.mgkgDia = Math.round(esquema.mgkgDia * 10) / 10;
+    r.tmpDoseMg = esquema.ampDose * BACTRIM_TMP_AMP;             // mg TMP por dose
+    r.smxDoseMg = esquema.ampDose * 400;                         // mg SMX por dose
+    r.ampDia = esquema.ampDose * esquema.n;
+
+    // Aviso de volume quando a dose única fica grande (típico em renal 24/24h).
+    if (r.ampDose > 4) r.avisos.push(r.ampDose + ' ampolas em dose única — volume alto; diluir bem e checar tempo de infusão.');
+    if (!r.clcrOk && !hd) r.avisos.push('ClCr não informado — cálculo sem ajuste renal. Preencha o ClCr se houver disfunção renal.');
+
+    r.podeAplicar = !!r.ampDose;
+    r.ok = true;
+    return r;
+  }
+
   function CampoDoseVanco(p) {
     var f = p.campo;
     var V = p.valores || {};
@@ -857,6 +946,71 @@
     var t = p.campo.type;
     if (t === 'text' || t === 'number' || t === 'date') return e(CampoTexto, p);
     if (t === 'textarea') return e(CampoTextarea, p);
+  function CampoDoseBactrim(p) {
+    var f = p.campo;
+    var V = p.valores || {};
+    var aplSt = useState(false), aplicado = aplSt[0], setAplicado = aplSt[1];
+
+    var res = computeBactrim(V['peso'], V['clcr'], V['foco_infeccao'], V['dialise'], V['setor']);
+
+    var box = { background:'#f4f8ff', border:'1px solid #cfe0f7', borderRadius:'10px', padding:'14px', marginTop:'6px' };
+    var mini = { fontSize:'12px', color:'#456', display:'block', marginBottom:'3px' };
+    var inp = { width:'96px', padding:'7px 8px', border:'1px solid #b9cae6', borderRadius:'7px', fontSize:'14px' };
+    function setKey(k) { return function (v) { p.set(k, v); setAplicado(false); }; }
+
+    function aplicar() {
+      var atb = Array.isArray(V['atb_solicitado']) ? V['atb_solicitado'] : [];
+      var idx = atb.indexOf('Sulfametoxazol/Trimetoprim');
+      if (idx < 0 || !res.podeAplicar) return;
+      var pos = Array.isArray(V['posologia']) ? V['posologia'].slice() : [];
+      var horas = res.intervalo === '6/6h' ? 6 : (res.intervalo === '8/8h' ? 8 : (res.intervalo === '12/12h' ? 12 : 24));
+      pos[idx] = Object.assign({}, pos[idx], {
+        droga: 'Sulfametoxazol/Trimetoprim',
+        dose: res.ampDose + ' ampola(s) (400/80)',
+        intervalo: res.intervalo,
+        dose_valor: res.tmpDoseMg || '',
+        dose_unidade: res.tmpDoseMg ? 'mg' : '',
+        freq_tipo: 'cada',
+        freq_horas: horas
+      });
+      p.set('posologia', pos);
+      setAplicado(true);
+    }
+
+    var corpo = [];
+    if (res.itu) {
+      corpo.push(e('div', { key:'itu', style:{ color:'#667', fontSize:'13px' } },
+        'Foco urinário: usar dose padrão de ITU — este cálculo (15–20 mg/kg/dia) não se aplica.'));
+    } else if (res.faltaPeso) {
+      corpo.push(e('div', { key:'fp', style:{ color:'#a4700a', fontSize:'13px' } }, 'Informe o peso para calcular.'));
+    } else if (res.ok) {
+      corpo.push(e('div', { key:'dose', style:{ marginBottom:'6px', fontSize:'15px' } },
+        e('b', null, res.ampDose + ' ampola(s) '), e('span', null, res.intervalo),
+        e('span', { style:{ color:'#667', fontSize:'12px' } },
+          '  (' + res.tmpDoseMg + ' mg TMP / ' + res.smxDoseMg + ' mg SMX por dose · ≈ ' + res.mgkgDia + ' mg/kg/dia)')));
+      if (res.notaRenal) corpo.push(e('div', { key:'rn', style:{ color:'#667', fontSize:'12px', marginBottom:'6px' } }, res.notaRenal));
+      corpo.push(e('button', { key:'ap', type:'button', onClick:aplicar, disabled:!res.podeAplicar,
+        style:{ padding:'8px 14px', border:'0', borderRadius:'7px', background: aplicado ? '#2e7d32' : '#0c447c', color:'#fff', cursor:'pointer', fontSize:'13px', marginTop:'4px' } },
+        aplicado ? '✓ aplicado na posologia' : 'Aplicar na posologia'));
+    }
+
+    var avisos = (res.avisos || []).map(function (a, i) {
+      return e('div', { key:'av' + i, style:{ background:'#fff6e5', border:'1px solid #f0d9a8', color:'#7a5300', borderRadius:'7px', padding:'8px 10px', fontSize:'12.5px', marginTop:'6px' } }, a);
+    });
+
+    return e('div', { style:{ marginBottom:'14px' } },
+      f.label ? e('label', { style:{ fontWeight:600, display:'block', marginBottom:'4px' } }, f.label) : null,
+      f.hint ? e('div', { style:{ fontSize:'12px', color:'#667', marginBottom:'6px' } }, f.hint) : null,
+      e('div', { style:box },
+        e('div', { style:{ display:'flex', flexWrap:'wrap', gap:'10px', marginBottom:'10px' } },
+          e('div', null, e('label', { style:mini }, 'Peso (kg)'),
+            e('input', { style:inp, type:'number', value:V['peso'] == null ? '' : V['peso'], onChange:function (ev) { setKey('peso')(ev.target.value); } })),
+          e('div', null, e('label', { style:mini }, 'ClCr (mL/min)'),
+            e('input', { style:inp, type:'number', value:V['clcr'] == null ? '' : V['clcr'], onChange:function (ev) { setKey('clcr')(ev.target.value); } }))),
+        corpo,
+        avisos));
+  }
+
     if (t === 'select')   return e(CampoSelect, p);
     if (t === 'radio')    return e(CampoRadio, p);
     if (t === 'checkbox') return e(CampoCheckbox, p);
@@ -864,6 +1018,7 @@
     if (t === 'crm')      return e(CampoCRM, p);
     if (t === 'sofa')     return e(CampoSofa, p);
     if (t === 'dose_vanco') return e(CampoDoseVanco, p);
+    if (t === 'dose_bactrim') return e(CampoDoseBactrim, p);
     return null;
   }
 

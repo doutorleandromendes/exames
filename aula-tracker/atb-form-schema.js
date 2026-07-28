@@ -223,6 +223,12 @@ export const SEMENTE_HUSF = {
         { key:'dose_vanco', type:'dose_vanco', label:'Auxílio de dose — Vancomicina',
           hint:'Apoio à decisão (alvo AUC 400–600). Preencha peso, ClCr, foco e CIM; use "Aplicar na posologia".',
           cond:{ campo:'atb_solicitado', op:'contains', valor:'Vancomicina' } },
+        { key:'dose_bactrim', type:'dose_bactrim', label:'Auxílio de dose — Sulfametoxazol/Trimetoprim',
+          hint:'Dose por TMP 15 mg/kg/dia (ampola 400/80), corrigida por ClCr. Foco urinário usa dose padrão. Preencha peso e ClCr; use "Aplicar na posologia".',
+          cond:{ all:[
+            { campo:'atb_solicitado', op:'contains', valor:'Sulfametoxazol/Trimetoprim' },
+            { campo:'foco_infeccao', op:'neq', valor:'Infecção do trato urinário' }
+          ] } },
         { key:'posologia', type:'matrix', label:'Posologia', required:true,
           sincronizaCom:'atb_solicitado', maxLinhas:3, linhaLabel:'ATB',
           colunas:[
@@ -319,7 +325,7 @@ export function buildSCMI() {
   //    tenha entrado antes.)
   const secAtb = sec('atb_solicitado');
   if (secAtb && Array.isArray(secAtb.campos)) {
-    secAtb.campos = secAtb.campos.filter(c => c.key !== 'dose_vanco');
+    secAtb.campos = secAtb.campos.filter(c => c.key !== 'dose_vanco' && c.key !== 'dose_bactrim');
   }
 
   return d;

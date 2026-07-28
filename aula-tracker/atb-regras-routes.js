@@ -200,7 +200,7 @@ export async function catalogoCampos(pool, inst='HUSF'){
 export const OPERADORES = {
   select: [['eq','é igual a'],['neq','é diferente de'],['in','é um de'],['filled','está preenchido'],['not_filled','está vazio']],
   multi:  [['contains','contém'],['contains_any','contém algum de'],['filled','está preenchido'],['not_filled','está vazio']],
-  bool:   [['eq','é']],
+  bool:   [['eq','é'],['neq','é diferente de'],['filled','está preenchido'],['not_filled','está vazio']],
   numero: [['lt','<'],['lte','≤'],['gt','>'],['gte','≥'],['eq','='],['neq','≠'],['filled','preenchido'],['not_filled','vazio']],
   texto:  [['text_contains_any','contém (texto) algum de'],['eq','é igual a'],['neq','é diferente de'],['filled','preenchido'],['not_filled','vazio']],
 };

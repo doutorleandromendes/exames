@@ -48,7 +48,7 @@ const TIPOS_JSON = new Set(['checkbox', 'matrix']);
 // Tipos de campo que NÃO geram coluna de dados (widgets / blocos compostos):
 //   sofa       — _sofa_bloco produz sofa/sofa_renal via parser (colunas de sistema)
 //   dose_vanco — widget de apoio à decisão; escreve na matriz posologia
-export const TIPOS_SEM_COLUNA = new Set(['sofa', 'dose_vanco']);
+export const TIPOS_SEM_COLUNA = new Set(['sofa', 'dose_vanco', 'dose_bactrim']);
 
 // ── Colunas de SISTEMA / COMPUTADAS ───────────────────────────────────────────
 // Não correspondem a um campo do formulário (são contexto, derivadas ou fixas).

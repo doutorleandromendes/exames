@@ -37,7 +37,7 @@ import { COLS as GRID_COLS } from './atb-grid-filters.js';
 
 // ── constantes de política ────────────────────────────────────────────────────
 export const TIPOS_CRIAVEIS = ['text', 'textarea', 'number', 'date', 'select', 'radio', 'checkbox'];
-const TIPOS_CONHECIDOS = new Set([...TIPOS_CRIAVEIS, 'matrix', 'crm', 'sofa', 'dose_vanco', 'check']);
+const TIPOS_CONHECIDOS = new Set([...TIPOS_CRIAVEIS, 'matrix', 'crm', 'sofa', 'dose_vanco', 'dose_bactrim', 'check']);
 const TIPOS_COM_OPCOES = new Set(['select', 'radio', 'checkbox']);
 export const KEYS_INDELETAVEIS = new Set(['pac_nome', 'prontuario', 'crm']);
 const OPS = new Set(['eq', 'neq', 'in', 'filled', 'not_filled', 'contains', 'not_contains', 'contains_any', 'not_contains_any', 'text_contains_any']);
@@ -368,7 +368,7 @@ function clienteJS() {
 
   var TIPO_LABEL = { text:'Texto curto', textarea:'Texto longo', number:'Número', date:'Data',
     select:'Seleção', radio:'Escolha única', checkbox:'Múltipla escolha',
-    matrix:'Matriz', crm:'CRM', sofa:'Bloco SOFA', dose_vanco:'Widget vancomicina', check:'Check' };
+    matrix:'Matriz', crm:'CRM', sofa:'Bloco SOFA', dose_vanco:'Widget vancomicina', dose_bactrim:'Widget Bactrim', check:'Check' };
   var OP_LABEL = { eq:'é igual a', neq:'é diferente de', contains:'contém', not_contains:'não contém',
     in:'é um de (lista)', contains_any:'contém algum de (lista)', not_contains_any:'não contém nenhum de (lista)',
     text_contains_any:'texto contém algum de (lista)',

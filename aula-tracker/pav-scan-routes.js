@@ -196,8 +196,31 @@ function checaOrientacao(){
 }
 addEventListener('resize', checaOrientacao); checaOrientacao();
 
+// ── WYSIWYG: capturar EXATAMENTE o que o preview 'cover' mostra ────────────
+// O <video> usa object-fit:cover dentro do guia 297:210 — o navegador RECORTA
+// o preview. Capturar o frame bruto leria outra imagem (fiduciais fora dos
+// cantos; falsos positivos em sombras/móveis). coverRect calcula o retângulo-
+// fonte exato do cover; grabFrame desenha SÓ ele: o que se vê é o que se lê.
+const GUIA_ASPECT = 297/210;
+function coverRect(vw, vh, aspect){
+  if (vw/vh > aspect) { const sh=vh, sw=Math.round(vh*aspect); return {sx:(vw-sw>>1), sy:0, sw, sh}; }
+  const sw=vw, sh=Math.round(vw/aspect); return {sx:0, sy:(vh-sh>>1), sw, sh};
+}
+function grabFrame(v, maxW){
+  const r=coverRect(v.videoWidth, v.videoHeight, GUIA_ASPECT);
+  const w=Math.min(maxW||r.sw, r.sw), h=Math.round(w*r.sh/r.sw);
+  const c=grabFrame._c||(grabFrame._c=document.createElement('canvas'));
+  c.width=w; c.height=h;
+  const cx=c.getContext('2d',{willReadFrequently:true});
+  cx.drawImage(v, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
+  const im=cx.getImageData(0,0,w,h);
+  const g=new Uint8Array(w*h);
+  for(let i=0,j=0;i<im.data.length;i+=4,j++)
+    g[j]=(im.data[i]*0.299+im.data[i+1]*0.587+im.data[i+2]*0.114)|0;
+  return {gray:g, w, h};
+}
+
 // ── loop de detecção em baixa resolução (1–8ms por frame; barato) ──────────
-const det = document.createElement('canvas');
 function pararDeteccao(){ if(detTimer){ clearInterval(detTimer); detTimer=null; } }
 function iniciarDeteccao(){
   pararDeteccao();
@@ -206,16 +229,8 @@ function iniciarDeteccao(){
     if(lendo || !template) return;
     const v=$('#v');
     if(!v.videoWidth) return;
-    const LARG=480;                                  // resolução do preview p/ detectar
-    det.width=LARG; det.height=Math.round(v.videoHeight*LARG/v.videoWidth);
-    const cx=det.getContext('2d',{willReadFrequently:true});
-    cx.drawImage(v,0,0,det.width,det.height);
-    const im=cx.getImageData(0,0,det.width,det.height);
-    const g=new Uint8Array(det.width*det.height);
-    for(let i=0,j=0;i<im.data.length;i+=4,j++)
-      g[j]=(im.data[i]*0.299+im.data[i+1]*0.587+im.data[i+2]*0.114)|0;
-
-    const f = findFiducials(g, det.width, det.height);
+    const {gray:g, w:gw, h:gh} = grabFrame(v, 480);   // MESMO recorte do preview
+    const f = findFiducials(g, gw, gh);
     marcarCantos(f);
     if(f){
       estaveis++;
@@ -242,15 +257,10 @@ function capturar(automatico){
   if(lendo) return;
   lendo=true;
   try{
-    const v=$('#v'), cv=$('#cv');
-    cv.width=v.videoWidth; cv.height=v.videoHeight;      // resolução MÁXIMA p/ ler
-    const ctx=cv.getContext('2d',{willReadFrequently:true}); ctx.drawImage(v,0,0);
-    const img=ctx.getImageData(0,0,cv.width,cv.height);
-    const gray=new Uint8Array(cv.width*cv.height);
-    for(let i=0,j=0;i<img.data.length;i+=4,j++)
-      gray[j]=(img.data[i]*0.299+img.data[i+1]*0.587+img.data[i+2]*0.114)|0;
-
-    const res=readSheet(gray,cv.width,cv.height,template);
+    const v=$('#v');
+    // resolução máxima DO RECORTE COVER — a mesma imagem que o usuário enquadrou
+    const {gray, w:cw, h:ch} = grabFrame(v);
+    const res=readSheet(gray,cw,ch,template);
     if(!res.ok){
       if(!automatico) alert('Não consegui ler: '+res.erro+'. Reenquadre com os 4 cantos visíveis.');
       setHint('não deu — reenquadre','');       // no automático, só avisa e segue tentando
@@ -258,8 +268,8 @@ function capturar(automatico){
     }
     if(navigator.vibrate) navigator.vibrate(60);           // confirmação tátil
     pararDeteccao();
-    lastRead={res,gray,w:cv.width,h:cv.height};
-    mostrar(res,cv);
+    lastRead={res,gray,w:cw,h:ch};
+    mostrar(res);
   } finally { lendo=false; }
 }
 $('#shot').onclick=()=>capturar(false);
@@ -275,9 +285,23 @@ function crop(gray,w,box){
   cx.putImageData(id,0,0); return c.toDataURL();
 }
 
-function mostrar(res,cv){
+function thumbCapturada(gray,w,h,fid){
+  const tw=Math.min(420,w), th=Math.round(h*tw/w);
+  const c=document.createElement('canvas'); c.width=tw; c.height=th;
+  const cx=c.getContext('2d'); const id=cx.createImageData(tw,th);
+  for(let y=0;y<th;y++)for(let x=0;x<tw;x++){
+    const g=gray[((y*h/th)|0)*w+((x*w/tw)|0)], o=(y*tw+x)*4;
+    id.data[o]=id.data[o+1]=id.data[o+2]=g; id.data[o+3]=255;
+  }
+  cx.putImageData(id,0,0);
+  cx.fillStyle='#19c37d';
+  for(const [fx,fy] of fid){ cx.beginPath(); cx.arc(fx*tw/w, fy*th/h, 6, 0, 7); cx.fill(); }
+  return c.toDataURL();
+}
+function mostrar(res){
   $('#step1').hidden=true; $('#step2').hidden=false;
-  $('#fidbox').innerHTML='<b>✔ Folha reconhecida</b> <small>4 cantos localizados · perspectiva corrigida</small>';
+  $('#fidbox').innerHTML='<b>✔ Folha reconhecida</b> <small>4 cantos localizados · perspectiva corrigida</small>'
+    + '<div style="margin-top:8px"><img style="width:100%;border-radius:8px" src="'+thumbCapturada(lastRead.gray,lastRead.w,lastRead.h,res.fiducials)+'"></div>';
 
   // fichas
   $('#fichas').innerHTML = fichas.length

@@ -166,9 +166,44 @@ export function sampleBubble(gray, w, h, H, cx_mm, cy_mm, r_mm, params) {
 //         | 'AMBAS' (dupla marcação → conferência humana)
 // Campos numéricos NÃO são lidos automaticamente (v1): devolvemos as caixas
 // em px para a UI recortar e o humano digitar.
+// ── plausibilidade do quadrilátero ────────────────────────────────────────
+// Falsos fiduciais (sombras/móveis nos cantos) formam quadriláteros com
+// geometria errada. Antes de aceitar, exigimos: ordem correta, convexidade,
+// área mínima e proporção compatível com a folha (fiduciais: 276×189mm ≈ 1.46;
+// perspectiva razoável fica entre ~1.0 e ~2.2).
+export function plausibleFiducials(fid, w, h) {
+  if (!fid || fid.length !== 4) return false;
+  const [tl, tr, bl, br] = fid;
+  // ordem: cada canto no seu quadrante relativo, com separação mínima
+  if (!(tl[0] < tr[0] - w * 0.2 && bl[0] < br[0] - w * 0.2)) return false;
+  if (!(tl[1] < bl[1] - h * 0.2 && tr[1] < br[1] - h * 0.2)) return false;
+  // área (shoelace, ordem tl→tr→br→bl) — a folha deve ocupar boa parte do quadro
+  const pts = [tl, tr, br, bl];
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % 4];
+    area += x1 * y2 - x2 * y1;
+  }
+  area = Math.abs(area) / 2;
+  if (area < 0.25 * w * h) return false;
+  // proporção média largura/altura do quadrilátero
+  const wTop = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]);
+  const wBot = Math.hypot(br[0] - bl[0], br[1] - bl[1]);
+  const hEsq = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
+  const hDir = Math.hypot(br[0] - tr[0], br[1] - tr[1]);
+  const ratio = ((wTop + wBot) / 2) / ((hEsq + hDir) / 2);
+  if (ratio < 1.0 || ratio > 2.2) return false;
+  // lados opostos não podem divergir absurdamente (perspectiva extrema/lixo)
+  if (Math.max(wTop, wBot) / Math.min(wTop, wBot) > 1.8) return false;
+  if (Math.max(hEsq, hDir) / Math.min(hEsq, hDir) > 1.8) return false;
+  return true;
+}
+
 export function readSheet(gray, w, h, template, opts = {}) {
   const fid = opts.fiducials ?? findFiducials(gray, w, h);
   if (!fid) return { ok: false, erro: 'fiduciais não encontrados' };
+  if (!opts.skipPlausible && !plausibleFiducials(fid, w, h))
+    return { ok: false, erro: 'enquadramento implausível — os 4 cantos detectados não formam a folha' };
   const H = solveHomography(template.fiducials_mm, fid);
   if (!H) return { ok: false, erro: 'homografia degenerada' };
 

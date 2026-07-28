@@ -72,9 +72,25 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
   #net.off{background:#c0392b}
   main{padding:14px;max-width:640px;margin:0 auto}
   video,canvas{width:100%;border-radius:12px;background:#000;display:block}
-  .guide{position:relative}
-  .guide .frame{position:absolute;inset:6% 4%;border:2px dashed rgba(255,255,255,.6);border-radius:8px;pointer-events:none}
-  .guide .corner{position:absolute;width:22px;height:22px;border:3px solid #7ee0b0}
+  /* guia de enquadramento na proporção da folha: A4 PAISAGEM (297×210 = 1.414) */
+  .guide{position:relative;aspect-ratio:297/210;overflow:hidden;border-radius:12px;background:#000}
+  .guide video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .guide .frame{position:absolute;inset:5% 4%;border:2px dashed rgba(255,255,255,.45);border-radius:6px;pointer-events:none;transition:border-color .2s}
+  .guide.lock .frame{border-color:#7ee0b0;border-style:solid}
+  .corner{position:absolute;width:26px;height:26px;border:3px solid rgba(255,255,255,.35);pointer-events:none;transition:border-color .15s,transform .15s}
+  .corner.on{border-color:#7ee0b0;transform:scale(1.12)}
+  .c-tl{top:5%;left:4%;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
+  .c-tr{top:5%;right:4%;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
+  .c-bl{bottom:5%;left:4%;border-right:0;border-top:0;border-radius:0 0 0 6px}
+  .c-br{bottom:5%;right:4%;border-left:0;border-top:0;border-radius:0 0 6px 0}
+  .hint{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:13px;font-weight:600;
+        color:#fff;text-shadow:0 1px 4px #000;pointer-events:none}
+  .hint.ok{color:#7ee0b0}
+  .ring{position:absolute;top:10px;right:12px;width:34px;height:34px;border-radius:50%;
+        border:3px solid rgba(255,255,255,.25);pointer-events:none}
+  .ring i{position:absolute;inset:-3px;border-radius:50%;border:3px solid #7ee0b0;
+          clip-path:inset(0 0 100% 0);transition:clip-path .12s}
+  .rot{background:#3d2a10;color:#ffd98a;border:1px solid #6b4a18;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:13px}
   button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 16px;background:var(--pri);color:#fff}
   button.sec{background:#243330;color:#cfe6dd}
   button:disabled{opacity:.4}
@@ -92,13 +108,19 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
 <header><b>PAV · Leitura de folha</b><span id="net">•••</span></header>
 <main>
   <div id="step1">
-    <p><small>Enquadre a folha inteira, com os quatro quadrados pretos dos cantos visíveis. Boa luz, sem sombra sobre o papel.</small></p>
-    <div class="guide">
+    <p><small>Deite o celular (paisagem) e enquadre a folha inteira, com os quatro quadrados pretos dos cantos dentro do quadro. A captura é <b>automática</b> quando os quatro forem reconhecidos.</small></p>
+    <div class="rot" id="rotaviso" hidden>📱 Gire o celular para a horizontal — a ficha é deitada.</div>
+    <div class="guide" id="guide">
       <video id="v" playsinline autoplay muted></video>
       <div class="frame"></div>
+      <div class="corner c-tl" id="ctl"></div><div class="corner c-tr" id="ctr"></div>
+      <div class="corner c-bl" id="cbl"></div><div class="corner c-br" id="cbr"></div>
+      <div class="ring"><i id="ringfill"></i></div>
+      <div class="hint" id="hint">procurando os cantos…</div>
     </div>
     <div class="row">
-      <button id="shot">📷 Capturar e ler</button>
+      <button id="shot">📷 Capturar agora</button>
+      <button class="sec" id="auto">⏸ Pausar automático</button>
       <button class="sec" id="flip">↺ Câmera</button>
     </div>
   </div>
@@ -133,7 +155,7 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
 </main>
 
 <script type="module">
-import { readSheet, readNumber, loadDigitMLP } from '/pav/scan/reader.js';
+import { readSheet, readNumber, loadDigitMLP, findFiducials } from '/pav/scan/reader.js';
 
 const CONF_OK = 0.99;   // portão: acima disso pré-preenche; abaixo pede revisão
 const $ = s => document.querySelector(s);
@@ -143,32 +165,104 @@ function setNet(){ const on = navigator.onLine; netEl.textContent = on?'online':
 addEventListener('online',setNet); addEventListener('offline',setNet);
 
 let template=null, stream=null, facing='environment', lastRead=null, fichas=[];
+let autoOn=true, detTimer=null, estaveis=0, lendo=false;
+const ESTAVEIS_P_DISPARO = 4;      // frames consecutivos com os 4 cantos → dispara
+const DET_MS = 160;                // intervalo do loop de detecção (~6 fps)
+
 fetch('/pav/scan/template.json').then(r=>r.json()).then(t=>template=t);
 fetch('/pav/api/fichas-ativas').then(r=>r.json()).then(d=>{fichas=d.fichas||[];}).catch(()=>{});
 
 async function startCam(){
   if(stream) stream.getTracks().forEach(t=>t.stop());
-  stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:2560},height:{ideal:1440}}});
+  // pede PAISAGEM: a ficha é A4 deitada (1.414). O navegador aproxima o mais perto possível.
+  stream = await navigator.mediaDevices.getUserMedia({video:{
+    facingMode:facing,
+    width:{ideal:2560}, height:{ideal:1440},
+    aspectRatio:{ideal:297/210}
+  }});
   $('#v').srcObject = stream;
+  await $('#v').play().catch(()=>{});
+  iniciarDeteccao();
 }
-startCam().catch(()=>{ $('#v').outerHTML='<p style="color:#f0a89e">Sem acesso à câmera. Habilite a permissão.</p>'; });
+startCam().catch(()=>{ $('#v').outerHTML='<p style="color:#f0a89e">Sem acesso à câmera. Habilite a permissão (e use HTTPS).</p>'; });
 $('#flip').onclick=()=>{ facing = facing==='environment'?'user':'environment'; startCam(); };
+$('#auto').onclick=()=>{ autoOn=!autoOn; $('#auto').textContent = autoOn?'⏸ Pausar automático':'▶ Retomar automático';
+  if(autoOn) iniciarDeteccao(); else pararDeteccao(); setHint(autoOn?'procurando os cantos…':'automático pausado','') };
 
-// ── captura e leitura ──
-$('#shot').onclick=()=>{
-  const v=$('#v'), cv=$('#cv');
-  cv.width=v.videoWidth; cv.height=v.videoHeight;
-  const ctx=cv.getContext('2d'); ctx.drawImage(v,0,0);
-  const img=ctx.getImageData(0,0,cv.width,cv.height);
-  const gray=new Uint8Array(cv.width*cv.height);
-  for(let i=0,j=0;i<img.data.length;i+=4,j++)
-    gray[j]=(img.data[i]*0.299+img.data[i+1]*0.587+img.data[i+2]*0.114)|0;
+// avisa se o telefone está em pé (a ficha é deitada)
+function checaOrientacao(){
+  const retrato = window.innerHeight > window.innerWidth;
+  $('#rotaviso').hidden = !retrato;
+}
+addEventListener('resize', checaOrientacao); checaOrientacao();
 
-  const res=readSheet(gray,cv.width,cv.height,template);
-  if(!res.ok){ alert('Não consegui ler: '+res.erro+'. Reenquadre com os 4 cantos visíveis.'); return; }
-  lastRead={res,gray,w:cv.width,h:cv.height};
-  mostrar(res,cv);
-};
+// ── loop de detecção em baixa resolução (1–8ms por frame; barato) ──────────
+const det = document.createElement('canvas');
+function pararDeteccao(){ if(detTimer){ clearInterval(detTimer); detTimer=null; } }
+function iniciarDeteccao(){
+  pararDeteccao();
+  if(!autoOn) return;
+  detTimer = setInterval(()=>{
+    if(lendo || !template) return;
+    const v=$('#v');
+    if(!v.videoWidth) return;
+    const LARG=480;                                  // resolução do preview p/ detectar
+    det.width=LARG; det.height=Math.round(v.videoHeight*LARG/v.videoWidth);
+    const cx=det.getContext('2d',{willReadFrequently:true});
+    cx.drawImage(v,0,0,det.width,det.height);
+    const im=cx.getImageData(0,0,det.width,det.height);
+    const g=new Uint8Array(det.width*det.height);
+    for(let i=0,j=0;i<im.data.length;i+=4,j++)
+      g[j]=(im.data[i]*0.299+im.data[i+1]*0.587+im.data[i+2]*0.114)|0;
+
+    const f = findFiducials(g, det.width, det.height);
+    marcarCantos(f);
+    if(f){
+      estaveis++;
+      setRing(estaveis/ESTAVEIS_P_DISPARO);
+      $('#guide').classList.add('lock');
+      setHint(estaveis>=ESTAVEIS_P_DISPARO?'capturando…':'4 cantos ✓ segure firme','ok');
+      if(estaveis>=ESTAVEIS_P_DISPARO){ estaveis=0; setRing(0); capturar(true); }
+    } else {
+      estaveis=0; setRing(0);
+      $('#guide').classList.remove('lock');
+      setHint('procurando os cantos… aproxime e enquadre a folha toda','');
+    }
+  }, DET_MS);
+}
+function marcarCantos(f){
+  const ids=['#ctl','#ctr','#cbl','#cbr'];
+  ids.forEach((id,i)=> $(id).classList.toggle('on', !!(f && f[i])));
+}
+function setRing(frac){ $('#ringfill').style.clipPath = 'inset('+Math.max(0,(1-Math.min(1,frac))*100)+'% 0 0 0)'; }
+function setHint(txt,cls){ const h=$('#hint'); h.textContent=txt; h.className='hint'+(cls?' '+cls:''); }
+
+// ── captura (automática ou manual) ────────────────────────────────────────
+function capturar(automatico){
+  if(lendo) return;
+  lendo=true;
+  try{
+    const v=$('#v'), cv=$('#cv');
+    cv.width=v.videoWidth; cv.height=v.videoHeight;      // resolução MÁXIMA p/ ler
+    const ctx=cv.getContext('2d',{willReadFrequently:true}); ctx.drawImage(v,0,0);
+    const img=ctx.getImageData(0,0,cv.width,cv.height);
+    const gray=new Uint8Array(cv.width*cv.height);
+    for(let i=0,j=0;i<img.data.length;i+=4,j++)
+      gray[j]=(img.data[i]*0.299+img.data[i+1]*0.587+img.data[i+2]*0.114)|0;
+
+    const res=readSheet(gray,cv.width,cv.height,template);
+    if(!res.ok){
+      if(!automatico) alert('Não consegui ler: '+res.erro+'. Reenquadre com os 4 cantos visíveis.');
+      setHint('não deu — reenquadre','');       // no automático, só avisa e segue tentando
+      lendo=false; return;
+    }
+    if(navigator.vibrate) navigator.vibrate(60);           // confirmação tátil
+    pararDeteccao();
+    lastRead={res,gray,w:cv.width,h:cv.height};
+    mostrar(res,cv);
+  } finally { lendo=false; }
+}
+$('#shot').onclick=()=>capturar(false);
 
 function crop(gray,w,box){
   const [x,y,bw,bh]=box; const c=document.createElement('canvas');
@@ -241,7 +335,7 @@ function mostrar(res,cv){
     : '<small>Nenhum campo numérico marcado.</small>';
 }
 
-$('#again').onclick=()=>{ $('#step2').hidden=true; $('#step1').hidden=false; };
+$('#again').onclick=()=>{ $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); iniciarDeteccao(); };
 
 // ── montar payload e enfileirar ──
 $('#enq').onclick=async ()=>{
@@ -286,7 +380,7 @@ $('#enq').onclick=async ()=>{
 
   const job={ ficha_id:fichaId, criado_em:Date.now(), celulas:cells, ocr_amostras:ocrAmostras };
   await enfileirar(job);
-  $('#step2').hidden=true; $('#step1').hidden=false;
+  $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); iniciarDeteccao();
   renderFila(); setNet();
 };
 

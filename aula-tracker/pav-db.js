@@ -136,7 +136,7 @@ export async function runPavMigrations(pool) {
 
       -- Coordenada temporal do turno (data = diaDoTurno, ver pav-core).
       data                DATE    NOT NULL,
-      turno               TEXT    NOT NULL,   -- 'M'|'T'|'N'|'E'
+      turno               TEXT    NOT NULL,   -- 'D'|'N' (Dia/Noite); dados legados podem ter 'M'|'T'|'E'
       categoria           TEXT    NOT NULL,   -- 'fisio'|'enf'
 
       -- Salão de onde a pessoa AFIRMOU ter trabalhado (auditoria + trava da enf,
@@ -225,6 +225,61 @@ export async function runPavMigrations(pool) {
       ) AS v(chave, valor)
     ON CONFLICT (instituicao_id, chave) DO NOTHING
   `);
+
+  // ── Entrada por PAPEL (OCR/OMR de smartphone) ─────────────────────────────
+  // O papel é a porta de entrada inicial da coleta. Cada check ganha PROVENIÊNCIA:
+  //   origem   → 'digital' (default, preenchido no /pav/m) ou 'papel' (importado)
+  //   lote_id  → o lote de importação que trouxe este check (NULL p/ digital)
+  //   hora_papel → hora anotada no papel (texto 'HH:MM'), quando presente
+  // A chave natural (ficha,data,turno,categoria) já garante idempotência: reler a
+  // mesma folha é upsert. A camada de conferência decide o que sobrescrever.
+  await pool.query(`ALTER TABLE pav_checks ADD COLUMN IF NOT EXISTS origem     TEXT DEFAULT 'digital'`);
+  await pool.query(`ALTER TABLE pav_checks ADD COLUMN IF NOT EXISTS lote_id    INTEGER`);
+  await pool.query(`ALTER TABLE pav_checks ADD COLUMN IF NOT EXISTS hora_papel TEXT`);
+
+  // Lotes de importação: uma folha-semana escaneada = um lote pendente de
+  // conferência pelo SCIH. O resumo guarda o que entrou, o que já existia igual
+  // (no-op) e o que DIVERGIU do digital (não sobrescreve — humano decide).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pav_lotes (
+      id             SERIAL PRIMARY KEY,
+      instituicao_id INTEGER REFERENCES atb_instituicoes(id),
+      ficha_id       INTEGER REFERENCES pav_fichas(id) ON DELETE SET NULL,
+      criado_por     INTEGER REFERENCES users(id),
+      criado_por_nome TEXT,
+      criado_em      TIMESTAMPTZ DEFAULT now(),
+      semana_ini     DATE,                       -- segunda-feira da semana escaneada
+      estado         TEXT DEFAULT 'pendente',    -- 'pendente' | 'conferido'
+      conferido_por  INTEGER REFERENCES users(id),
+      conferido_em   TIMESTAMPTZ,
+      resumo         JSONB DEFAULT '{}'          -- {inseridos, ignorados, divergencias:[...]}
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS pav_lotes_estado_idx ON pav_lotes (instituicao_id, estado, criado_em)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS pav_checks_lote_idx  ON pav_checks (lote_id)`);
+
+  // Log de amostras do OCR de dígito: cada campo numérico lido guarda o RECORTE
+  // da imagem (base64 PNG), o valor reconhecido, a confiança e o valor FINAL
+  // (após revisão humana, se houve). Serve a dois fins:
+  //   auditoria  → rastrear de onde veio cada número clínico
+  //   treino     → correções humanas viram dataset rotulado (imagem→dígito) para
+  //                afinar o modelo com a caligrafia real da unidade.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pav_ocr_amostras (
+      id             SERIAL PRIMARY KEY,
+      instituicao_id INTEGER REFERENCES atb_instituicoes(id),
+      lote_id        INTEGER REFERENCES pav_lotes(id) ON DELETE CASCADE,
+      check_key      TEXT,                       -- 'cuff'|'fio2'|'peep'|'pao2'|'vm_dias'
+      data           DATE, turno TEXT,
+      recorte_png    TEXT,                       -- base64 do campo (auditoria + treino)
+      valor_ocr      TEXT,                       -- o que o modelo leu
+      confianca      REAL,                       -- conf_min do campo (0..1)
+      valor_final    TEXT,                       -- o confirmado/corrigido pelo humano
+      revisado       BOOLEAN DEFAULT false,      -- passou pelo portão de revisão?
+      criado_em      TIMESTAMPTZ DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS pav_ocr_treino_idx ON pav_ocr_amostras (instituicao_id, revisado)`);
 
   console.log('[pav] migrations ok — registro:', REGISTRO.length, 'itens · salões:', SALOES.map(s => s[0]).join(','));
 }

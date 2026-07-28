@@ -33,7 +33,7 @@ function safe(s) {
 }
 
 const SALAO_LABEL = Object.fromEntries(SALOES);
-const TURNO_LABEL = { M: 'Manhã', T: 'Tarde', N: 'Noite', E: 'Madrugada' };
+const TURNO_LABEL = { D: 'Dia', N: 'Noite' };
 
 // Categoria de trabalho do req.user. super_admin sem categoria assume 'fisio'
 // (só para poder ver/testar a tela — a escrita dele é sempre retroativa/livre).
@@ -360,7 +360,10 @@ export function registerPavRoutes(app, pool, pavRequired, renderShell, scihRequi
       const reg = extraiRegistro(req.body);
       if (reg.motivos.length) return res.status(400).json({ erro: reg.motivos[0], motivos: reg.motivos });
 
-      const categoria = vig ? vig.categoria : ctx.categoria_pav;
+      // No modelo Dia/Noite a categoria de quem escreve vem do PRÓPRIO usuário
+      // (a autoria é por item, não pelo período). Super-admin sem categoria
+      // definida grava como 'fisio' por padrão (backfill).
+      const categoria = ctx.categoria_pav || (ctx.super_admin ? 'fisio' : null);
       const nome = req.user?.full_name || null;
       // enf compartilhada: identificação digitada no ato (nome + COREN).
       const identificacao = (categoria === 'enf')
@@ -568,20 +571,18 @@ function confirmarPend(id){
     const catLabel = (CATEGORIAS_PAV.find(c => c[0] === cat) || [null, cat])[1] || '—';
     const itens = itensDaCategoria(cat);
     const semTurno = !vig;
-    const turnoTxt = vig ? `${TURNO_LABEL[vig.turno]} · ${vig.data.split('-').reverse().join('/')}` : 'Fora de turno';
+    const turnoTxt = vig ? `${TURNO_LABEL[vig.turno]} · ${vig.data.split('-').reverse().join('/')}` : 'Fora de período';
 
-    // Aviso quando a categoria do usuário não bate com o turno vigente.
-    const turnoDaOutra = vig && ctx.categoria_pav && vig.categoria !== ctx.categoria_pav && !ctx.super_admin;
-    // Pode PREENCHER check? (só no turno vigente da própria categoria, ou super)
-    const podeCheck = ctx.super_admin || (vig && (!ctx.categoria_pav || vig.categoria === ctx.categoria_pav));
+    // No modelo Dia/Noite ambas as categorias escrevem no MESMO período (cada uma
+    // seu subconjunto de itens). Pode PREENCHER se há período vigente (ou super).
+    const podeCheck = ctx.super_admin || !!vig;
 
     const salaoInfo = cat === 'enf' && ctx.salao_sessao
       ? `<a class="full" href="/pav/trocar-salao">${safe(SALAO_LABEL[ctx.salao_sessao] || ctx.salao_sessao)} ⇄</a>` : '';
 
     // Aviso de contexto (não bloqueia a lista nem o botão de abrir).
     let aviso = '';
-    if (semTurno) aviso = `<div class="aviso">Fora de turno: você pode abrir/encerrar fichas, mas o preenchimento do bundle só é possível no turno cronológico da sua categoria.</div>`;
-    else if (turnoDaOutra) aviso = `<div class="aviso">O turno vigente é da ${safe(vig.categoria)}. Você pode abrir/encerrar fichas; o preenchimento do bundle é da categoria vigente.</div>`;
+    if (semTurno) aviso = `<div class="aviso">Fora de período: você pode abrir/encerrar fichas, mas o preenchimento do bundle só é possível no período cronológico vigente (Dia 07–19h · Noite 19–07h).</div>`;
 
     // Salões que o usuário pode escolher ao abrir uma ficha.
     const saloesUsuario = saloesDoContexto(ctx);

@@ -31,20 +31,18 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 // ══════════════════════════════════════════════════════════════════════════
-//  GRADE DE TURNOS  (cobre 24h sem buraco e sem sobreposição)
+//  GRADE DE PERÍODOS  (Dia/Noite — cobre 24h sem buraco e sem sobreposição)
 // ══════════════════════════════════════════════════════════════════════════
-// A CATEGORIA é derivada do horário: quem loga às 03:00 só pode estar no turno
-// da enfermagem; às 15:00, no T da fisio. Por isso turnoVigente() não recebe
-// categoria — o relógio a determina. Anotação é UMA vez por turno; bordas não
-// vazam. Fisio: M 07–13, T 13–19, N 19–01 (cruza meia-noite). Enf: E 01–07.
+// Modelo pactuado na implantação: a coleta é em DOIS períodos, não quatro turnos.
+// O período NÃO carrega categoria: no mesmo período, fisio e enfermagem preenchem
+// simultaneamente, cada uma o SEU subconjunto de itens. A autoria é propriedade do
+// ITEM (ver REGISTRO.cat), não do período. Horários ajustáveis no futuro.
 //
-// ⚠️ O N (fisio, 19:00–01:00) é o ÚNICO turno que cruza a meia-noite. Um check
-// às 00:30 pertence ao N do dia em que o turno COMEÇOU (regra em diaDoTurno).
+// ⚠️ A Noite (19:00–07:00) cruza a meia-noite (fim 31h = 07:00 do dia seguinte).
+// Um check às 00:30 pertence à Noite do dia em que o período COMEÇOU (diaDoTurno).
 export const TURNOS = [
-  { turno: 'M', categoria: 'fisio', ini: 7,  fim: 13, label: 'Manhã'     },
-  { turno: 'T', categoria: 'fisio', ini: 13, fim: 19, label: 'Tarde'     },
-  { turno: 'N', categoria: 'fisio', ini: 19, fim: 25, label: 'Noite'     },  // 25h = 01:00 do dia seguinte
-  { turno: 'E', categoria: 'enf',   ini: 1,  fim: 7,  label: 'Madrugada' },
+  { turno: 'D', ini: 7,  fim: 19, label: 'Dia'   },
+  { turno: 'N', ini: 19, fim: 31, label: 'Noite' },  // 31h = 07:00 do dia seguinte
 ];
 
 export const CATEGORIAS_PAV = [
@@ -116,9 +114,9 @@ export function efeitoEncerramento(ctx, acao = 'registrar') {
 // Ordem = ordem de exibição no formulário.
 export const REGISTRO = [
   // — Itens de execução do bundle (sim/não) —
-  { key: 'cabeceira',   label: 'Decúbito elevado (30–45°)',        cat: 'ambos', per: 'turno', tipo: 'sim_nao' },
+  { key: 'cabeceira',   label: 'Decúbito elevado (30–45°)',        cat: 'fisio', per: 'turno', tipo: 'sim_nao' },
   { key: 'higiene_oral',label: 'Higiene oral',                     cat: 'enf',   per: 'turno', tipo: 'sim_nao' },
-  { key: 'aspiracao',   label: 'Aspiração de vias aéreas',         cat: 'ambos', per: 'turno', tipo: 'sim_nao' },
+  { key: 'aspiracao',   label: 'Aspiração de vias aéreas',         cat: 'fisio',   per: 'turno', tipo: 'sim_nao' },
   { key: 'subglotica',  label: 'Aspiração subglótica',             cat: 'fisio', per: 'turno', tipo: 'sim_nao', via: true },
   { key: 'despertar',   label: 'Despertar diário / TRE',           cat: 'fisio', per: 'dia',   tipo: 'sim_nao', justifica_se_nao: true },
   { key: 'extubacao',   label: 'Avaliação de prontidão p/ extubação', cat: 'fisio', per: 'dia', tipo: 'sim_nao' },
@@ -207,18 +205,17 @@ export function turnoVigente(agora = new Date()) {
   for (const def of TURNOS) {
     const hNorm = (def.fim > 24 && h < (def.fim - 24)) ? h + 24 : h;
     if (hNorm >= def.ini && hNorm < def.fim) {
-      return { turno: def.turno, categoria: def.categoria, data: diaDoTurno(def.turno, agora) };
+      return { turno: def.turno, data: diaDoTurno(def.turno, agora) };
     }
   }
   return null;
 }
 
-// O DIA a que um turno pertence. Só o N (fisio) pode pertencer ao dia anterior
-// quando o relógio já passou da meia-noite: check às 00:30 do dia 18 é o N que
-// começou no dia 17.
+// O DIA a que um período pertence. A Noite (19:00–07:00) cruza a meia-noite:
+// um check entre 00:00 e 07:00 é a Noite que COMEÇOU no dia anterior.
 export function diaDoTurno(turno, agora = new Date()) {
   const d = new Date(agora);
-  if (turno === 'N' && agora.getHours() < 2) d.setDate(d.getDate() - 1);
+  if (turno === 'N' && agora.getHours() < 7) d.setDate(d.getDate() - 1);
   return d.toISOString().slice(0, 10);
 }
 
@@ -249,11 +246,12 @@ export function podeEscrever(alvo, ctx, agora = new Date()) {
     return { permitido: true, retroativo: !noVigente, motivo: null };
   }
 
-  if (!vig) return { permitido: false, retroativo: false, motivo: 'fora de qualquer turno' };
-  if (ctx?.categoria_pav && ctx.categoria_pav !== vig.categoria)
-    return { permitido: false, retroativo: false, motivo: `turno vigente é da ${vig.categoria}` };
+  if (!vig) return { permitido: false, retroativo: false, motivo: 'fora de qualquer período' };
+  // No modelo Dia/Noite a autoria é por ITEM, não por período: fisio e enfermagem
+  // escrevem no MESMO período, cada uma o seu subconjunto (filtrado por
+  // itensDaCategoria). Por isso NÃO há mais trava de "período é da categoria X".
   if (alvo?.data !== vig.data || alvo?.turno !== vig.turno)
-    return { permitido: false, retroativo: false, motivo: 'só o turno cronológico vigente' };
+    return { permitido: false, retroativo: false, motivo: 'só o período cronológico vigente' };
 
   const saloes = saloesDoContexto(ctx);
   if (!saloes.includes(alvo?.salao))
@@ -302,11 +300,9 @@ export function podeTransferir(mov, ctx, agora = new Date()) {
 
   if (!alcancaAmbos)
     return { permitido: false, retroativo: false, motivo: 'transferência exige alcançar os dois salões' };
-  if (!vig) return { permitido: false, retroativo: false, motivo: 'fora de qualquer turno' };
-  if (ctx?.categoria_pav && ctx.categoria_pav !== vig.categoria)
-    return { permitido: false, retroativo: false, motivo: `turno vigente é da ${vig.categoria}` };
+  if (!vig) return { permitido: false, retroativo: false, motivo: 'fora de qualquer período' };
   if (mov?.data !== vig.data || mov?.turno !== vig.turno)
-    return { permitido: false, retroativo: false, motivo: 'só o turno cronológico vigente' };
+    return { permitido: false, retroativo: false, motivo: 'só o período cronológico vigente' };
 
   return { permitido: true, retroativo: false, motivo: null };
 }

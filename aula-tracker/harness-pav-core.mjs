@@ -50,19 +50,21 @@ eq('subglótica sim + porta dedicada', regViaPorta.itens.subglotica.via, 'porta_
 
 console.log('\n═══ ESCOPO DE ACESSO (turno × salão) ═══');
 
-console.log('\n── turnoVigente ──');
-eq('08:00 → M fisio', turnoVigente(at(17, 8)).turno, 'M');
-eq('15:00 → T fisio', turnoVigente(at(17, 15)).categoria, 'fisio');
-eq('20:00 → N', turnoVigente(at(17, 20)).turno, 'N');
-eq('03:00 → E enf', turnoVigente(at(17, 3)).categoria, 'enf');
-eq('01:00 exato → E', turnoVigente(at(17, 1)).turno, 'E');
-eq('13:00 exato → T', turnoVigente(at(17, 13)).turno, 'T');
+console.log('\n── turnoVigente (Dia/Noite) ──');
+eq('08:00 → Dia', turnoVigente(at(17, 8)).turno, 'D');
+eq('15:00 → Dia', turnoVigente(at(17, 15)).turno, 'D');
+eq('20:00 → Noite', turnoVigente(at(17, 20)).turno, 'N');
+eq('03:00 → Noite', turnoVigente(at(17, 3)).turno, 'N');
+eq('período não carrega categoria', turnoVigente(at(17, 15)).categoria, undefined);
+eq('07:00 exato → Dia', turnoVigente(at(17, 7)).turno, 'D');
+eq('19:00 exato → Noite', turnoVigente(at(17, 19)).turno, 'N');
 
-console.log('\n── diaDoTurno: N cruza meia-noite ──');
-eq('N 00:30 dia 18 → dia 17', diaDoTurno('N', at(18, 0, 30)), '2026-07-17');
-eq('E 03:00 dia 18 → dia 18', diaDoTurno('E', at(18, 3)), '2026-07-18');
-eq('turno vigente 00:30 é N', turnoVigente(at(18, 0, 30)).turno, 'N');
-eq('data do N às 00:30 = dia anterior', turnoVigente(at(18, 0, 30)).data, '2026-07-17');
+console.log('\n── diaDoTurno: Noite cruza meia-noite ──');
+eq('Noite 00:30 dia 18 → dia 17', diaDoTurno('N', at(18, 0, 30)), '2026-07-17');
+eq('Noite 06:30 dia 18 → dia 17', diaDoTurno('N', at(18, 6, 30)), '2026-07-17');
+eq('Dia 08:00 dia 18 → dia 18', diaDoTurno('D', at(18, 8)), '2026-07-18');
+eq('turno vigente 00:30 é Noite', turnoVigente(at(18, 0, 30)).turno, 'N');
+eq('data da Noite às 00:30 = dia anterior', turnoVigente(at(18, 0, 30)).data, '2026-07-17');
 
 console.log('\n── saloesDoContexto ──');
 eq('fisio alcança os dois salões', saloesDoContexto({ categoria_pav: 'fisio' }), ['UTIAB', 'UTIC']);
@@ -70,24 +72,24 @@ eq('enf alcança só o salão da sessão', saloesDoContexto({ categoria_pav: 'en
 eq('enf sem salão de sessão → vazio', saloesDoContexto({ categoria_pav: 'enf' }), []);
 eq('super_admin alcança tudo', saloesDoContexto({ super_admin: true }), ['UTIAB', 'UTIC']);
 
-console.log('\n── podeEscrever: turno × salão ──');
+console.log('\n── podeEscrever: período × salão (autoria por item) ──');
 const fisio = { categoria_pav: 'fisio' };
 const enfAB = { categoria_pav: 'enf', salao_sessao: 'UTIAB' };
 const su = { super_admin: true };
 
-t('fisio escreve UTIC no T vigente', podeEscrever({ data: '2026-07-17', turno: 'T', salao: 'UTIC' }, fisio, at(17, 15)).permitido);
-t('fisio escreve UTIAB no T vigente', podeEscrever({ data: '2026-07-17', turno: 'T', salao: 'UTIAB' }, fisio, at(17, 15)).permitido);
-t('fisio NÃO faz backfill', !podeEscrever({ data: '2026-07-17', turno: 'M', salao: 'UTIAB' }, fisio, at(17, 15)).permitido);
-t('fisio NÃO escreve madrugada (é da enf)', !podeEscrever({ data: '2026-07-17', turno: 'E', salao: 'UTIAB' }, fisio, at(17, 3)).permitido);
+t('fisio escreve UTIC no Dia vigente', podeEscrever({ data: '2026-07-17', turno: 'D', salao: 'UTIC' }, fisio, at(17, 15)).permitido);
+t('fisio escreve UTIAB no Dia vigente', podeEscrever({ data: '2026-07-17', turno: 'D', salao: 'UTIAB' }, fisio, at(17, 15)).permitido);
+t('fisio NÃO faz backfill (Noite anterior)', !podeEscrever({ data: '2026-07-16', turno: 'N', salao: 'UTIAB' }, fisio, at(17, 15)).permitido);
+t('fisio escreve na Noite vigente (mesmo período que enf)', podeEscrever({ data: '2026-07-17', turno: 'N', salao: 'UTIAB' }, fisio, at(17, 20)).permitido);
 
-t('enf UTIAB escreve UTIAB na madrugada', podeEscrever({ data: '2026-07-17', turno: 'E', salao: 'UTIAB' }, enfAB, at(17, 3)).permitido);
-t('enf UTIAB BLOQUEADA em UTIC (fora do alcance)', !podeEscrever({ data: '2026-07-17', turno: 'E', salao: 'UTIC' }, enfAB, at(17, 3)).permitido);
-eq('motivo do bloqueio de salão', podeEscrever({ data: '2026-07-17', turno: 'E', salao: 'UTIC' }, enfAB, at(17, 3)).motivo, 'salão fora do seu alcance');
-t('enf NÃO escreve no turno da fisio', !podeEscrever({ data: '2026-07-17', turno: 'M', salao: 'UTIAB' }, enfAB, at(17, 8)).permitido);
+t('enf UTIAB escreve UTIAB na Noite (mesmo período que fisio)', podeEscrever({ data: '2026-07-17', turno: 'N', salao: 'UTIAB' }, enfAB, at(17, 20)).permitido);
+t('enf UTIAB escreve UTIAB no Dia (autoria por item, não por período)', podeEscrever({ data: '2026-07-17', turno: 'D', salao: 'UTIAB' }, enfAB, at(17, 15)).permitido);
+t('enf UTIAB BLOQUEADA em UTIC (fora do alcance)', !podeEscrever({ data: '2026-07-17', turno: 'N', salao: 'UTIC' }, enfAB, at(17, 20)).permitido);
+eq('motivo do bloqueio de salão', podeEscrever({ data: '2026-07-17', turno: 'N', salao: 'UTIC' }, enfAB, at(17, 20)).motivo, 'salão fora do seu alcance');
 
-t('super-admin backfill em qualquer salão', podeEscrever({ data: '2026-07-10', turno: 'M', salao: 'UTIC' }, su, at(17, 15)).permitido);
-t('backfill do super-admin é retroativo', podeEscrever({ data: '2026-07-10', turno: 'M', salao: 'UTIC' }, su, at(17, 15)).retroativo);
-t('super-admin no vigente NÃO é retroativo', !podeEscrever({ data: '2026-07-17', turno: 'T', salao: 'UTIC' }, su, at(17, 15)).retroativo);
+t('super-admin backfill em qualquer salão', podeEscrever({ data: '2026-07-10', turno: 'D', salao: 'UTIC' }, su, at(17, 15)).permitido);
+t('backfill do super-admin é retroativo', podeEscrever({ data: '2026-07-10', turno: 'D', salao: 'UTIC' }, su, at(17, 15)).retroativo);
+t('super-admin no vigente NÃO é retroativo', !podeEscrever({ data: '2026-07-17', turno: 'D', salao: 'UTIC' }, su, at(17, 15)).retroativo);
 
 console.log('\n── leitosVisiveis ──');
 const fichas = [
@@ -101,25 +103,27 @@ eq('enf UTIAB vê só os 2 de UTIAB', leitosVisiveis(enfAB, fichas).map(f => f.i
 console.log('\n── itensDaCategoria ──');
 t('fisio não vê higiene oral', !itensDaCategoria('fisio').some(c => c.key === 'higiene_oral'));
 t('enf vê higiene oral', itensDaCategoria('enf').some(c => c.key === 'higiene_oral'));
-t('ambos veem cabeceira', itensDaCategoria('fisio').some(c => c.key === 'cabeceira') && itensDaCategoria('enf').some(c => c.key === 'cabeceira'));
+t('enf vê APENAS higiene oral', itensDaCategoria('enf').length === 1 && itensDaCategoria('enf')[0].key === 'higiene_oral');
+t('só fisio vê cabeceira', itensDaCategoria('fisio').some(c => c.key === 'cabeceira') && !itensDaCategoria('enf').some(c => c.key === 'cabeceira'));
+t('só fisio vê aspiração de vias aéreas', itensDaCategoria('fisio').some(c => c.key === 'aspiracao') && !itensDaCategoria('enf').some(c => c.key === 'aspiracao'));
 t('fisio vê subglótica, enf não', itensDaCategoria('fisio').some(c => c.key === 'subglotica') && !itensDaCategoria('enf').some(c => c.key === 'subglotica'));
 
 console.log('\n── podeTransferir: exige alcançar os dois salões ──');
-t('fisio transfere UTIAB→UTIC no turno',
-  podeTransferir({ data: '2026-07-17', turno: 'T', salao_de: 'UTIAB', salao_para: 'UTIC' }, fisio, at(17, 15)).permitido);
-t('fisio NÃO transfere fora do turno',
-  !podeTransferir({ data: '2026-07-17', turno: 'M', salao_de: 'UTIAB', salao_para: 'UTIC' }, fisio, at(17, 15)).permitido);
+t('fisio transfere UTIAB→UTIC no Dia vigente',
+  podeTransferir({ data: '2026-07-17', turno: 'D', salao_de: 'UTIAB', salao_para: 'UTIC' }, fisio, at(17, 15)).permitido);
+t('fisio NÃO transfere fora do período',
+  !podeTransferir({ data: '2026-07-16', turno: 'N', salao_de: 'UTIAB', salao_para: 'UTIC' }, fisio, at(17, 15)).permitido);
 t('enf NÃO transfere (alcança só um salão)',
-  !podeTransferir({ data: '2026-07-17', turno: 'E', salao_de: 'UTIAB', salao_para: 'UTIC' }, enfAB, at(17, 3)).permitido);
+  !podeTransferir({ data: '2026-07-17', turno: 'N', salao_de: 'UTIAB', salao_para: 'UTIC' }, enfAB, at(17, 20)).permitido);
 eq('motivo do bloqueio da enf',
-  podeTransferir({ data: '2026-07-17', turno: 'E', salao_de: 'UTIAB', salao_para: 'UTIC' }, enfAB, at(17, 3)).motivo,
+  podeTransferir({ data: '2026-07-17', turno: 'N', salao_de: 'UTIAB', salao_para: 'UTIC' }, enfAB, at(17, 20)).motivo,
   'transferência exige alcançar os dois salões');
 t('origem == destino rejeitada',
-  !podeTransferir({ data: '2026-07-17', turno: 'T', salao_de: 'UTIAB', salao_para: 'UTIAB' }, fisio, at(17, 15)).permitido);
+  !podeTransferir({ data: '2026-07-17', turno: 'D', salao_de: 'UTIAB', salao_para: 'UTIAB' }, fisio, at(17, 15)).permitido);
 t('super-admin faz transferência retroativa',
-  podeTransferir({ data: '2026-07-10', turno: 'M', salao_de: 'UTIAB', salao_para: 'UTIC' }, su, at(17, 15)).retroativo);
+  podeTransferir({ data: '2026-07-10', turno: 'D', salao_de: 'UTIAB', salao_para: 'UTIC' }, su, at(17, 15)).retroativo);
 t('super-admin transferência no vigente NÃO é retroativa',
-  !podeTransferir({ data: '2026-07-17', turno: 'T', salao_de: 'UTIAB', salao_para: 'UTIC' }, su, at(17, 15)).retroativo);
+  !podeTransferir({ data: '2026-07-17', turno: 'D', salao_de: 'UTIAB', salao_para: 'UTIC' }, su, at(17, 15)).retroativo);
 
 console.log('\n── efeitoEncerramento: dois níveis ──');
 eq('enf registra extubação → pendente', efeitoEncerramento({ categoria_pav: 'enf' }, 'registrar').estado_novo, 'extubacao_pendente');
@@ -132,21 +136,19 @@ eq('fisio confirma pendência → encerrado', efeitoEncerramento({ categoria_pav
 eq('enf NÃO confirma pendência', efeitoEncerramento({ categoria_pav: 'enf' }, 'confirmar').estado_novo, null);
 eq('motivo do bloqueio da enf ao confirmar', efeitoEncerramento({ categoria_pav: 'enf' }, 'confirmar').motivo, 'confirmação é ato de fisio/SCIH');
 
-console.log('\n── estadoTurnosDoDia / coberturaDoDia: grid do SCIH ──');
-// um dia com M conforme, T com NC (cabeceira não), N vazio, E vazio
+console.log('\n── estadoTurnosDoDia / coberturaDoDia: grid do SCIH (Dia/Noite) ──');
+// um dia com Dia conforme, Noite com NC (cabeceira não)
 const bundleOk = { cabeceira:{resp:'sim'}, aspiracao:{resp:'sim'}, higiene_oral:{resp:'sim'},
   subglotica:{resp:'sim'}, despertar:{resp:'sim'}, extubacao:{resp:'sim'}, cuff:{valor:28} };
 const bundleNC = { ...bundleOk, cabeceira:{resp:'nao'} };
-const checksDia = [ { turno:'M', itens: bundleOk }, { turno:'T', itens: bundleNC } ];
+const checksDia = [ { turno:'D', itens: bundleOk }, { turno:'N', itens: bundleNC } ];
 const est = estadoTurnosDoDia(checksDia);
-eq('M conforme', est.M, 'conforme');
-eq('T com NC', est.T, 'nc');
-eq('N vazio (lacuna, não NC)', est.N, 'vazio');
-eq('E vazio', est.E, 'vazio');
+eq('Dia conforme', est.D, 'conforme');
+eq('Noite com NC', est.N, 'nc');
 const cob = coberturaDoDia(checksDia);
-eq('2 turnos preenchidos', cob.preenchidos, 2);
-eq('1 turno conforme', cob.conformes, 1);
-eq('total de turnos = 4', cob.total_turnos, 4);
+eq('2 períodos preenchidos', cob.preenchidos, 2);
+eq('1 período conforme', cob.conformes, 1);
+eq('total de períodos = 2', cob.total_turnos, 2);
 // dia sem nenhum check → tudo vazio, 0 preenchidos
 eq('dia vazio: 0 preenchidos', coberturaDoDia([]).preenchidos, 0);
 

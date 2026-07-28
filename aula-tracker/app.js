@@ -29,6 +29,8 @@ import { registerFormTransportadorRoutes } from './atb-form-transportador.js';  
 import { runIscMigrations } from './isc-db.js';         // ← ADICIONAR (vigilância pós-alta de ISC)
 import { runPavMigrations } from './pav-db.js';         // ← ADICIONAR (bundle de prevenção de PAV)
 import { registerPavRoutes } from './pav-routes.js';    // ← ADICIONAR (form/grid de PAV)
+import { registerPavImportRoutes } from './pav-import-routes.js';  // entrada por papel (OCR)
+import { registerPavScanRoutes } from './pav-scan-routes.js';      // PWA de leitura no leito
 import { runGovMigrations } from './gov-db.js';         // ← ADICIONAR (painel de governança)
 import { registerGovRoutes } from './gov-routes.js';    // ← ADICIONAR (painel de governança)
 import { registerIscRoutes } from './isc-routes.js';    // ← ADICIONAR (vigilância pós-alta de ISC)
@@ -215,6 +217,12 @@ try { registerIscImportRoutes(app, pool, scihRequired, renderShell); }
 catch (e) { console.error('ERRO registerIscImportRoutes', e); }
 try { registerPavRoutes(app, pool, pavRequired, renderShell, scihRequired); }
 catch (e) { console.error('ERRO registerPavRoutes', e); }
+
+try { registerPavImportRoutes(app, pool, pavRequired, renderShell, scihRequired); }
+catch (e) { console.error('ERRO registerPavImportRoutes', e); }
+
+try { registerPavScanRoutes(app, pool, pavRequired); }
+catch (e) { console.error('ERRO registerPavScanRoutes', e); }
 try { registerGovRoutes(app, pool, gestaoRequired, renderShell); }
 catch (e) { console.error('ERRO registerGovRoutes', e); }
 try { registerProntRoutes(app, pool, prontRequired, adminRequired, renderShell, medicoRequired); }

@@ -13,6 +13,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { tenantMode, tenantFromReq } from './atb-tenant.js';
 import { MODULOS, SOLICITAVEIS, moduloPorChave } from './acesso-modulos.js';
+import { sendAcessoAprovadoEmail, mailerConfigurado } from './mailer.js';
 
 const TOKEN_TTL_DIAS = 7;
 
@@ -69,6 +70,8 @@ export async function ensureScihAcessoSchema(pool) {
   await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS instituicao TEXT`);
   // dados adicionais pedidos por módulo (ver campos[] em acesso-modulos.js)
   await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS dados JSONB`);
+  // quando o e-mail com o link de senha saiu (nulo = não saiu)
+  await pool.query(`ALTER TABLE access_requests ADD COLUMN IF NOT EXISTS email_enviado_at TIMESTAMPTZ`);
 }
 
 function novoToken() { return crypto.randomBytes(24).toString('hex'); }
@@ -497,6 +500,11 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           <h1>Acessos</h1>
           <p class="mut">Aprove os pedidos pendentes e gerencie quem tem acesso a cada sistema.
              O formulário público fica em <a href="/acesso/solicitar">/acesso/solicitar</a>.</p>
+          ${mailerConfigurado() ? '' : `<p style="background:#fff6e5;border:1px solid #f0d9a8;color:#7a4c00;
+             border-radius:10px;padding:12px 14px;margin-top:12px">
+             <strong>Envio de e-mail desligado neste servidor.</strong> Ao aprovar, o link de
+             definição de senha aparece na tela e precisa ser enviado à mão.
+             Para automatizar, configure MAIL_USER e MAIL_PASS.</p>`}
         </div>
 
         ${blocosPendentes}
@@ -598,19 +606,56 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
       await client.query('COMMIT');
 
       const link = `${baseUrl(req)}/definir-senha?token=${token}`;
+
+      // Envio depois do commit e fora da transação: aprovação concedida não pode
+      // ser desfeita nem escondida por falha de e-mail. O link continua na tela
+      // em qualquer cenário, para envio manual.
+      let envio;
+      try {
+        await sendAcessoAprovadoEmail({
+          to: email,
+          nome: r.full_name,
+          modulo: mod.rotulo,
+          link,
+          dias: TOKEN_TTL_DIAS,
+          aprovadoPor: mod.aprovadoPor,
+        });
+        await pool.query(`UPDATE access_requests SET email_enviado_at = now() WHERE id=$1`, [id]);
+        envio = { ok: true };
+      } catch (e) {
+        // nunca registrar o link em log: é credencial de uso único
+        console.error('[acesso] e-mail de aprovação falhou:', e.code || e.message);
+        envio = { ok: false, semConfig: e.code === 'SEM_CONFIG', motivo: e.message };
+      }
+
+      const aviso = envio.ok
+        ? `<p class="ok">E-mail enviado para <strong>${esc(email)}</strong> com o link de definição de senha.</p>`
+        : envio.semConfig
+          ? `<p class="alerta"><strong>Envio de e-mail não configurado</strong> neste servidor
+             (MAIL_USER e MAIL_PASS). <strong>Envie o link abaixo manualmente</strong>, ou o acesso
+             fica aprovado sem que a pessoa consiga entrar.</p>`
+          : `<p class="alerta"><strong>Não foi possível enviar o e-mail.</strong>
+             O acesso está aprovado, mas a pessoa não recebeu nada —
+             <strong>copie o link abaixo e envie manualmente</strong>.
+             <span class="mut">(${esc(envio.motivo || 'falha no envio')})</span></p>`;
+
       res.send(page('Pedido aprovado', `
         <div class="card">
           <h1>Acesso aprovado</h1>
           <p><strong>${esc(r.full_name)}</strong> (${esc(email)}) agora tem acesso a
              <strong>${esc(mod.rotulo)}</strong>${inst ? ` — unidade ${esc(inst)}` : ''}.</p>
-          <p class="mut">Envie este link para a pessoa definir a senha. Expira em ${TOKEN_TTL_DIAS} dias
-             e só funciona uma vez:</p>
+          ${aviso}
+          <p class="mut">O link expira em ${TOKEN_TTL_DIAS} dias e só funciona uma vez:</p>
           <div class="linkbox" id="lk">${esc(link)}</div>
           <div class="row mt">
             <button class="ghost" onclick="navigator.clipboard.writeText(document.getElementById('lk').innerText).then(()=>{this.innerText='Copiado!'})">Copiar link</button>
             <a href="/atb/admin/scih">Voltar ao painel</a>
           </div>
-        </div>`));
+        </div>
+        <style>
+          .ok{background:#eaf7ee;border:1px solid #bfe3c9;color:#175c2c;border-radius:10px;padding:10px 12px}
+          .alerta{background:#fff6e5;border:1px solid #f0d9a8;color:#7a4c00;border-radius:10px;padding:12px 14px}
+        </style>`));
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch {}
       console.error('[acesso] aprovar:', err);

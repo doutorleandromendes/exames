@@ -381,18 +381,21 @@ export async function ensureFormSchemaTable(pool) {
     [JSON.stringify(buildSCMI())]
   );
 
-  // Migração idempotente: garante o campo 'dose_vanco' (auxílio de dose da
-  // Vancomicina) na seção 'atb_solicitado' do schema ativo do HUSF, se ainda não o
-  // tiver. RESTRITO AO HUSF — o SCMI não recebe (buildSCMI remove o campo). Não-clobber.
-  await _garantirDoseVanco(pool);
+  // Migração idempotente: garante os campos-widget de auxílio de dose (dose_vanco
+  // e dose_bactrim) na seção 'atb_solicitado' do schema ativo do HUSF, se ainda não
+  // os tiver. RESTRITO AO HUSF — o SCMI não recebe (buildSCMI remove os campos).
+  await _garantirCampoHUSF(pool, 'dose_vanco');
+  await _garantirCampoHUSF(pool, 'dose_bactrim');
 }
 
-// Injeta o campo 'dose_vanco' (modelo extraído da própria SEMENTE_HUSF, garantindo
-// identidade com o seed) antes da 'posologia'. RESTRITO AO HUSF — o SCMI não recebe
-// (o buildSCMI já o remove). Idempotente e não-clobber.
-async function _garantirDoseVanco(pool) {
+// Injeta um campo-widget da SEMENTE_HUSF (modelo extraído do próprio seed, garantindo
+// identidade) antes da 'posologia' no schema ATIVO do HUSF, se ainda não o tiver.
+// RESTRITO AO HUSF — o SCMI não recebe (buildSCMI remove esses campos). Idempotente
+// e não-clobber. Usado para dose_vanco e dose_bactrim (widgets que vivem na semente
+// mas precisam ser injetados no schema vivo do banco, que não vem do seed).
+async function _garantirCampoHUSF(pool, key) {
   const secSem = SEMENTE_HUSF.secoes.find(s => s.id === 'atb_solicitado');
-  const modeloRaw = secSem && secSem.campos.find(c => c.key === 'dose_vanco');
+  const modeloRaw = secSem && secSem.campos.find(c => c.key === key);
   if (!modeloRaw) return;
   const { rows } = await pool.query(`SELECT id, definicao FROM atb_form_schema WHERE ativo=true AND instituicao='HUSF'`);
   for (const row of rows) {
@@ -400,13 +403,13 @@ async function _garantirDoseVanco(pool) {
     if (!def || !Array.isArray(def.secoes)) continue;
     const sec = def.secoes.find(s => s.id === 'atb_solicitado');
     if (!sec || !Array.isArray(sec.campos)) continue;
-    if (sec.campos.some(c => c.key === 'dose_vanco')) continue; // idempotente
+    if (sec.campos.some(c => c.key === key)) continue; // idempotente
     const modelo = JSON.parse(JSON.stringify(modeloRaw));
     const iPos = sec.campos.findIndex(c => c.key === 'posologia');
     if (iPos >= 0) sec.campos.splice(iPos, 0, modelo); else sec.campos.push(modelo);
     await pool.query(`UPDATE atb_form_schema SET definicao=$1::jsonb WHERE id=$2`,
       [JSON.stringify(def), row.id]);
-    console.log(`[atb-form-schema] dose_vanco injetado no schema id=${row.id} (${def.instituicao || '?'})`);
+    console.log(`[atb-form-schema] ${key} injetado no schema id=${row.id} (${def.instituicao || '?'})`);
   }
 }
 

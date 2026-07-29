@@ -18,22 +18,77 @@
 // Procura, em cada janela de canto (fração `win` da imagem), o blob escuro
 // mais parecido com um quadrado do tamanho esperado. Retorna 4 centros em px
 // na ordem do template (TL, TR, BL, BR) ou null se algum canto falhar.
-export function findFiducials(gray, w, h, opts = {}) {
-  const win = opts.win ?? 0.28;                 // janela de busca por canto
-  const wins = [
-    [0, 0],                                     // TL
-    [w - Math.floor(w * win), 0],               // TR
-    [0, h - Math.floor(h * win)],               // BL
-    [w - Math.floor(w * win), h - Math.floor(h * win)], // BR
-  ];
-  const ww = Math.floor(w * win), wh = Math.floor(h * win);
-  const out = [];
-  for (const [ox, oy] of wins) {
-    const c = darkestSquareBlob(gray, w, h, ox, oy, Math.min(ww, w - ox), Math.min(wh, h - oy));
-    if (!c) return null;
-    out.push(c);
+// Localiza a FOLHA (região clara) dentro do quadro. Sem isso, a busca de
+// fiduciais nos cantos da IMAGEM falha sempre que a folha não preenche o
+// quadro — p.ex. celular em retrato fotografando uma ficha deitada: os
+// fiduciais ficam na faixa central, fora das janelas de canto.
+export function findSheetBBox(gray, w, h) {
+  const step = Math.max(1, Math.round(Math.min(w, h) / 400));
+  // Otsu sobre histograma subamostrado: separa papel (claro) de mesa (escura)
+  const hist = new Float64Array(256);
+  let n = 0;
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) { hist[gray[y * w + x]]++; n++; }
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = -1, thr = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = n - wB; if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > best) { best = v; thr = t; }
   }
-  return out;
+  // projeções da máscara clara
+  const colF = new Float32Array(w), rowF = new Float32Array(h);
+  let tot = 0;
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
+    if (gray[y * w + x] > thr) { colF[x]++; rowF[y]++; tot++; }
+  }
+  if (tot < 50) return null;
+  const lim = (arr, len, frac) => {
+    let max = 0; for (let i = 0; i < len; i++) if (arr[i] > max) max = arr[i];
+    const c = max * frac;
+    let a = 0, b = len - 1;
+    while (a < len && arr[a] < c) a++;
+    while (b > a && arr[b] < c) b--;
+    return [a, b];
+  };
+  const [x0, x1] = lim(colF, w, 0.35);
+  const [y0, y1] = lim(rowF, h, 0.35);
+  if (x1 - x0 < w * 0.15 || y1 - y0 < h * 0.10) return null;
+  return { x0, y0, x1, y1, thr };
+}
+
+export function findFiducials(gray, w, h, opts = {}) {
+  // 1) tenta localizar a folha e buscar nos cantos DELA (robusto a folha
+  //    pequena/deslocada no quadro); 2) se falhar, cai para os cantos da imagem.
+  const boxes = [];
+  const bb = opts.bbox ?? findSheetBBox(gray, w, h);
+  if (bb) {
+    const m = Math.round(Math.min(bb.x1 - bb.x0, bb.y1 - bb.y0) * 0.05);
+    boxes.push({ x0: Math.max(0, bb.x0 - m), y0: Math.max(0, bb.y0 - m),
+                 x1: Math.min(w, bb.x1 + m), y1: Math.min(h, bb.y1 + m) });
+  }
+  boxes.push({ x0: 0, y0: 0, x1: w, y1: h });      // fallback: quadro inteiro
+
+  const win = opts.win ?? 0.30;
+  for (const b of boxes) {
+    const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+    const ww = Math.max(8, Math.floor(bw * win)), wh = Math.max(8, Math.floor(bh * win));
+    const cantos = [
+      [b.x0, b.y0], [b.x1 - ww, b.y0], [b.x0, b.y1 - wh], [b.x1 - ww, b.y1 - wh],
+    ];
+    const out = [];
+    let ok = true;
+    for (const [ox, oy] of cantos) {
+      const c = darkestSquareBlob(gray, w, h, Math.max(0, ox), Math.max(0, oy),
+        Math.min(ww, w - Math.max(0, ox)), Math.min(wh, h - Math.max(0, oy)));
+      if (!c) { ok = false; break; }
+      out.push(c);
+    }
+    if (ok) return out;
+  }
+  return null;
 }
 
 function darkestSquareBlob(gray, w, h, ox, oy, ww, wh) {
@@ -215,14 +270,18 @@ export function plausibleFiducials(fid, w, h) {
     area += x1 * y2 - x2 * y1;
   }
   area = Math.abs(area) / 2;
-  if (area < 0.25 * w * h) return false;
+  // Área mínima baixa (12%): sem recorte, um celular em RETRATO fotografando a
+  // ficha deitada deixa a folha ocupando ~23% do quadro, o que é legítimo. Quem
+  // discrimina lixo aqui é a PROPORÇÃO (abaixo), não a área — o quadrilátero
+  // verdadeiro dos fiduciais é 276×189mm = 1.46.
+  if (area < 0.12 * w * h) return false;
   // proporção média largura/altura do quadrilátero
   const wTop = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]);
   const wBot = Math.hypot(br[0] - bl[0], br[1] - bl[1]);
   const hEsq = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
   const hDir = Math.hypot(br[0] - tr[0], br[1] - tr[1]);
   const ratio = ((wTop + wBot) / 2) / ((hEsq + hDir) / 2);
-  if (ratio < 1.0 || ratio > 2.2) return false;
+  if (ratio < 1.10 || ratio > 2.00) return false;   // verdadeiro 1.46 ± perspectiva
   // lados opostos não podem divergir absurdamente (perspectiva extrema/lixo)
   if (Math.max(wTop, wBot) / Math.min(wTop, wBot) > 1.8) return false;
   if (Math.max(hEsq, hDir) / Math.min(hEsq, hDir) > 1.8) return false;
@@ -298,14 +357,21 @@ function refineOffset(gray, w, h, H, template) {
     return s;
   };
   let best = { v: -1, dx: 0, dy: 0 };
+  const todos = [];
   for (let dy = -3; dy <= 3; dy += 0.5) for (let dx = -2; dx <= 2; dx += 0.5) {
-    const v = score(dx, dy); if (v > best.v) best = { v, dx, dy };
+    const v = score(dx, dy); todos.push(v);
+    if (v > best.v) best = { v, dx, dy };
   }
   for (let dy = best.dy - 0.5; dy <= best.dy + 0.5; dy += 0.25)
     for (let dx = best.dx - 0.5; dx <= best.dx + 0.5; dx += 0.25) {
       const v = score(dx, dy); if (v > best.v) best = { v, dx, dy };
     }
-  return { dx: best.dx, dy: best.dy };
+  // NITIDEZ DO PICO = evidência de que a grade impressa está mesmo ali.
+  // Numa folha de verdade, os contornos das bolhas criam um máximo bem
+  // destacado; sobre lixo (sombra, mesa, textura), a superfície é plana.
+  todos.sort((a, b) => a - b);
+  const mediana = todos[todos.length >> 1] || 1;
+  return { dx: best.dx, dy: best.dy, pico: best.v / (mediana || 1) };
 }
 
 export function readSheet(gray, w, h, template, opts = {}) {
@@ -328,7 +394,12 @@ export function readSheet(gray, w, h, template, opts = {}) {
   if (!H) return { ok: false, erro: 'homografia degenerada' };
 
   // 2º refino: deslocamento fino pelos contornos impressos (auto-calibração)
-  const off = opts.skipRefine ? { dx: 0, dy: 0 } : refineOffset(gray, w, h, H, template);
+  const off = opts.skipRefine ? { dx: 0, dy: 0, pico: 99 } : refineOffset(gray, w, h, H, template);
+  // Sem pico de contorno não há grade impressa sob a homografia: é enquadramento
+  // errado ou lixo (sombra/mesa lidos como fiduciais). Melhor recusar do que
+  // devolver marcas inventadas.
+  if (!opts.skipRefine && off.pico < 1.04)
+    return { ok: false, erro: 'a folha não foi reconhecida sob os cantos detectados — reenquadre' };
 
   // referência de preto da folha: mediana da intensidade nos 4 fiduciais
   const darks = fid.map(([cx, cy]) => {

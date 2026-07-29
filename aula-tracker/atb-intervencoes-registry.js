@@ -12,6 +12,8 @@ export const INTERVENCOES = {
     "alvo": "atb-form-engine.js",
     "promovivel": true,
     "descricao": "Gatilho de IA: história narrativa. Blur informativo + bloqueio condicional no submit (obrigatoriedade), fail-open com tag. Regra vem de schema.narrativaCond; sem regra = nao bloqueia (producao segura).",
+    "titulo": "Aviso de história telegráfica",
+    "explicacao": "Quando o prescritor escreve uma história muito curta (só um diagnóstico, sem descrição do quadro), a IA avisa e pede para detalhar antes de enviar. Se a IA estiver fora do ar, não trava o envio.",
     "transformacoes": [
       {
         "nota": "state",
@@ -50,6 +52,8 @@ export const INTERVENCOES = {
     "alvo": "atb-form-engine.js",
     "promovivel": false,
     "descricao": "CÓDIGO SÓ-DE-TESTE: schema vem de ATB_SCHEMA_INST. NÃO promover — só o ambiente de teste usa.",
+    "titulo": "Schema de teste",
+    "explicacao": "Faz o ambiente de teste usar um schema separado. É só do teste — nunca vai para o formulário real.",
     "transformacoes": [
       {
         "ancora": "      fetch('/atb/api/form-schema?inst=' + encodeURIComponent(inst))",
@@ -63,6 +67,8 @@ export const INTERVENCOES = {
     "alvo": "atb-form-engine.js",
     "promovivel": true,
     "descricao": "Fase 1 da triagem de ISC: le historia_clinica.iscCond, pede o rotulo 'isc', confirma com o prescritor. 'Sim' move foco_infeccao para a opcao de sitio cirurgico do proprio schema. Nao bloqueia. Inclui o conserto do botao durante a checagem.",
+    "titulo": "Pergunta sobre infecção cirúrgica",
+    "explicacao": "Quando a história sugere infecção de sítio cirúrgico, pergunta ao prescritor se confirma. Se sim, marca o foco como cirúrgico automaticamente. Não bloqueia o envio.",
     "transformacoes": [
       {
         "ancora": "    var hUltimoRef = React.useRef('');",
@@ -106,6 +112,8 @@ export const INTERVENCOES = {
     "alvo": "atb-form-engine.js",
     "promovivel": false,
     "descricao": "SO-TESTE (inclui SOFA e celulas de matriz): botao que preenche os campos visiveis e vazios com dados plausiveis (pula historia_clinica; pac_nome vira ZZ_TESTE). NAO promover — um botao de lixo num formulario de prescricao real e inaceitavel.",
+    "titulo": "Botão de preenchimento falso",
+    "explicacao": "Botão que preenche a ficha com dados fictícios para testar. Não pode ir para o formulário real (é um formulário de prescrição de verdade).",
     "transformacoes": [
       {
         "ancora": "    function validar() {",

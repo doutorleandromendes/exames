@@ -37,20 +37,34 @@ function carregarIntervencoes() {
   return listarIntervencoes().map((i) => ({ ...i, _arquivo: i._nome + '.json' }));
 }
 
-// Estado de cada intervenção contra o engine de produção ATUAL: aplicável?
+// Estado de cada intervenção contra o engine de produção ATUAL.
+// Distingue três situações (o que acaba com o "âncora não casa" assustador):
+//   • pronta      → a âncora original casa no engine → ainda não aplicada, pode publicar
+//   • ja_aplicada → a âncora não casa MAS o resultado ('vira') já está no engine → já publicada
+//   • erro        → nem a âncora nem o resultado aparecem → o código mudou de forma inesperada
 function diagnosticar(prod, intervencoes) {
   return intervencoes.map((interv) => {
     const problemas = validarIntervencao(interv);
     const anc = (interv.transformacoes || []).map((t, i) => {
       const c = checarTransformacao(prod, t.ancora);
-      return { i, ...c, nota: t.nota || null };
+      // 'vira' pode ser grande; basta uma amostra estável estar presente no engine.
+      const amostra = String(t.vira || '').slice(0, 120);
+      const jaTem = amostra && prod.indexOf(amostra) !== -1;
+      return { i, ...c, jaAplicada: jaTem, nota: t.nota || null };
     });
+    const todasCasam = anc.every((a) => a.ok);
+    const todasJa = anc.length > 0 && anc.every((a) => a.jaAplicada);
+    // situação da intervenção como um todo:
+    let situacao;
+    if (todasCasam) situacao = 'pronta';
+    else if (todasJa) situacao = 'ja_aplicada';
+    else situacao = 'erro';
     return {
       nome: interv.nome, arquivo: interv._arquivo, descricao: interv.descricao || '',
+      titulo: interv.titulo || interv.nome, explicacao: interv.explicacao || '',
       promovivel: interv.promovivel === true, dependeDe: interv.dependeDe || [],
       formatoOk: problemas.length === 0, problemas,
-      // aplicável DIRETO em produção (só as sem dependeDe podem ser checadas isoladamente)
-      ancoras: anc, aplicavelDireto: anc.every((a) => a.ok),
+      ancoras: anc, aplicavelDireto: todasCasam, situacao,
     };
   });
 }
@@ -74,22 +88,34 @@ export function registerFormTransportadorRoutes(app, pool, adminRequired) {
       try { aplicarPilha(prod, promoviveis, { dry: false }); }
       catch (e) { pilhaOk = false; pilhaErro = e.message; }
 
+      // Cada intervenção vira um card com ESTADO claro (badge colorido) + explicação
+      // humana. A descrição técnica fica num "ver detalhes" para quem quiser rastrear.
+      const badgeDe = (d) => {
+        if (!d.promovivel) return { cor:'#80868b', bg:'#f1efe8', txt:'só do teste', desc:'Não entra no formulário real — é ferramenta de teste.' };
+        if (d.situacao === 'ja_aplicada') return { cor:'#1a8a52', bg:'#e6f4ea', txt:'já no ar', desc:'Já está no formulário. Nada a fazer.' };
+        if (d.situacao === 'pronta') return { cor:'#185fa5', bg:'#e6f1fb', txt:'pronta para publicar', desc:'Testada e pronta. Entra quando você baixar o motor.' };
+        return { cor:'#c5221f', bg:'#fcebeb', txt:'precisa reconferir', desc:'O código mudou de um jeito inesperado. Reconfira antes de publicar.' };
+      };
       const cardInterv = diag.map((d) => {
-        const cor = d.promovivel ? '#1a8a52' : '#80868b';
-        const tag = d.promovivel
-          ? '<span style="color:#1a8a52">✓ será promovida</span>'
-          : '<span style="color:#a4700a">só-teste — fica de fora</span>';
-        const estado = d.aplicavelDireto
-          ? '<span style="color:#1a8a52">aplicável</span>'
-          : (d.dependeDe.length
-              ? `<span class="nota">depende de ${esc(d.dependeDe.join(', '))} (aplicada na pilha)</span>`
-              : '<span style="color:#c5221f">âncora não casa — re-ancorar</span>');
-        return `<div style="border-left:3px solid ${cor};padding:8px 12px;margin:8px 0">
-          <div><strong>${esc(d.nome)}</strong> · ${tag}</div>
-          <div class="nota">${esc(d.descricao)}</div>
-          <div class="nota">alvo: ${esc(intervencoes.find((i)=>i.nome===d.nome).alvo)} · ${estado} · ${d.ancoras.length} transformação(ões)</div>
+        const b = badgeDe(d);
+        const tecnico = d.descricao
+          ? `<details style="margin-top:8px"><summary class="nota" style="cursor:pointer">ver detalhes técnicos</summary><div class="nota" style="margin-top:6px;white-space:pre-wrap">${esc(d.descricao)}<br>alvo: ${esc(intervencoes.find((i)=>i.nome===d.nome).alvo)} · ${d.ancoras.length} transformação(ões)</div></details>`
+          : '';
+        return `<div style="border:0.5px solid #e3e3dd;border-radius:12px;padding:14px 16px;margin:10px 0">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+            <span style="font-weight:600;font-size:15px">${esc(d.titulo)}</span>
+            <span style="font-size:12px;background:${b.bg};color:${b.cor};padding:2px 10px;border-radius:20px">${esc(b.txt)}</span>
+          </div>
+          ${d.explicacao ? `<div style="font-size:13px;color:#444;line-height:1.6">${esc(d.explicacao)}</div>` : ''}
+          <div style="font-size:12px;color:#80868b;margin-top:6px">${esc(b.desc)}</div>
+          ${tecnico}
         </div>`;
       }).join('');
+
+      // Resumo do topo: há algo a publicar, ou está tudo no ar?
+      const promProntas = diag.filter((d) => d.promovivel && d.situacao === 'pronta');
+      const promErro = diag.filter((d) => d.promovivel && d.situacao === 'erro');
+      const tudoNoAr = promProntas.length === 0 && promErro.length === 0;
 
       // diff legível das promovíveis
       const diffs = promoviveis.map((interv) => {
@@ -113,41 +139,57 @@ export function registerFormTransportadorRoutes(app, pool, adminRequired) {
         return false;
       })();
 
-      res.send(page('Transportador do formulário', `
+      res.send(page('Publicar mudanças do formulário', `
         <div class="card">
-          <h1>Transportador do formulário</h1>
-          <p class="mut">Promove uma mudança testada para produção. O engine é gerado como <strong>artefato para você baixar e commitar</strong> (o servidor não escreve no próprio código). O schema do HUSF é promovido no banco por ação direta.</p>
+          <h1>Publicar mudanças do formulário</h1>
+          <p class="mut">Leva o que você testou para o formulário de verdade. São dois passos, nesta ordem: primeiro o <strong>motor</strong> (o código), depois os <strong>campos</strong> (no banco). Nada muda no formulário sem você agir aqui.</p>
         </div>
 
+        ${tudoNoAr
+          ? `<div class="card" style="border-left:4px solid #1a8a52;background:#f3faf5">
+               <div style="font-weight:600;color:#1a7f37">✓ Tudo já publicado — nada a fazer agora</div>
+               <p class="nota" style="margin-top:4px">As melhorias testadas já estão no formulário. Esta tela só tem trabalho quando você cria algo novo para publicar.</p>
+             </div>`
+          : (promErro.length
+             ? `<div class="card" style="border-left:4px solid #c5221f;background:#fdf3f3">
+                  <div style="font-weight:600;color:#b3261e">⚠ Uma melhoria precisa ser reconferida</div>
+                  <p class="nota" style="margin-top:4px">O código de produção mudou de um jeito que não bate com o que foi testado. Veja qual abaixo antes de publicar.</p>
+                </div>`
+             : `<div class="card" style="border-left:4px solid #185fa5;background:#f3f8fd">
+                  <div style="font-weight:600;color:#185fa5">${promProntas.length} melhoria(s) pronta(s) para publicar</div>
+                  <p class="nota" style="margin-top:4px">Testadas e prontas. Siga o passo 1 abaixo para levá-las ao formulário.</p>
+                </div>`)}
+
         <div class="card">
-          <h2>Intervenções</h2>
+          <h2>Melhorias testadas</h2>
+          <p class="nota">Cada uma mostra o que faz e em que situação está.</p>
           ${cardInterv}
-          ${pilhaOk
-            ? '<p class="nota" style="color:#1a8a52;margin-top:8px">✓ a pilha promovível aplica limpo sobre a produção atual.</p>'
-            : `<p style="color:#c5221f;margin-top:8px">⚠ a pilha não aplica: ${esc(pilhaErro)} — produção mudou? Re-ancore antes de promover.</p>`}
         </div>
 
         <div class="card">
-          <h2>1 · Promover o ENGINE <span class="nota">(gera artefato)</span></h2>
-          <p class="nota">Gera <code>atb-form-engine.js</code> = produção + as intervenções promovíveis (${promoviveis.map((i)=>esc(i.nome)).join(' + ') || 'nenhuma'}). O <code>form-teste-schema-override</code> NÃO entra. Baixe e commite via GitHub.</p>
-          <form method="POST" action="/atb/admin/form-transportador/gerar-engine" ${pilhaOk ? '' : 'onsubmit="alert(\'A pilha não aplica limpo — resolva antes.\');return false"'}>
-            <button type="submit">⬇ Gerar atb-form-engine.js promovido</button>
+          <h2>Passo 1 · Baixar o motor <span class="nota">(o código)</span></h2>
+          <p class="nota">Gera o arquivo <code>atb-form-engine.js</code> com as melhorias prontas já embutidas (${promProntas.map((i)=>esc(i.titulo)).join(' + ') || (tudoNoAr ? 'nenhuma nova — as atuais já estão no ar' : 'nenhuma')}). Você baixa e sobe no GitHub. As ferramentas de teste ficam de fora.</p>
+          <form method="POST" action="/atb/admin/form-transportador/gerar-engine" ${pilhaOk ? '' : 'onsubmit="alert(\'Uma melhoria precisa ser reconferida — resolva antes.\');return false"'}>
+            <button type="submit">⬇ Baixar arquivo do motor</button>
+          </form>
+          ${pilhaOk ? '' : `<p class="nota" style="color:#c5221f;margin-top:8px">Não dá para baixar agora: ${esc(pilhaErro)}</p>`}
+        </div>
+
+        <div class="card">
+          <h2>Passo 2 · Atualizar os campos <span class="nota">(no banco) · só depois do deploy</span></h2>
+          <p class="nota">Estado atual: schema HUSF ${husfSchema ? ('versão <strong>' + esc(String(husfSchema.versao)) + '</strong> — posologia ' + (husfEstrut ? '<span style="color:#1a8a52">estruturada</span>' : '<span style="color:#a4700a">texto livre</span>')) : 'não encontrado'}. Atualizar grava uma nova versão dos campos no banco.</p>
+          <div style="background:#faeeda;border-radius:8px;padding:10px 14px;margin:8px 0;font-size:13px;color:#854f0b;line-height:1.6">
+            <strong>A ordem importa:</strong> só faça o passo 2 depois que o motor (passo 1) já estiver no ar. Se inverter, fichas novas gravam campos que os leitores ainda não sabem ler, e aparecem vazias.
+          </div>
+          <form method="POST" action="/atb/admin/form-transportador/promover-schema" onsubmit="return confirm('Atualizar os campos do HUSF no banco? Confirme que o motor (passo 1) já está no ar.')">
+            <button type="submit">Atualizar campos no banco</button>
           </form>
         </div>
 
         <div class="card">
-          <h2>2 · Promover o SCHEMA do HUSF <span class="nota">(ação no banco)</span></h2>
-          <p class="nota">Estado atual do schema HUSF: ${husfSchema ? ('versão ' + esc(String(husfSchema.versao)) + ' — posologia ' + (husfEstrut ? '<span style="color:#1a8a52">já estruturada</span>' : '<span style="color:#a4700a">texto livre</span>')) : 'não encontrado'}. Promover grava uma NOVA versão do HUSF com a posologia estruturada (as fichas novas passam a nascer no formato novo).</p>
-          <p style="color:#a4700a;font-size:13px"><strong>Ordem importa:</strong> só promova o schema DEPOIS que o engine promovido E os leitores (card/parecer/ficha) estiverem no ar. Senão, fichas novas gravam no formato novo e os leitores antigos mostram vazio.</p>
-          <form method="POST" action="/atb/admin/form-transportador/promover-schema" onsubmit="return confirm('Gravar nova versão do schema HUSF com posologia estruturada? Confirme que o engine e os leitores já estão no ar.')">
-            <button type="submit">Promover schema HUSF no banco</button>
-          </form>
-        </div>
-
-        <div class="card">
-          <h2>Diff das intervenções promovíveis</h2>
-          <p class="nota">Vermelho = produção atual · verde = após promoção. Revise antes de commitar.</p>
-          ${diffs || '<p class="nota">nenhuma intervenção promovível.</p>'}
+          <h2>O que exatamente vai mudar no código</h2>
+          <p class="nota">Para quem quiser conferir linha a linha. Vermelho = como está hoje · verde = como fica depois de publicar.</p>
+          ${diffs || '<p class="nota">nenhuma mudança nova a publicar.</p>'}
         </div>`));
     } catch (e) {
       console.error('[atb] transportador painel:', e.message);

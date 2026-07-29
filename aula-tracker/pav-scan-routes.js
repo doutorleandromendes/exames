@@ -60,7 +60,7 @@ self.addEventListener('fetch', e => {
 }
 
 const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>PAV · Leitura de folha</title>
 <style>
   :root{--pri:#0e6b52;--nc:#c0392b;--ok:#1e874b;--line:#d8e0dd;--mut:#607068}
@@ -71,44 +71,30 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
   #net{margin-left:auto;font-size:12px;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.18)}
   #net.off{background:#c0392b}
   main{padding:14px;max-width:640px;margin:0 auto}
-  video,canvas{width:100%;border-radius:12px;background:#000;display:block}
-  /* guia de enquadramento na proporção da folha: A4 PAISAGEM (297×210 = 1.414) */
-  /* O guia mantém SEMPRE 297:210 (o recorte depende disso). Para não estourar
-     em paisagem — onde a altura da tela é o limite — a largura é derivada da
-     altura disponível. Antes, width:100% gerava 640×453 numa área de 352px. */
-  .guide{position:relative;aspect-ratio:297/210;overflow:hidden;border-radius:12px;background:#000;
-         width:100%;max-width:calc((100dvh - 200px) * 1.4142);margin-inline:auto}
-  /* MODO CAPTURA EM TELA CHEIA: o guia ocupa a viewport inteira mantendo
-     297:210 (o recorte depende desse aspect), com os controles FLUTUANDO por
-     cima. Sem isso, em paisagem os controles comiam a altura e a janela ficava
-     MENOR que em retrato — o oposto do que o aviso de girar prometia. */
-  body.cap{overflow:hidden}
-  body.cap header, body.cap #intro, body.cap #camdiag, body.cap #rotaviso,
-  body.cap #fila, body.cap main>p{display:none}
-  body.cap main{padding:0;max-width:none}
-  body.cap .guide{position:fixed;inset:0;margin:auto;border-radius:0;z-index:5;
-    width:auto;height:auto;max-width:min(100vw, calc(100dvh * 1.4142));max-height:min(100dvh, calc(100vw / 1.4142))}
-  body.cap #ctrls{position:fixed;left:0;right:0;bottom:calc(10px + env(safe-area-inset-bottom));
-    z-index:6;display:flex;gap:8px;justify-content:center;margin:0;padding:0 10px}
-  body.cap #ctrls button{box-shadow:0 3px 14px rgba(0,0,0,.55)}
-  body.cap #sair{display:inline-block}
-  #sair{display:none}
-  .guide video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-  .guide .frame{position:absolute;inset:5% 4%;border:2px dashed rgba(255,255,255,.45);border-radius:6px;pointer-events:none;transition:border-color .2s}
-  .guide.lock .frame{border-color:#7ee0b0;border-style:solid}
-  .corner{position:absolute;width:26px;height:26px;border:3px solid rgba(255,255,255,.35);pointer-events:none;transition:border-color .15s,transform .15s}
+  canvas{width:100%;border-radius:12px;background:#000;display:block}
+  /* CAPTURA EM TELA CHEIA, SEMPRE. Sem opt-in por toque (a versão anterior
+     exigia tocar p/ ampliar e ninguém tocava) e sem recorte: o vídeo aparece
+     inteiro (object-fit:contain) e é capturado inteiro — o que se vê é
+     exatamente o que é lido, com o campo de visão máximo da câmera. */
+  #step1{position:fixed;inset:0;background:#000;z-index:20;display:flex;
+         align-items:center;justify-content:center}
+  #step1 video{width:100%;height:100%;object-fit:contain;background:#000}
+  #alvo{position:absolute;border:2px dashed rgba(255,255,255,.5);border-radius:4px;
+        pointer-events:none;transition:border-color .18s}
+  #alvo.ok{border-color:#7ee0b0;border-style:solid}
+  .corner{position:absolute;width:26px;height:26px;border:3px solid rgba(255,255,255,.35);
+          pointer-events:none;transition:border-color .15s,transform .15s}
   .corner.on{border-color:#7ee0b0;transform:scale(1.12)}
-  .c-tl{top:5%;left:4%;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
-  .c-tr{top:5%;right:4%;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
-  .c-bl{bottom:5%;left:4%;border-right:0;border-top:0;border-radius:0 0 0 6px}
-  .c-br{bottom:5%;right:4%;border-left:0;border-top:0;border-radius:0 0 6px 0}
-  .hint{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:13px;font-weight:600;
-        color:#fff;text-shadow:0 1px 4px #000;pointer-events:none}
+  .hint{position:absolute;left:0;right:0;top:calc(10px + env(safe-area-inset-top));
+        text-align:center;font-size:13px;font-weight:600;color:#fff;
+        text-shadow:0 1px 5px #000;pointer-events:none;padding:0 12px}
   .hint.ok{color:#7ee0b0}
-  .ring{position:absolute;top:10px;right:12px;width:34px;height:34px;border-radius:50%;
-        border:3px solid rgba(255,255,255,.25);pointer-events:none}
-  .ring i{position:absolute;inset:-3px;border-radius:50%;border:3px solid #7ee0b0;
-          clip-path:inset(0 0 100% 0);transition:clip-path .12s}
+  #camdiag{position:absolute;left:0;right:0;bottom:calc(74px + env(safe-area-inset-bottom));
+           text-align:center;font-size:11px;color:#9fb3ab;text-shadow:0 1px 4px #000;pointer-events:none}
+  #ctrls{position:absolute;left:0;right:0;bottom:calc(12px + env(safe-area-inset-bottom));
+         display:flex;gap:8px;justify-content:center;padding:0 10px;margin:0}
+  #ctrls button{box-shadow:0 3px 14px rgba(0,0,0,.6)}
+  #erro{position:absolute;inset:auto 16px auto 16px;top:40%;color:#f0a89e;text-align:center;font-size:14px}
   .rot{background:#3d2a10;color:#ffd98a;border:1px solid #6b4a18;border-radius:10px;padding:10px 12px;margin:10px 0;font-size:13px}
   button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 16px;background:var(--pri);color:#fff}
   button.sec{background:#243330;color:#cfe6dd}
@@ -127,22 +113,17 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
 <header><b>PAV · Leitura de folha</b><span id="net">•••</span></header>
 <main>
   <div id="step1">
-    <p id="intro"><small>Enquadre a folha inteira, com os quatro quadrados pretos dos cantos dentro do quadro. A captura é <b>automática</b> quando os quatro forem reconhecidos. <b>Deitar o celular</b> aumenta a janela e permite aproximar mais.</small></p>
-    <div class="rot" id="rotaviso" hidden>📱 Gire o celular para a horizontal — a janela fica maior e você pode aproximar mais.</div>
-    <div id="camdiag" style="font-size:11px;color:#607068;margin:4px 0"></div>
-    <div class="guide" id="guide">
-      <video id="v" playsinline autoplay muted></video>
-      <div class="frame"></div>
-      <div class="corner c-tl" id="ctl"></div><div class="corner c-tr" id="ctr"></div>
-      <div class="corner c-bl" id="cbl"></div><div class="corner c-br" id="cbr"></div>
-      <div class="ring"><i id="ringfill"></i></div>
-      <div class="hint" id="hint">procurando os cantos…</div>
-    </div>
-    <div class="row" id="ctrls">
+    <video id="v" playsinline autoplay muted></video>
+    <div id="alvo"></div>
+    <div class="corner" id="ctl"></div><div class="corner" id="ctr"></div>
+    <div class="corner" id="cbl"></div><div class="corner" id="cbr"></div>
+    <div class="hint" id="hint">procurando os cantos…</div>
+    <div id="camdiag"></div>
+    <div id="erro" hidden></div>
+    <div id="ctrls">
       <button id="shot">📷 Capturar</button>
       <button class="sec" id="auto">⏸ Auto</button>
       <button class="sec" id="flip">↺</button>
-      <button class="sec" id="sair">✕</button>
     </div>
   </div>
 
@@ -195,67 +176,101 @@ fetch('/pav/api/fichas-ativas').then(r=>r.json()).then(d=>{fichas=d.fichas||[];}
 
 async function startCam(){
   if(stream) stream.getTracks().forEach(t=>t.stop());
-  // pede PAISAGEM: a ficha é A4 deitada (1.414). O navegador aproxima o mais perto possível.
-  // 4:3 é o sensor nativo (iPhone/Android). CRÍTICO: como recortamos p/ 1.414,
-  // um stream 16:9 (1.778) perderia 20% da LARGURA — reduzindo o campo de visão
-  // e obrigando a afastar o celular (menos px/mm na folha). Já um 4:3 (1.333)
-  // perde só ALTURA no recorte, mantendo o FOV horizontal intacto.
-  stream = await navigator.mediaDevices.getUserMedia({video:{
-    facingMode:facing,
-    width:{ideal:4032}, height:{ideal:3024},   // 4:3, resolução máxima usual
-    aspectRatio:{ideal:4/3}
-  }});
-  $('#v').srcObject = stream;
-  await $('#v').play().catch(()=>{});
-  // diagnóstico: o que a câmera realmente entregou (aspect errado = FOV perdido)
-  const t=stream.getVideoTracks()[0], st=t?t.getSettings():{};
-  if(st.width){
-    const a=(st.width/st.height);
-    const perda = a>1.4142 ? (1-1.4142/a) : 0;
-    $('#camdiag').textContent = 'câmera: '+st.width+'×'+st.height+' ('+a.toFixed(2)+')'
-      + (perda>0.02 ? ' · ⚠ recorte perde '+Math.round(perda*100)+'% da largura' : ' · campo de visão íntegro');
+  $('#erro').hidden=true;
+  // CADEIA DE FALLBACK. A versão anterior pedia 4032×3024 — resolução de FOTO;
+  // streams de VÍDEO no iPhone vão até ~1920×1440 (4:3) e o pedido devolvia um
+  // stream que não reproduzia (tela preta). Aqui tentamos do melhor ao básico e
+  // paramos no primeiro que funciona.
+  const tentativas = [
+    {facingMode:{ideal:facing}, width:{ideal:1920}, height:{ideal:1440}},  // 4:3 nítido
+    {facingMode:{ideal:facing}, width:{ideal:1280}, height:{ideal:960}},   // 4:3 seguro
+    {facingMode:{ideal:facing}},
+    true,
+  ];
+  let err=null;
+  for(const c of tentativas){
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({video:c, audio:false});
+      break;
+    }catch(e){ err=e; stream=null; }
   }
+  if(!stream){
+    $('#erro').hidden=false;
+    $('#erro').textContent='Não consegui abrir a câmera'+(err?(' ('+(err.name||err)+')'):'')
+      +'. Verifique a permissão de câmera do navegador e se a página está em HTTPS.';
+    return;
+  }
+  const v=$('#v');
+  v.srcObject = stream;
+  v.setAttribute('playsinline','');    // iOS: sem isso o vídeo abre em tela cheia nativa
+  try{ await v.play(); }catch(e){}
+  // espera as dimensões chegarem (iOS demora alguns frames)
+  for(let i=0;i<40 && !v.videoWidth;i++) await new Promise(r=>setTimeout(r,50));
+  const t=stream.getVideoTracks()[0], st=t?t.getSettings():{};
+  $('#camdiag').textContent = v.videoWidth
+    ? ('câmera '+v.videoWidth+'×'+v.videoHeight+(st.facingMode?' · '+st.facingMode:''))
+    : 'câmera sem sinal de vídeo';
+  posicionarAlvo();
   iniciarDeteccao();
 }
-startCam().catch(()=>{ $('#v').outerHTML='<p style="color:#f0a89e">Sem acesso à câmera. Habilite a permissão (e use HTTPS).</p>'; });
 $('#flip').onclick=()=>{ facing = facing==='environment'?'user':'environment'; startCam(); };
 // entra em tela cheia ao tocar no guia; sai no ✕ (a leitura também sai)
-$('#guide').addEventListener('click', e=>{ if(e.target.closest('button')) return; setCap(true); });
-$('#sair').onclick=(e)=>{ e.stopPropagation(); setCap(false); };
-function setCap(on){ document.body.classList.toggle('cap', on); }
 $('#auto').onclick=()=>{ autoOn=!autoOn; $('#auto').textContent = autoOn?'⏸ Pausar automático':'▶ Retomar automático';
   if(autoOn) iniciarDeteccao(); else pararDeteccao(); setHint(autoOn?'procurando os cantos…':'automático pausado','') };
 
 // avisa se o telefone está em pé (a ficha é deitada)
 function checaOrientacao(){
   const retrato = window.innerHeight > window.innerWidth;
-  $('#rotaviso').hidden = !retrato;
+  const h=$('#hint');
+  if(retrato && !h.dataset.lock) h.dataset.dica='deite o celular p/ enquadrar maior';
 }
 addEventListener('resize', checaOrientacao); checaOrientacao();
 
-// ── WYSIWYG: capturar EXATAMENTE o que o preview 'cover' mostra ────────────
-// O <video> usa object-fit:cover dentro do guia 297:210 — o navegador RECORTA
-// o preview. Capturar o frame bruto leria outra imagem (fiduciais fora dos
-// cantos; falsos positivos em sombras/móveis). coverRect calcula o retângulo-
-// fonte exato do cover; grabFrame desenha SÓ ele: o que se vê é o que se lê.
-const GUIA_ASPECT = 297/210;
-function coverRect(vw, vh, aspect){
-  if (vw/vh > aspect) { const sh=vh, sw=Math.round(vh*aspect); return {sx:(vw-sw>>1), sy:0, sw, sh}; }
-  const sw=vw, sh=Math.round(vw/aspect); return {sx:0, sy:(vh-sh>>1), sw, sh};
-}
+// ── SEM RECORTE: o frame inteiro é exibido (contain) e capturado ───────────
+// Toda a classe de bugs anterior (foto diferente do preview, campo de visão
+// perdido, fiduciais fora do quadro) vinha de recortar o frame. Sem recorte:
+// o que se vê é o frame, e o frame é o que se lê. A defesa contra cantos
+// escuros do ambiente é a validação de plausibilidade, no leitor.
 function grabFrame(v, maxW){
-  const r=coverRect(v.videoWidth, v.videoHeight, GUIA_ASPECT);
-  const w=Math.min(maxW||r.sw, r.sw), h=Math.round(w*r.sh/r.sw);
-  const c=grabFrame._c||(grabFrame._c=document.createElement('canvas'));
+  const VW=v.videoWidth, VH=v.videoHeight;
+  const w = maxW ? Math.min(maxW, VW) : VW;
+  const h = Math.round(VH*w/VW);
+  const c = grabFrame._c || (grabFrame._c = document.createElement('canvas'));
   c.width=w; c.height=h;
   const cx=c.getContext('2d',{willReadFrequently:true});
-  cx.drawImage(v, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
+  cx.drawImage(v, 0,0,VW,VH, 0,0,w,h);
   const im=cx.getImageData(0,0,w,h);
   const g=new Uint8Array(w*h);
   for(let i=0,j=0;i<im.data.length;i+=4,j++)
     g[j]=(im.data[i]*0.299+im.data[i+1]*0.587+im.data[i+2]*0.114)|0;
   return {gray:g, w, h};
 }
+
+// desenha o retângulo-guia (297:210) sobre a ÁREA REALMENTE EXIBIDA do vídeo
+// (object-fit:contain deixa tarjas pretas — o guia não pode invadi-las)
+function posicionarAlvo(){
+  const v=$('#v'), al=$('#alvo');
+  if(!v.videoWidth){ al.style.display='none'; return; }
+  al.style.display='block';
+  const CW=v.clientWidth, CH=v.clientHeight;
+  const esc=Math.min(CW/v.videoWidth, CH/v.videoHeight);   // contain
+  const dw=v.videoWidth*esc, dh=v.videoHeight*esc;         // área exibida
+  const dx=(CW-dw)/2, dy=(CH-dh)/2;
+  const A=297/210;
+  let tw,th;
+  if(dw/dh > A){ th=dh*0.92; tw=th*A; } else { tw=dw*0.92; th=tw/A; }
+  const tx=dx+(dw-tw)/2, ty=dy+(dh-th)/2;
+  const r=v.getBoundingClientRect(), p=$('#step1').getBoundingClientRect();
+  const ox=r.left-p.left, oy=r.top-p.top;
+  Object.assign(al.style,{left:(ox+tx)+'px',top:(oy+ty)+'px',width:tw+'px',height:th+'px'});
+  const C=13;
+  const pos=[[tx,ty],[tx+tw-C*2,ty],[tx,ty+th-C*2],[tx+tw-C*2,ty+th-C*2]];
+  ['#ctl','#ctr','#cbl','#cbr'].forEach((id,i)=>{
+    Object.assign($(id).style,{left:(ox+pos[i][0])+'px',top:(oy+pos[i][1])+'px'});
+  });
+}
+addEventListener('resize', posicionarAlvo);
+addEventListener('orientationchange', ()=>setTimeout(posicionarAlvo,300));
 
 // ── loop de detecção em baixa resolução (1–8ms por frame; barato) ──────────
 function pararDeteccao(){ if(detTimer){ clearInterval(detTimer); detTimer=null; } }
@@ -272,21 +287,22 @@ function iniciarDeteccao(){
     if(f){
       estaveis++;
       setRing(estaveis/ESTAVEIS_P_DISPARO);
-      $('#guide').classList.add('lock');
       setHint(estaveis>=ESTAVEIS_P_DISPARO?'capturando…':'4 cantos ✓ segure firme','ok');
       if(estaveis>=ESTAVEIS_P_DISPARO){ estaveis=0; setRing(0); capturar(true); }
     } else {
       estaveis=0; setRing(0);
-      $('#guide').classList.remove('lock');
       setHint('procurando os cantos… aproxime e enquadre a folha toda','');
     }
   }, DET_MS);
 }
 function marcarCantos(f){
-  const ids=['#ctl','#ctr','#cbl','#cbr'];
-  ids.forEach((id,i)=> $(id).classList.toggle('on', !!(f && f[i])));
+  ['#ctl','#ctr','#cbl','#cbr'].forEach((id,i)=> $(id).classList.toggle('on', !!(f && f[i])));
+  $('#alvo').classList.toggle('ok', !!f);
 }
-function setRing(frac){ $('#ringfill').style.clipPath = 'inset('+Math.max(0,(1-Math.min(1,frac))*100)+'% 0 0 0)'; }
+function setRing(frac){
+  // progresso da captura automática mostrado no próprio texto do topo
+  const el=$('#ringfill'); if(el) el.style.clipPath='inset('+Math.max(0,(1-Math.min(1,frac))*100)+'% 0 0 0)';
+}
 function setHint(txt,cls){ const h=$('#hint'); h.textContent=txt; h.className='hint'+(cls?' '+cls:''); }
 
 // ── captura (automática ou manual) ────────────────────────────────────────
@@ -295,7 +311,8 @@ function capturar(automatico){
   lendo=true;
   try{
     const v=$('#v');
-    // resolução máxima DO RECORTE COVER — a mesma imagem que o usuário enquadrou
+    if(!v.videoWidth){ lendo=false; return; }
+    // frame INTEIRO em resolução máxima — exatamente o que está no visor
     const {gray, w:cw, h:ch} = grabFrame(v);
     // PISO DE RESOLUÇÃO: abaixo de ~900px de largura a bolha tem <11px e a
     // leitura degrada. Avisa (não bloqueia: melhor ler com aviso que travar).
@@ -345,7 +362,6 @@ function thumbCapturada(gray,w,h,fid){
   return c.toDataURL();
 }
 function mostrar(res){
-  setCap(false);
   $('#step1').hidden=true; $('#step2').hidden=false;
   $('#fidbox').innerHTML='<b>✔ Folha reconhecida</b> <small>'+lastRead.w+'×'+lastRead.h+'px'
     + (res.refino? ' · ajuste '+res.refino.off.dx+','+res.refino.off.dy+'mm':'')+'</small>'
@@ -407,7 +423,7 @@ function mostrar(res){
     : '<small>Nenhum campo numérico marcado.</small>';
 }
 
-$('#again').onclick=()=>{ $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); iniciarDeteccao(); };
+$('#again').onclick=()=>{ $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); posicionarAlvo(); iniciarDeteccao(); };
 
 // ── montar payload e enfileirar ──
 $('#enq').onclick=async ()=>{
@@ -452,7 +468,7 @@ $('#enq').onclick=async ()=>{
 
   const job={ ficha_id:fichaId, criado_em:Date.now(), celulas:cells, ocr_amostras:ocrAmostras };
   await enfileirar(job);
-  $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); iniciarDeteccao();
+  $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); posicionarAlvo(); iniciarDeteccao();
   renderFila(); setNet();
 };
 

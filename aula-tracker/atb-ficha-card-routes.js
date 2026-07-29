@@ -483,7 +483,7 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
       if (f.obito) metaParts.push('✝ óbito' + (f.data_obito ? ' ' + _dt(f.data_obito) : ''));
 
       const culturas = await buscarCulturasDaFicha(pool, f);
-      const hemo = await buscarHemoDaFicha(pool, f);
+      const hemo = await buscarHemoDaFicha(pool, f, 5, 5);   // banner só ±5d da ficha (evita hemo antiga confundir)
       const mdr = await buscarMdrDaFicha(pool, f);
       const _np = await buscarNomePacs(pool, f.instituicao_id, f.prontuario);
       const _divergePacs = _np && nomeDivergePacs(f.paciente_nome_raw || f.paciente_nome, _np.nome_pacs_norm);

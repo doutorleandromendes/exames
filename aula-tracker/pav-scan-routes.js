@@ -545,14 +545,27 @@ function capturar(automatico){
     if(navigator.vibrate) navigator.vibrate(60);           // confirmação tátil
     pararDeteccao();
     lastRead={res,gray,w:cw,h:ch};
-    mostrar(res);
+    // Blindagem: pararDeteccao() já matou o loop. Se mostrar() lançar, o app
+    // ficaria eternamente em "capturando…" sem tela e sem detecção. Aqui,
+    // qualquer falha volta para a câmera com o motivo à vista.
+    try { mostrar(res); }
+    catch(e){
+      $('#step1').hidden=false; $('#step2').hidden=true;
+      setHint('erro ao montar a revisão: '+((e&&(e.message||e.name))||e),'');
+      if(window.__bootErro) window.__bootErro('mostrar(): '+((e&&e.stack)||e));
+      estaveis=0; iniciarDeteccao();
+    }
   } finally { lendo=false; }
 }
 $('#shot').onclick=()=>capturar(false);
 
 function crop(gray,w,box){
-  const [x,y,bw,bh]=box; const c=document.createElement('canvas');
-  c.width=Math.max(1,bw); c.height=Math.max(1,bh); const cx=c.getContext('2d');
+  // limita o recorte: uma homografia ruim pode gerar caixas enormes e um canvas
+  // gigante trava o aparelho
+  let [x,y,bw,bh]=box.map(v=>Math.round(v));
+  bw=Math.max(1,Math.min(bw,600)); bh=Math.max(1,Math.min(bh,300));
+  const c=document.createElement('canvas');
+  c.width=bw; c.height=bh; const cx=c.getContext('2d');
   const id=cx.createImageData(c.width,c.height);
   for(let yy=0;yy<c.height;yy++)for(let xx=0;xx<c.width;xx++){
     const sx=x+xx,sy=y+yy,g=(sy>=0&&sx>=0&&sy*w+sx<gray.length)?gray[sy*w+sx]:255,o=(yy*c.width+xx)*4;
@@ -599,41 +612,68 @@ function mostrar(res){
   $('#marks').innerHTML=linhas;
   $('#marksum').textContent = nS+' sim · '+nN+' não · '+nA+' dupla(!) · '+nV+' vazias';
 
-  // numéricos: OCR com portão de confiança + recorte para revisão/auditoria
-  const nums=[]; window._ocr = [];   // guarda amostras p/ log
-  let baixaConf=0;
-  for(const nb of res.numeric_boxes){
+  // ── NUMÉRICOS: processamento INCREMENTAL ────────────────────────────────
+  // São 63 campos: cada um gera um PNG (toDataURL, lento no iOS) e roda a rede
+  // por dígito. Fazer isso de uma vez, sincronamente, congelava a interface por
+  // muitos segundos ANTES da tela aparecer — parecia travado em "capturando…".
+  // Agora a revisão abre na hora e os campos entram em lotes, com progresso.
+  window._ocr = [];
+  $('#nums').innerHTML = '<small id="numprog">preparando os campos numéricos…</small>';
+  processarNumericos(res).catch(e=>{
+    $('#nums').innerHTML = '<small style="color:#f0a89e">falha ao ler os campos numéricos: '
+      + ((e&&(e.message||e.name))||e) + '</small>';
+  });
+}
+
+async function processarNumericos(res){
+  const alvos=[];
+  for(const nb of res.numeric_boxes)
     nb.dias.forEach((perList,d)=> perList.forEach((caixas,p)=>{
-      if(!caixas.length) return;
+      if(caixas && caixas.length) alvos.push({nb,d,p,caixas});
+    }));
+
+  const prog=$('#numprog');
+  const partes=[]; let baixaConf=0, feito=0;
+  const LOTE=6;                      // respira entre lotes p/ a UI não congelar
+
+  for(const a of alvos){
+    const {nb,d,p,caixas}=a;
+    let img='', rn={valor:null,conf_min:0,vazio:true};
+    try{
       const xs=caixas.map(b=>b[0]), ys=caixas.map(b=>b[1]);
       const x=Math.min(...xs), y=Math.min(...ys);
       const bw=Math.max(...caixas.map(b=>b[0]+b[2]))-x, bh=Math.max(...caixas.map(b=>b[1]+b[3]))-y;
-      const img=crop(lastRead.gray,lastRead.w,[x,y,bw,bh]);
+      img=crop(lastRead.gray,lastRead.w,[x,y,bw,bh]);
+      rn=readNumber(lastRead.gray,lastRead.w,lastRead.h,caixas);
+    }catch(e){ /* um campo ruim não derruba a revisão inteira */ }
 
-      // ── OCR do campo ──
-      const rn = readNumber(lastRead.gray, lastRead.w, lastRead.h, caixas);
-      const per = nb.por_dia? '' : (p===0?'Dia':'Noite');
-      const id='n_'+nb.key+'_'+d+'_'+p;
-      const val = rn.vazio ? '' : (rn.valor ?? '');
-      const revisar = !rn.vazio && rn.conf_min < CONF_OK;
-      if(revisar) baixaConf++;
-      const cls = rn.vazio ? '' : (revisar ? 'style="border-color:#c0392b"' : 'style="border-color:#1e874b"');
-      const tag = rn.vazio ? '' : (revisar
-        ? '<span class="mk N" title="confirme">revisar '+Math.round(rn.conf_min*100)+'%</span>'
-        : '<span class="mk S">'+Math.round(rn.conf_min*100)+'%</span>');
+    const per = nb.por_dia? '' : (p===0?'Dia':'Noite');
+    const id='n_'+nb.key+'_'+d+'_'+p;
+    const val = rn.vazio ? '' : (rn.valor ?? '');
+    const revisar = !rn.vazio && rn.conf_min < CONF_OK;
+    if(revisar) baixaConf++;
+    const cls = rn.vazio ? '' : (revisar ? 'style="border-color:#c0392b"' : 'style="border-color:#1e874b"');
+    const tag = rn.vazio ? '' : (revisar
+      ? '<span class="mk N" title="confirme">revisar '+Math.round(rn.conf_min*100)+'%</span>'
+      : '<span class="mk S">'+Math.round(rn.conf_min*100)+'%</span>');
 
-      window._ocr.push({ key:nb.key, d, p, turno:(p===0?'D':'N'), por_dia:nb.por_dia,
-        png:img, valor_ocr:String(val), conf:rn.conf_min, revisar });
+    window._ocr.push({ key:nb.key, d, p, turno:(p===0?'D':'N'), por_dia:nb.por_dia,
+      png:img, valor_ocr:String(val), conf:rn.conf_min, revisar });
 
-      nums.push('<div class="num"><img src="'+img+'"><small>'+nb.label+' · D'+(d+1)+' '+per+'</small>'+
-        '<input id="'+id+'" data-key="'+nb.key+'" data-d="'+d+'" data-p="'+p+'" inputmode="numeric" '+
-        'value="'+val+'" '+cls+'> '+tag+'</div>');
-    }));
+    partes.push('<div class="num">'+(img?'<img src="'+img+'">':'')+'<small>'+nb.label+' · D'+(d+1)+' '+per+'</small>'+
+      '<input id="'+id+'" data-key="'+nb.key+'" data-d="'+d+'" data-p="'+p+'" inputmode="numeric" '+
+      'value="'+val+'" '+cls+'> '+tag+'</div>');
+
+    if(++feito % LOTE === 0){
+      if(prog) prog.textContent = 'lendo campos numéricos… '+feito+'/'+alvos.length;
+      await new Promise(r=>setTimeout(r,0));      // devolve o controle à interface
+    }
   }
-  $('#nums').innerHTML = nums.length
-    ? (baixaConf? '<div style="color:#f0a89e;margin-bottom:6px">⚠ '+baixaConf+' campo(s) em vermelho: confira o recorte e corrija se preciso.</div>':'')
-      + nums.join('')
-    : '<small>Nenhum campo numérico marcado.</small>';
+
+  $('#nums').innerHTML = (baixaConf
+      ? '<div style="color:#f0a89e;margin-bottom:6px">⚠ '+baixaConf+' campo(s) em vermelho: confira o recorte e corrija se preciso.</div>'
+      : '')
+    + (partes.length? partes.join('') : '<small>Nenhum campo numérico marcado.</small>');
 }
 
 $('#again').onclick=()=>{ $('#step2').hidden=true; $('#step1').hidden=false; estaveis=0; setRing(0); posicionarAlvo(); iniciarDeteccao(); };

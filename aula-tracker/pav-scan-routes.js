@@ -174,6 +174,12 @@ const DET_MS = 160;                // intervalo do loop de detecção (~6 fps)
 fetch('/pav/scan/template.json').then(r=>r.json()).then(t=>template=t);
 fetch('/pav/api/fichas-ativas').then(r=>r.json()).then(d=>{fichas=d.fichas||[];}).catch(()=>{});
 
+// log visível na própria tela: sem isso, depurar câmera em celular é adivinhação
+function log(msg){
+  const el=$('#camdiag'); if(!el) return;
+  el.textContent = msg;
+}
+
 async function startCam(){
   if(stream) stream.getTracks().forEach(t=>t.stop());
   $('#erro').hidden=true;
@@ -183,16 +189,17 @@ async function startCam(){
   // paramos no primeiro que funciona.
   const tentativas = [
     {facingMode:{ideal:facing}, width:{ideal:1920}, height:{ideal:1440}},  // 4:3 nítido
-    {facingMode:{ideal:facing}, width:{ideal:1280}, height:{ideal:960}},   // 4:3 seguro
-    {facingMode:{ideal:facing}},
-    true,
+    {facingMode:{ideal:facing}},                                           // simples
+    true,                                                                  // qualquer câmera
   ];
   let err=null;
   for(const c of tentativas){
     try{
+      log('pedindo câmera…');
       stream = await navigator.mediaDevices.getUserMedia({video:c, audio:false});
+      log('stream obtido');
       break;
-    }catch(e){ err=e; stream=null; }
+    }catch(e){ err=e; stream=null; log('falhou: '+(e.name||e)); }
   }
   if(!stream){
     $('#erro').hidden=false;
@@ -213,7 +220,27 @@ async function startCam(){
   posicionarAlvo();
   iniciarDeteccao();
 }
-$('#flip').onclick=()=>{ facing = facing==='environment'?'user':'environment'; startCam(); };
+
+// ── INICIALIZAÇÃO DA CÂMERA ───────────────────────────────────────────────
+// (a ausência desta chamada foi o bug que deixou o app não-funcional: startCam
+//  existia mas só era invocada pelo botão de trocar câmera)
+let camIniciada=false;
+async function ligarCamera(){
+  if(camIniciada) return; camIniciada=true;
+  try{ await startCam(); }
+  catch(e){
+    camIniciada=false;
+    $('#erro').hidden=false;
+    $('#erro').innerHTML='Falha ao iniciar a câmera: '+(e && (e.name||e.message||e))
+      +'<br><br><button id="retry" style="margin-top:8px">Tentar de novo</button>';
+    const r=$('#retry'); if(r) r.onclick=()=>{ $('#erro').hidden=true; ligarCamera(); };
+  }
+}
+ligarCamera();
+// iOS às vezes exige gesto do usuário: qualquer toque na tela tenta de novo
+$('#step1').addEventListener('click', ()=>{ if(!stream) ligarCamera(); }, {passive:true});
+
+$('#flip').onclick=(e)=>{ e.stopPropagation(); facing = facing==='environment'?'user':'environment'; camIniciada=false; ligarCamera(); };
 // entra em tela cheia ao tocar no guia; sai no ✕ (a leitura também sai)
 $('#auto').onclick=()=>{ autoOn=!autoOn; $('#auto').textContent = autoOn?'⏸ Pausar automático':'▶ Retomar automático';
   if(autoOn) iniciarDeteccao(); else pararDeteccao(); setHint(autoOn?'procurando os cantos…':'automático pausado','') };

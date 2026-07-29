@@ -135,7 +135,13 @@ export function textoPosologia(row) {
     ? String(row.dose_valor).replace('.', ',') + (row.dose_unidade ? ' ' + row.dose_unidade : '')
     : String(row.dose || row.Dose || '');
   let freq;
-  if (row.freq_tipo === 'cada' && row.freq_horas) freq = row.freq_horas + '/' + row.freq_horas + 'h';
+  if (row.freq_tipo === 'cada' && row.freq_horas) {
+    // freq_horas deveria ser o número de horas (ex.: 12). Mas o campo é de entrada
+    // livre e às vezes vem já como intervalo ('12/12', '12/12h', '12h'). Extrai o
+    // primeiro número e monta 'N/Nh' uma única vez — senão sai '12/12/12/12h'.
+    const nHoras = parseInt(String(row.freq_horas).match(/\d+/)?.[0] || '', 10);
+    freq = Number.isFinite(nHoras) ? (nHoras + '/' + nHoras + 'h') : String(row.freq_horas);
+  }
   else if (row.freq_tipo === 'unica') freq = 'dose \u00fanica';
   else if (row.freq_tipo === 'hd') freq = 'ap\u00f3s cada HD';
   else freq = String(row.intervalo || row.Intervalo || '');

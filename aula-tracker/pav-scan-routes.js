@@ -26,11 +26,16 @@ export function registerPavScanRoutes(app, pool, pavRequired) {
   // Impressão digital do conteúdo: muda a cada deploy e invalida cache antigo.
   let VER = 'dev';
   let READER = '', TEMPLATE = '{}';
-  try { READER = fs.readFileSync(path.join(__dirname, 'pav-omr-reader.mjs'), 'utf8'); } catch {}
-  try { TEMPLATE = fs.readFileSync(path.join(__dirname, 'pav-omr-template.json'), 'utf8'); } catch {}
+  let ERRO_ASSETS = '';
+  try { READER = fs.readFileSync(path.join(__dirname, 'pav-omr-reader.mjs'), 'utf8'); }
+  catch (e) { ERRO_ASSETS += 'pav-omr-reader.mjs: ' + e.code + '; '; }
+  try { TEMPLATE = fs.readFileSync(path.join(__dirname, 'pav-omr-template.json'), 'utf8'); }
+  catch (e) { ERRO_ASSETS += 'pav-omr-template.json: ' + e.code + '; '; }
 
   let MODEL = '{}';
-  try { MODEL = fs.readFileSync(path.join(__dirname, 'pav-digit-model.json'), 'utf8'); } catch {}
+  try { MODEL = fs.readFileSync(path.join(__dirname, 'pav-digit-model.json'), 'utf8'); }
+  catch (e) { ERRO_ASSETS += 'pav-digit-model.json: ' + e.code + '; '; }
+  if (ERRO_ASSETS) console.error('[pav-scan] ASSETS AUSENTES →', ERRO_ASSETS);
   try {
     VER = crypto.createHash('sha1')
       .update(READER).update(TEMPLATE).update(String(MODEL.length)).update(SCAN_HTML)
@@ -39,6 +44,10 @@ export function registerPavScanRoutes(app, pool, pavRequired) {
 
   app.get('/pav/scan/reader.js', pavRequired, (_req, res) => {
     res.set('Cache-Control', 'no-cache');
+    // Servir vazio faria o import ESM abortar o script inteiro SEM erro visível
+    // (foi assim que uma falha de asset virou "app não funciona, tela preta").
+    if (!READER) return res.status(500).type('text/plain')
+      .send('pav-omr-reader.mjs ausente no servidor: ' + (ERRO_ASSETS || 'motivo desconhecido'));
     res.type('application/javascript').send(READER);
   });
   app.get('/pav/scan/template.json', pavRequired, (_req, res) => {
@@ -89,6 +98,107 @@ self.addEventListener('fetch', e => {
     }
   })());
 });`);
+  });
+
+  // ── /pav/scan/diag — diagnóstico autocontido ──────────────────────────────
+  // JS clássico, sem imports e sem service worker: funciona mesmo quando a
+  // página principal não carrega. Testa cada peça e mostra o resultado na tela.
+  app.get('/pav/scan/diag', pavRequired, (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.type('html').send(`<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PAV scan · diagnóstico</title><style>
+body{font:13px/1.5 ui-monospace,Menlo,monospace;background:#0b0d0c;color:#dfe9e4;margin:0;padding:14px}
+h1{font-size:15px;margin:0 0 10px}
+.l{padding:7px 9px;border-left:3px solid #333;margin:6px 0;background:#141917;white-space:pre-wrap;word-break:break-word}
+.ok{border-color:#19c37d}.err{border-color:#c0392b}.warn{border-color:#d1a020}
+button{font:inherit;padding:10px 14px;border:0;border-radius:8px;background:#0e6b52;color:#fff;margin:4px 4px 4px 0}
+video{width:100%;max-width:420px;background:#000;border-radius:8px;margin-top:8px}
+</style></head><body>
+<h1>PAV · diagnóstico do leitor</h1>
+<div id="out"></div>
+<button onclick="testarCam()">Testar câmera</button>
+<button onclick="limpar()">Limpar cache + SW</button>
+<button onclick="location.reload()">Repetir</button>
+<video id="v" playsinline autoplay muted></video>
+<script>
+var out=document.getElementById('out');
+function add(txt,cls){var d=document.createElement('div');d.className='l '+(cls||'');d.textContent=txt;out.appendChild(d);}
+function erro(e){return (e&&(e.name+': '+e.message))||String(e);}
+
+add('user-agent: '+navigator.userAgent);
+add('URL: '+location.href+'   ·   seguro (HTTPS): '+window.isSecureContext, window.isSecureContext?'ok':'err');
+add('getUserMedia disponível: '+!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia),
+    (navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)?'ok':'err');
+
+// 1. os assets sobem?
+function testarAsset(url,esperado){
+  return fetch(url,{cache:'no-store'}).then(function(r){
+    return r.text().then(function(t){
+      var cls = r.ok && t.length>50 ? 'ok' : 'err';
+      add(url+'\n  HTTP '+r.status+' · '+t.length+' bytes\n  início: '+t.slice(0,90).replace(/\n/g,' '), cls);
+      if(esperado && r.ok && t.indexOf(esperado)<0)
+        add('  ⚠ não contém "'+esperado+'" — conteúdo inesperado','warn');
+      return t;
+    });
+  }).catch(function(e){ add(url+'\n  FALHOU: '+erro(e),'err'); });
+}
+
+// 2. o import do módulo funciona?
+function testarImport(){
+  return import('/pav/scan/reader.js?diag='+Date.now()).then(function(m){
+    var fns=['readSheet','readNumber','loadDigitMLP','findFiducials'];
+    var falta=fns.filter(function(f){return typeof m[f]!=='function';});
+    add('import do reader.js: OK\n  exporta: '+Object.keys(m).join(', ').slice(0,200),
+        falta.length?'warn':'ok');
+    if(falta.length) add('  ⚠ FALTAM exports: '+falta.join(', '),'err');
+  }).catch(function(e){
+    add('import do reader.js FALHOU:\n  '+erro(e)+'\n  → é isto que impede a página principal de rodar','err');
+  });
+}
+
+// 3. service worker
+function testarSW(){
+  if(!('serviceWorker' in navigator)){ add('serviceWorker: indisponível','warn'); return Promise.resolve(); }
+  return navigator.serviceWorker.getRegistrations().then(function(rs){
+    add('service workers registrados: '+rs.length+(rs.length?('\n  escopo: '+rs.map(function(r){return r.scope;}).join(', ')):''),
+        rs.length>1?'warn':'ok');
+    return caches.keys().then(function(ks){ add('caches: '+(ks.join(', ')||'(nenhum)')); });
+  }).catch(function(e){ add('SW: '+erro(e),'warn'); });
+}
+
+window.testarCam=function(){
+  add('pedindo câmera…');
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}},audio:false})
+  .then(function(st){
+    var v=document.getElementById('v'); v.srcObject=st;
+    return v.play().catch(function(){}).then(function(){
+      return new Promise(function(r){ setTimeout(r,900); });
+    }).then(function(){
+      var t=st.getVideoTracks()[0], s=t?t.getSettings():{};
+      add('câmera OK\n  vídeo: '+v.videoWidth+'×'+v.videoHeight+
+          '\n  track: '+(s.width||'?')+'×'+(s.height||'?')+' · '+(s.facingMode||'?')+
+          '\n  readyState: '+(t&&t.readyState), v.videoWidth?'ok':'err');
+      if(!v.videoWidth) add('  ⚠ stream obtido mas SEM frames (tela preta)','err');
+    });
+  }).catch(function(e){ add('câmera FALHOU: '+erro(e),'err'); });
+};
+
+window.limpar=function(){
+  Promise.resolve()
+    .then(function(){ return caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){return caches.delete(k);})); }); })
+    .then(function(){ return navigator.serviceWorker?navigator.serviceWorker.getRegistrations():[]; })
+    .then(function(rs){ return Promise.all((rs||[]).map(function(r){return r.unregister();})); })
+    .then(function(){ add('cache e service workers REMOVIDOS — recarregue a página principal','ok'); })
+    .catch(function(e){ add('limpeza: '+erro(e),'err'); });
+};
+
+testarAsset('/pav/scan/reader.js','export')
+  .then(function(){ return testarAsset('/pav/scan/template.json','fiducials_mm'); })
+  .then(function(){ return testarAsset('/pav/scan/model.json','W0'); })
+  .then(testarImport).then(testarSW)
+  .then(function(){ add('— fim do diagnóstico —'); });
+</script></body></html>`);
   });
 
   app.get('/pav/scan', pavRequired, (_req, res) => {
@@ -148,6 +258,43 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
   .q{background:#141917;border:1px solid #223029;border-radius:10px;padding:10px 12px;margin:8px 0;display:flex;justify-content:space-between}
   .q b{color:#7ee0b0}
 </style></head><body>
+<script>
+/* Diagnóstico de boot em JS CLÁSSICO — roda ANTES do módulo. Se o <script
+   type="module"> falhar (import quebrado, asset ausente, erro de sintaxe), o
+   navegador aborta o script inteiro em silêncio: o HTML estático aparece e
+   nada funciona. Estes handlers tornam essa falha VISÍVEL na tela. */
+(function(){
+  function painel(){
+    var el=document.getElementById('bootlog');
+    if(!el){
+      el=document.createElement('div'); el.id='bootlog';
+      el.style.cssText='position:fixed;left:0;right:0;top:0;z-index:9999;background:#6d1b1b;'+
+        'color:#fff;font:11px/1.45 ui-monospace,Menlo,monospace;padding:10px 12px;white-space:pre-wrap;'+
+        'max-height:70vh;overflow:auto;box-shadow:0 2px 12px rgba(0,0,0,.6)';
+      (document.body||document.documentElement).appendChild(el);
+    }
+    return el;
+  }
+  window.__bootErro=function(msg){ painel().textContent += msg + '\n'; };
+  window.addEventListener('error', function(e){
+    var alvo = e.target && e.target.tagName;
+    if (alvo === 'SCRIPT' || alvo === 'LINK')
+      window.__bootErro('FALHA AO CARREGAR ' + alvo + ': ' + (e.target.src||e.target.href));
+    else
+      window.__bootErro('ERRO: ' + (e.message||e.error||'?') +
+        (e.filename ? '\n  em ' + e.filename + ':' + e.lineno : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function(e){
+    var r=e.reason; window.__bootErro('PROMISE REJEITADA: ' + ((r&&(r.message||r.name))||r));
+  });
+  /* watchdog: o módulo sinaliza __moduloOk. Se em 4s não sinalizou, avisa. */
+  setTimeout(function(){
+    if(!window.__moduloOk)
+      window.__bootErro('O script principal NÃO carregou.\n'+
+        'Abra /pav/scan/diag para o diagnóstico completo.');
+  }, 4000);
+})();
+</script>
 <header><b>PAV · Leitura de folha</b><span id="net">•••</span></header>
 <main>
   <div id="step1">
@@ -196,6 +343,7 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
 
 <script type="module">
 import { readSheet, readNumber, loadDigitMLP, findFiducials } from '/pav/scan/reader.js?v=__VER__';
+window.__moduloOk = true;    // watchdog do boot: chegamos aqui, o import funcionou
 
 const CONF_OK = 0.99;   // portão: acima disso pré-preenche; abaixo pede revisão
 const $ = s => document.querySelector(s);

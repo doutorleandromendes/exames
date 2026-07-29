@@ -136,12 +136,12 @@ function testarAsset(url,esperado){
   return fetch(url,{cache:'no-store'}).then(function(r){
     return r.text().then(function(t){
       var cls = r.ok && t.length>50 ? 'ok' : 'err';
-      add(url+'\n  HTTP '+r.status+' · '+t.length+' bytes\n  início: '+t.slice(0,90).replace(/\n/g,' '), cls);
+      add(url+'\\n  HTTP '+r.status+' · '+t.length+' bytes\\n  início: '+t.slice(0,90).replace(/\\n/g,' '), cls);
       if(esperado && r.ok && t.indexOf(esperado)<0)
         add('  ⚠ não contém "'+esperado+'" — conteúdo inesperado','warn');
       return t;
     });
-  }).catch(function(e){ add(url+'\n  FALHOU: '+erro(e),'err'); });
+  }).catch(function(e){ add(url+'\\n  FALHOU: '+erro(e),'err'); });
 }
 
 // 2. o import do módulo funciona?
@@ -149,11 +149,11 @@ function testarImport(){
   return import('/pav/scan/reader.js?diag='+Date.now()).then(function(m){
     var fns=['readSheet','readNumber','loadDigitMLP','findFiducials'];
     var falta=fns.filter(function(f){return typeof m[f]!=='function';});
-    add('import do reader.js: OK\n  exporta: '+Object.keys(m).join(', ').slice(0,200),
+    add('import do reader.js: OK\\n  exporta: '+Object.keys(m).join(', ').slice(0,200),
         falta.length?'warn':'ok');
     if(falta.length) add('  ⚠ FALTAM exports: '+falta.join(', '),'err');
   }).catch(function(e){
-    add('import do reader.js FALHOU:\n  '+erro(e)+'\n  → é isto que impede a página principal de rodar','err');
+    add('import do reader.js FALHOU:\\n  '+erro(e)+'\\n  → é isto que impede a página principal de rodar','err');
   });
 }
 
@@ -161,7 +161,7 @@ function testarImport(){
 function testarSW(){
   if(!('serviceWorker' in navigator)){ add('serviceWorker: indisponível','warn'); return Promise.resolve(); }
   return navigator.serviceWorker.getRegistrations().then(function(rs){
-    add('service workers registrados: '+rs.length+(rs.length?('\n  escopo: '+rs.map(function(r){return r.scope;}).join(', ')):''),
+    add('service workers registrados: '+rs.length+(rs.length?('\\n  escopo: '+rs.map(function(r){return r.scope;}).join(', ')):''),
         rs.length>1?'warn':'ok');
     return caches.keys().then(function(ks){ add('caches: '+(ks.join(', ')||'(nenhum)')); });
   }).catch(function(e){ add('SW: '+erro(e),'warn'); });
@@ -176,9 +176,9 @@ window.testarCam=function(){
       return new Promise(function(r){ setTimeout(r,900); });
     }).then(function(){
       var t=st.getVideoTracks()[0], s=t?t.getSettings():{};
-      add('câmera OK\n  vídeo: '+v.videoWidth+'×'+v.videoHeight+
-          '\n  track: '+(s.width||'?')+'×'+(s.height||'?')+' · '+(s.facingMode||'?')+
-          '\n  readyState: '+(t&&t.readyState), v.videoWidth?'ok':'err');
+      add('câmera OK\\n  vídeo: '+v.videoWidth+'×'+v.videoHeight+
+          '\\n  track: '+(s.width||'?')+'×'+(s.height||'?')+' · '+(s.facingMode||'?')+
+          '\\n  readyState: '+(t&&t.readyState), v.videoWidth?'ok':'err');
       if(!v.videoWidth) add('  ⚠ stream obtido mas SEM frames (tela preta)','err');
     });
   }).catch(function(e){ add('câmera FALHOU: '+erro(e),'err'); });
@@ -275,14 +275,14 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
     }
     return el;
   }
-  window.__bootErro=function(msg){ painel().textContent += msg + '\n'; };
+  window.__bootErro=function(msg){ painel().textContent += msg + '\\n'; };
   window.addEventListener('error', function(e){
     var alvo = e.target && e.target.tagName;
     if (alvo === 'SCRIPT' || alvo === 'LINK')
       window.__bootErro('FALHA AO CARREGAR ' + alvo + ': ' + (e.target.src||e.target.href));
     else
       window.__bootErro('ERRO: ' + (e.message||e.error||'?') +
-        (e.filename ? '\n  em ' + e.filename + ':' + e.lineno : ''));
+        (e.filename ? '\\n  em ' + e.filename + ':' + e.lineno : ''));
   }, true);
   window.addEventListener('unhandledrejection', function(e){
     var r=e.reason; window.__bootErro('PROMISE REJEITADA: ' + ((r&&(r.message||r.name))||r));
@@ -290,7 +290,7 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
   /* watchdog: o módulo sinaliza __moduloOk. Se em 4s não sinalizou, avisa. */
   setTimeout(function(){
     if(!window.__moduloOk)
-      window.__bootErro('O script principal NÃO carregou.\n'+
+      window.__bootErro('O script principal NÃO carregou.\\n'+
         'Abra /pav/scan/diag para o diagnóstico completo.');
   }, 4000);
 })();
@@ -531,8 +531,8 @@ function capturar(automatico){
     // leitura degrada. Avisa (não bloqueia: melhor ler com aviso que travar).
     if (cw < 900) {
       setHint('resolução baixa ('+cw+'px) — aproxime o celular', '');
-      if (!automatico && !confirm('A câmera está entregando só '+cw+'px de largura.\n'
-        + 'A leitura pode falhar. Aproximar o celular da folha melhora muito.\n\nLer assim mesmo?')) {
+      if (!automatico && !confirm('A câmera está entregando só '+cw+'px de largura. '
+        + 'A leitura pode falhar — aproximar o celular da folha melhora muito. Ler assim mesmo?')) {
         lendo=false; return;
       }
     }

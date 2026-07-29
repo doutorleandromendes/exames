@@ -23,7 +23,36 @@ function chamar(p){
   });
 }
 
+import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
 let f=0; const t=(n,ok,ex='')=>{console.log((ok?'  ✓ ':'  ✗ ')+n+(ex?' — '+ex:'')); if(!ok)f++;};
+
+// Valida a SINTAXE do JavaScript que realmente chega ao navegador.
+// Existe por causa de um bug que custou dias: '\n' escrito dentro do template
+// literal do servidor é interpretado pelo Node e vira quebra de linha REAL no
+// HTML enviado — quebrando as strings do script. O servidor compila, o HTML
+// chega, e o script morre inteiro no navegador com SyntaxError. A página fica
+// visualmente montada e completamente inerte, sem nenhum erro do lado do Node.
+function checarScripts(nome, html){
+  const scripts=[...html.matchAll(/<script(?:\s+type="module")?>([\s\S]*?)<\/script>/g)];
+  t(nome+': tem script embutido', scripts.length>0, scripts.length+' bloco(s)');
+  scripts.forEach((m,i)=>{
+    const tmp=path.join(os.tmpdir(), `chk-${nome}-${i}-${Date.now()}.mjs`);
+    fs.writeFileSync(tmp, m[1]);
+    let ok=true, msg='';
+    try { execFileSync(process.execPath, ['--check', tmp], {stdio:'pipe'}); }
+    catch(e){ ok=false; msg=String(e.stderr||e).split('\n').slice(1,3).join(' ').trim().slice(0,90); }
+    fs.unlinkSync(tmp);
+    t(`${nome}: script #${i} tem sintaxe válida`, ok, msg);
+  });
+  // nenhuma string pode ficar aberta por quebra de linha crua
+  const abertas=html.split('\n').filter(l=>(l.match(/(?<!\\)'/g)||[]).length%2===1);
+  t(nome+': nenhuma string aberta por quebra de linha', abertas.length===0,
+    abertas.length? abertas.length+' linha(s), ex.: '+abertas[0].trim().slice(0,50) : '');
+}
 console.log('ROTAS de /pav/scan:\n');
 console.log('  registradas: '+[...rotas.keys()].join(', ')+'\n');
 
@@ -47,11 +76,13 @@ t('sw.js não é cacheado', sw.headers['Cache-Control']==='no-store');
 
 const diag = await chamar('/pav/scan/diag');
 t('/diag responde e é autocontido', diag.corpo.includes('diagnóstico') && !diag.corpo.includes('type="module"'));
+checarScripts('diag', diag.corpo);
 
 const pag = await chamar('/pav/scan');
 t('página injeta a versão (sem __VER__ sobrando)', !pag.corpo.includes('__VER__'));
 t('página tem captura de erro de boot', pag.corpo.includes('__bootErro'));
 t('página é no-store', pag.headers['Cache-Control']==='no-store');
+checarScripts('scan', pag.corpo);
 
 console.log(`\n${f? f+' FALHA(S)':'rotas OK'}`);
 process.exit(f?1:0);

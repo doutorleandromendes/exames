@@ -73,7 +73,26 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
   main{padding:14px;max-width:640px;margin:0 auto}
   video,canvas{width:100%;border-radius:12px;background:#000;display:block}
   /* guia de enquadramento na proporção da folha: A4 PAISAGEM (297×210 = 1.414) */
-  .guide{position:relative;aspect-ratio:297/210;overflow:hidden;border-radius:12px;background:#000}
+  /* O guia mantém SEMPRE 297:210 (o recorte depende disso). Para não estourar
+     em paisagem — onde a altura da tela é o limite — a largura é derivada da
+     altura disponível. Antes, width:100% gerava 640×453 numa área de 352px. */
+  .guide{position:relative;aspect-ratio:297/210;overflow:hidden;border-radius:12px;background:#000;
+         width:100%;max-width:calc((100dvh - 200px) * 1.4142);margin-inline:auto}
+  /* MODO CAPTURA EM TELA CHEIA: o guia ocupa a viewport inteira mantendo
+     297:210 (o recorte depende desse aspect), com os controles FLUTUANDO por
+     cima. Sem isso, em paisagem os controles comiam a altura e a janela ficava
+     MENOR que em retrato — o oposto do que o aviso de girar prometia. */
+  body.cap{overflow:hidden}
+  body.cap header, body.cap #intro, body.cap #camdiag, body.cap #rotaviso,
+  body.cap #fila, body.cap main>p{display:none}
+  body.cap main{padding:0;max-width:none}
+  body.cap .guide{position:fixed;inset:0;margin:auto;border-radius:0;z-index:5;
+    width:auto;height:auto;max-width:min(100vw, calc(100dvh * 1.4142));max-height:min(100dvh, calc(100vw / 1.4142))}
+  body.cap #ctrls{position:fixed;left:0;right:0;bottom:calc(10px + env(safe-area-inset-bottom));
+    z-index:6;display:flex;gap:8px;justify-content:center;margin:0;padding:0 10px}
+  body.cap #ctrls button{box-shadow:0 3px 14px rgba(0,0,0,.55)}
+  body.cap #sair{display:inline-block}
+  #sair{display:none}
   .guide video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
   .guide .frame{position:absolute;inset:5% 4%;border:2px dashed rgba(255,255,255,.45);border-radius:6px;pointer-events:none;transition:border-color .2s}
   .guide.lock .frame{border-color:#7ee0b0;border-style:solid}
@@ -108,8 +127,9 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
 <header><b>PAV · Leitura de folha</b><span id="net">•••</span></header>
 <main>
   <div id="step1">
-    <p><small>Deite o celular (paisagem) e enquadre a folha inteira, com os quatro quadrados pretos dos cantos dentro do quadro. A captura é <b>automática</b> quando os quatro forem reconhecidos.</small></p>
-    <div class="rot" id="rotaviso" hidden>📱 Gire o celular para a horizontal — a ficha é deitada.</div>
+    <p id="intro"><small>Enquadre a folha inteira, com os quatro quadrados pretos dos cantos dentro do quadro. A captura é <b>automática</b> quando os quatro forem reconhecidos. <b>Deitar o celular</b> aumenta a janela e permite aproximar mais.</small></p>
+    <div class="rot" id="rotaviso" hidden>📱 Gire o celular para a horizontal — a janela fica maior e você pode aproximar mais.</div>
+    <div id="camdiag" style="font-size:11px;color:#607068;margin:4px 0"></div>
     <div class="guide" id="guide">
       <video id="v" playsinline autoplay muted></video>
       <div class="frame"></div>
@@ -118,10 +138,11 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
       <div class="ring"><i id="ringfill"></i></div>
       <div class="hint" id="hint">procurando os cantos…</div>
     </div>
-    <div class="row">
-      <button id="shot">📷 Capturar agora</button>
-      <button class="sec" id="auto">⏸ Pausar automático</button>
-      <button class="sec" id="flip">↺ Câmera</button>
+    <div class="row" id="ctrls">
+      <button id="shot">📷 Capturar</button>
+      <button class="sec" id="auto">⏸ Auto</button>
+      <button class="sec" id="flip">↺</button>
+      <button class="sec" id="sair">✕</button>
     </div>
   </div>
 
@@ -175,17 +196,33 @@ fetch('/pav/api/fichas-ativas').then(r=>r.json()).then(d=>{fichas=d.fichas||[];}
 async function startCam(){
   if(stream) stream.getTracks().forEach(t=>t.stop());
   // pede PAISAGEM: a ficha é A4 deitada (1.414). O navegador aproxima o mais perto possível.
+  // 4:3 é o sensor nativo (iPhone/Android). CRÍTICO: como recortamos p/ 1.414,
+  // um stream 16:9 (1.778) perderia 20% da LARGURA — reduzindo o campo de visão
+  // e obrigando a afastar o celular (menos px/mm na folha). Já um 4:3 (1.333)
+  // perde só ALTURA no recorte, mantendo o FOV horizontal intacto.
   stream = await navigator.mediaDevices.getUserMedia({video:{
     facingMode:facing,
-    width:{ideal:2560}, height:{ideal:1440},
-    aspectRatio:{ideal:297/210}
+    width:{ideal:4032}, height:{ideal:3024},   // 4:3, resolução máxima usual
+    aspectRatio:{ideal:4/3}
   }});
   $('#v').srcObject = stream;
   await $('#v').play().catch(()=>{});
+  // diagnóstico: o que a câmera realmente entregou (aspect errado = FOV perdido)
+  const t=stream.getVideoTracks()[0], st=t?t.getSettings():{};
+  if(st.width){
+    const a=(st.width/st.height);
+    const perda = a>1.4142 ? (1-1.4142/a) : 0;
+    $('#camdiag').textContent = 'câmera: '+st.width+'×'+st.height+' ('+a.toFixed(2)+')'
+      + (perda>0.02 ? ' · ⚠ recorte perde '+Math.round(perda*100)+'% da largura' : ' · campo de visão íntegro');
+  }
   iniciarDeteccao();
 }
 startCam().catch(()=>{ $('#v').outerHTML='<p style="color:#f0a89e">Sem acesso à câmera. Habilite a permissão (e use HTTPS).</p>'; });
 $('#flip').onclick=()=>{ facing = facing==='environment'?'user':'environment'; startCam(); };
+// entra em tela cheia ao tocar no guia; sai no ✕ (a leitura também sai)
+$('#guide').addEventListener('click', e=>{ if(e.target.closest('button')) return; setCap(true); });
+$('#sair').onclick=(e)=>{ e.stopPropagation(); setCap(false); };
+function setCap(on){ document.body.classList.toggle('cap', on); }
 $('#auto').onclick=()=>{ autoOn=!autoOn; $('#auto').textContent = autoOn?'⏸ Pausar automático':'▶ Retomar automático';
   if(autoOn) iniciarDeteccao(); else pararDeteccao(); setHint(autoOn?'procurando os cantos…':'automático pausado','') };
 
@@ -260,6 +297,15 @@ function capturar(automatico){
     const v=$('#v');
     // resolução máxima DO RECORTE COVER — a mesma imagem que o usuário enquadrou
     const {gray, w:cw, h:ch} = grabFrame(v);
+    // PISO DE RESOLUÇÃO: abaixo de ~900px de largura a bolha tem <11px e a
+    // leitura degrada. Avisa (não bloqueia: melhor ler com aviso que travar).
+    if (cw < 900) {
+      setHint('resolução baixa ('+cw+'px) — aproxime o celular', '');
+      if (!automatico && !confirm('A câmera está entregando só '+cw+'px de largura.\n'
+        + 'A leitura pode falhar. Aproximar o celular da folha melhora muito.\n\nLer assim mesmo?')) {
+        lendo=false; return;
+      }
+    }
     const res=readSheet(gray,cw,ch,template);
     if(!res.ok){
       if(!automatico) alert('Não consegui ler: '+res.erro+'. Reenquadre com os 4 cantos visíveis.');
@@ -299,8 +345,10 @@ function thumbCapturada(gray,w,h,fid){
   return c.toDataURL();
 }
 function mostrar(res){
+  setCap(false);
   $('#step1').hidden=true; $('#step2').hidden=false;
-  $('#fidbox').innerHTML='<b>✔ Folha reconhecida</b> <small>4 cantos localizados · perspectiva corrigida</small>'
+  $('#fidbox').innerHTML='<b>✔ Folha reconhecida</b> <small>'+lastRead.w+'×'+lastRead.h+'px'
+    + (res.refino? ' · ajuste '+res.refino.off.dx+','+res.refino.off.dy+'mm':'')+'</small>'
     + '<div style="margin-top:8px"><img style="width:100%;border-radius:8px" src="'+thumbCapturada(lastRead.gray,lastRead.w,lastRead.h,res.fiducials)+'"></div>';
 
   // fichas

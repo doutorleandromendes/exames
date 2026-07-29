@@ -73,8 +73,10 @@ const navigator = {
   serviceWorker: { register(){ return Promise.resolve(); } },
 };
 
+const location = { href:'https://app.exemplo/pav/scan', hash:'', pathname:'/pav/scan',
+                   reload(){ chamadas.reload=(chamadas.reload||0)+1; }, replace(){} };
 const globals = {
-  document, navigator, window: { innerWidth: 800, innerHeight: 600 },
+  document, navigator, location, window: { innerWidth: 800, innerHeight: 600, location },
   addEventListener(){ chamadas.addEventListener++; },
   setTimeout, clearTimeout, setInterval: () => 1, clearInterval,
   fetch: () => Promise.resolve({ json: () => Promise.resolve({}), ok: true }),

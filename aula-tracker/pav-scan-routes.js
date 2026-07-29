@@ -17,19 +17,28 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function registerPavScanRoutes(app, pool, pavRequired) {
   // assets do leitor e template (lidos do disco; em produção podem ser embutidos)
+  // Impressão digital do conteúdo: muda a cada deploy e invalida cache antigo.
+  let VER = 'dev';
   let READER = '', TEMPLATE = '{}';
   try { READER = fs.readFileSync(path.join(__dirname, 'pav-omr-reader.mjs'), 'utf8'); } catch {}
   try { TEMPLATE = fs.readFileSync(path.join(__dirname, 'pav-omr-template.json'), 'utf8'); } catch {}
 
   let MODEL = '{}';
   try { MODEL = fs.readFileSync(path.join(__dirname, 'pav-digit-model.json'), 'utf8'); } catch {}
+  try {
+    VER = crypto.createHash('sha1')
+      .update(READER).update(TEMPLATE).update(String(MODEL.length)).update(SCAN_HTML)
+      .digest('hex').slice(0, 10);
+  } catch {}
 
   app.get('/pav/scan/reader.js', pavRequired, (_req, res) => {
+    res.set('Cache-Control', 'no-cache');
     res.type('application/javascript').send(READER);
   });
   app.get('/pav/scan/template.json', pavRequired, (_req, res) => {
@@ -40,22 +49,51 @@ export function registerPavScanRoutes(app, pool, pavRequired) {
   });
 
   // service worker: cache dos assets para funcionar offline na UTI
+  // SERVICE WORKER — reescrito depois de um incidente grave: a versão anterior
+  // usava cache-first com nome FIXO ('pav-scan-v1'). Resultado: o primeiro
+  // acesso congelava o app naquela versão e TODO deploy seguinte era ignorado
+  // pelo aparelho. Agora: nome versionado pelo conteúdo, NETWORK-FIRST (o cache
+  // é só rede-caiu), e o SW novo assume imediatamente (skipWaiting/claim).
   app.get('/pav/scan/sw.js', (_req, res) => {
+    res.set('Cache-Control', 'no-store');
     res.type('application/javascript').send(`
-const C = 'pav-scan-v1';
+const VER = '${VER}';
+const C   = 'pav-scan-' + VER;
 const ASSETS = ['/pav/scan', '/pav/scan/reader.js', '/pav/scan/template.json', '/pav/scan/model.json'];
-self.addEventListener('install', e => e.waitUntil(caches.open(C).then(c => c.addAll(ASSETS))));
-self.addEventListener('activate', e => e.waitUntil(
-  caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k))))));
+
+self.addEventListener('install', e => { self.skipWaiting(); });
+
+self.addEventListener('activate', e => e.waitUntil((async () => {
+  // apaga TODOS os caches antigos desta app (não só os de nome diferente)
+  const ks = await caches.keys();
+  await Promise.all(ks.filter(k => k.startsWith('pav-scan-') && k !== C).map(k => caches.delete(k)));
+  await self.clients.claim();
+})()));
+
 self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
   const u = new URL(e.request.url);
-  if (ASSETS.some(a => u.pathname === a))
-    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  if (u.origin !== self.location.origin) return;
+  const base = u.pathname;
+  if (!ASSETS.includes(base)) return;
+  // NETWORK-FIRST: a rede manda; o cache só entra se a rede falhar (UTI offline)
+  e.respondWith((async () => {
+    try {
+      const r = await fetch(e.request);
+      if (r && r.ok) { const c = await caches.open(C); c.put(e.request, r.clone()); }
+      return r;
+    } catch (err) {
+      const hit = await caches.match(e.request, { ignoreSearch: true });
+      if (hit) return hit;
+      throw err;
+    }
+  })());
 });`);
   });
 
   app.get('/pav/scan', pavRequired, (_req, res) => {
-    res.type('html').send(SCAN_HTML);
+    res.set('Cache-Control', 'no-store');     // o HTML nunca vem de cache
+    res.type('html').send(SCAN_HTML.replace(/__VER__/g, VER));
   });
 }
 
@@ -157,11 +195,11 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
 </main>
 
 <script type="module">
-import { readSheet, readNumber, loadDigitMLP, findFiducials } from '/pav/scan/reader.js';
+import { readSheet, readNumber, loadDigitMLP, findFiducials } from '/pav/scan/reader.js?v=__VER__';
 
 const CONF_OK = 0.99;   // portão: acima disso pré-preenche; abaixo pede revisão
 const $ = s => document.querySelector(s);
-fetch('/pav/scan/model.json').then(r=>r.json()).then(m=>{ if(m && m.W0) loadDigitMLP(m); }).catch(()=>{});
+fetch('/pav/scan/model.json?v=__VER__').then(r=>r.json()).then(m=>{ if(m && m.W0) loadDigitMLP(m); }).catch(()=>{});
 const netEl = $('#net');
 function setNet(){ const on = navigator.onLine; netEl.textContent = on?'online':'offline'; netEl.classList.toggle('off',!on); if(on) syncAll(); }
 addEventListener('online',setNet); addEventListener('offline',setNet);
@@ -171,7 +209,7 @@ let autoOn=true, detTimer=null, estaveis=0, lendo=false;
 const ESTAVEIS_P_DISPARO = 4;      // frames consecutivos com os 4 cantos → dispara
 const DET_MS = 160;                // intervalo do loop de detecção (~6 fps)
 
-fetch('/pav/scan/template.json').then(r=>r.json()).then(t=>template=t);
+fetch('/pav/scan/template.json?v=__VER__').then(r=>r.json()).then(t=>template=t);
 fetch('/pav/api/fichas-ativas').then(r=>r.json()).then(d=>{fichas=d.fichas||[];}).catch(()=>{});
 
 // log visível na própria tela: sem isso, depurar câmera em celular é adivinhação
@@ -535,6 +573,25 @@ async function syncAll(){
   renderFila();
 }
 
-if('serviceWorker' in navigator) navigator.serviceWorker.register('/pav/scan/sw.js').catch(()=>{});
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/pav/scan/sw.js').then(reg=>{
+    reg.update();                                  // checa versão nova a cada carga
+    // se um SW novo assumir, recarrega uma única vez p/ pegar o código atual
+    let recarregou=false;
+    navigator.serviceWorker.addEventListener('controllerchange',()=>{
+      if(recarregou) return; recarregou=true; location.reload();
+    });
+  }).catch(()=>{});
+}
+// escotilha de emergência: /pav/scan#reset limpa cache e SW e recarrega
+if(location.hash==='#reset'){
+  (async()=>{
+    try{
+      const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k)));
+      const rs=await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r=>r.unregister()));
+    }catch(e){}
+    location.replace('/pav/scan');
+  })();
+}
 setNet(); renderFila();
 </script></body></html>`;

@@ -224,6 +224,11 @@ const SCAN_HTML = `<!doctype html><html lang="pt-BR"><head>
      exigia tocar p/ ampliar e ninguém tocava) e sem recorte: o vídeo aparece
      inteiro (object-fit:contain) e é capturado inteiro — o que se vê é
      exatamente o que é lido, com o campo de visão máximo da câmera. */
+  /* [hidden] PRECISA vencer as regras de display abaixo. Sem isto, o atributo
+     hidden (que é display:none da folha do navegador) é sobrescrito por
+     #step1{display:flex} — muito mais específico — e a tela de captura NUNCA
+     some: fica por cima da revisão, com a dica congelada em "capturando…". */
+  [hidden]{display:none !important}
   #step1{position:fixed;inset:0;background:#000;z-index:20;display:flex;
          align-items:center;justify-content:center}
   #step1 video{width:100%;height:100%;object-fit:contain;background:#000}

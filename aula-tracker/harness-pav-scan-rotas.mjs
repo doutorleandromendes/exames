@@ -36,6 +36,25 @@ let f=0; const t=(n,ok,ex='')=>{console.log((ok?'  ✓ ':'  ✗ ')+n+(ex?' — '
 // HTML enviado — quebrando as strings do script. O servidor compila, o HTML
 // chega, e o script morre inteiro no navegador com SyntaxError. A página fica
 // visualmente montada e completamente inerte, sem nenhum erro do lado do Node.
+// Verifica se o atributo `hidden` realmente esconde os elementos que o código
+// alterna. Regras por ID com `display:` têm especificidade maior que a folha do
+// navegador ([hidden]{display:none}) e a anulam em silêncio: o elemento "some"
+// no JS e continua na tela. Foi assim que a captura ficou presa em "capturando…"
+// — a tela de revisão abria ATRÁS da câmera, que nunca era escondida.
+function checarHidden(nome, html){
+  const css=(html.match(/<style>([\s\S]*?)<\/style>/)||[])[1]||'';
+  const js=(html.match(/<script(?:\s+type="module")?>([\s\S]*?)<\/script>/g)||[]).join('\n');
+  // ids cujo `hidden` o código manipula
+  const alvos=[...new Set([...js.matchAll(/\$\('#([a-zA-Z0-9_-]+)'\)\.hidden\s*=/g)].map(m=>m[1]))];
+  if(!alvos.length) return;
+  const temReset=/\[hidden\]\s*{[^}]*display\s*:\s*none\s*!important/.test(css);
+  const perigosos=alvos.filter(id=>new RegExp('#'+id+'\\s*{[^}]*display\\s*:','m').test(css));
+  t(nome+': `hidden` funciona nos elementos alternados', temReset || perigosos.length===0,
+    perigosos.length && !temReset
+      ? 'regra #'+perigosos.join(', #')+' com display: anula o hidden (falta [hidden]{display:none!important})'
+      : 'ids: '+alvos.join(', '));
+}
+
 function checarScripts(nome, html){
   const scripts=[...html.matchAll(/<script(?:\s+type="module")?>([\s\S]*?)<\/script>/g)];
   t(nome+': tem script embutido', scripts.length>0, scripts.length+' bloco(s)');
@@ -83,6 +102,7 @@ t('página injeta a versão (sem __VER__ sobrando)', !pag.corpo.includes('__VER_
 t('página tem captura de erro de boot', pag.corpo.includes('__bootErro'));
 t('página é no-store', pag.headers['Cache-Control']==='no-store');
 checarScripts('scan', pag.corpo);
+checarHidden('scan', pag.corpo);
 
 console.log(`\n${f? f+' FALHA(S)':'rotas OK'}`);
 process.exit(f?1:0);

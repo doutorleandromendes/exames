@@ -169,6 +169,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/pergunta', '💬', 'Pergunta ao banco (SQL)')}
           ${card('/atb/admin/indicadores', '📉', 'Pergunta aos indicadores')}
           ${card('/atb/admin/export', '📤', 'Exportar dados (CSV completo)')}
+          ${card('/atb/export', '📄', 'Exportar resumo (prescritores & IrAS)')}
           ${card('/atb/admin/cve-painel', '📋', 'Painel CVE (IrAS & ISC)')}
         </div>
 

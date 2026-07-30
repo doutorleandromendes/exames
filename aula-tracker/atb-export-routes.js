@@ -144,6 +144,46 @@ function paginaEscolha({ titulo, subtitulo, hrefBase, nota }) {
 </body></html>`;
 }
 
+// Variante com VÁRIOS grupos de exportação, cada um com seus botões de recorte.
+// Usada quando a mesma porta oferece mais de um CSV (ex.: prescritores + IrAS).
+function paginaEscolhaMulti({ titulo, subtitulo, grupos, nota }) {
+  const secoes = grupos.map((g) => {
+    const botoes = Object.entries(PERIODOS).map(([k, v]) =>
+      `<a class="btn" href="${g.hrefBase}?periodo=${k}">${v.rotulo}</a>`).join('');
+    return `<div class="grupo">
+      <div class="grupo-tit">${g.rotulo}</div>
+      ${g.desc ? `<div class="grupo-desc">${g.desc}</div>` : ''}
+      <div class="grid">${botoes}</div>
+    </div>`;
+  }).join('');
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${titulo}</title>
+<style>
+  :root{--az:#1f6feb;--bg:#f4f6fb;--tx:#1b2330;--mut:#5b6472;--ln:#dde3ee}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx);padding:28px 16px}
+  .wrap{max-width:620px;margin:0 auto;background:#fff;border:1px solid var(--ln);border-radius:14px;padding:26px 24px;box-shadow:0 1px 3px rgba(20,30,50,.05)}
+  h1{margin:0 0 4px;font-size:20px}
+  .sub{color:var(--mut);margin:0 0 20px;font-size:14px}
+  .grupo{margin-bottom:22px}
+  .grupo-tit{font-weight:700;font-size:15px;margin-bottom:2px}
+  .grupo-desc{color:var(--mut);font-size:13px;margin-bottom:10px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .btn{display:flex;align-items:center;justify-content:center;text-align:center;padding:14px 12px;border:1px solid var(--ln);border-radius:10px;background:#fbfcfe;color:var(--tx);text-decoration:none;font-weight:600;transition:.12s}
+  .btn:hover{border-color:var(--az);background:#eef4ff;color:var(--az)}
+  .nota{margin-top:8px;padding-top:16px;border-top:1px solid var(--ln);color:var(--mut);font-size:13px}
+  @media(max-width:480px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+  <div class="wrap">
+    <h1>${titulo}</h1>
+    <p class="sub">${subtitulo}</p>
+    ${secoes}
+    ${nota ? `<div class="nota">${nota}</div>` : ''}
+  </div>
+</body></html>`;
+}
+
 export function registerExportRoutes(app, pool, adminRequired) {
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -207,10 +247,15 @@ export function registerExportRoutes(app, pool, adminRequired) {
   app.get('/atb/export', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     if (!temAcesso(req)) return res.send(paginaRestrito(req));
-    res.send(paginaEscolha({
+    res.send(paginaEscolhaMulti({
       titulo: 'Exportar dados das fichas',
-      subtitulo: 'Conteúdo inserido pelos prescritores no formulário. Escolha o recorte de tempo.',
-      hrefBase: '/atb/export/prescritores.csv',
+      subtitulo: 'Escolha o que exportar e o recorte de tempo.',
+      grupos: [
+        { rotulo: 'Dados dos prescritores', hrefBase: '/atb/export/prescritores.csv',
+          desc: 'Conteúdo inserido pelos prescritores no formulário.' },
+        { rotulo: 'IrAS (data · prontuário · nome · setor · IrAS)', hrefBase: '/atb/export/iras.csv',
+          desc: 'Uma linha por ficha com IrAS classificada. Só estes cinco campos.' },
+      ],
       nota: 'Abrange fichas do sistema novo e importadas do JotForm.',
     }));
   });
@@ -280,6 +325,48 @@ export function registerExportRoutes(app, pool, adminRequired) {
       res.send(montarCsv(result));
     } catch (e) {
       console.error('[atb] export prescritores:', e.message);
+      res.status(500).send('Erro ao exportar: ' + e.message);
+    }
+  });
+
+  // ── IrAS resumido (não admin-only): SÓ data, prontuário, nome, setor, IrAS ──
+  // Uma linha por ficha COM IrAS classificada (exclui descartes/repetidas/etc.).
+  // Mesmo gate (temAcesso) e mesmas periodicidades do export de prescritores.
+  app.get('/atb/export/iras.csv', async (req, res) => {
+    if (!temAcesso(req)) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(paginaRestrito(req));
+    }
+    const periodoKey = normPeriodo(req.query.periodo);
+    const per = PERIODOS[periodoKey];
+    try {
+      const inst = req.atbTenant;
+      const params = [];
+      const escT = escopoTenant(inst, params);
+      const corte = per.sql
+        ? ` AND ${DATA_CANONICA} >= now() - interval '${per.sql}'` : '';
+      // Só fichas com IrAS de verdade (mesma régua do painel/grid).
+      const sql = `
+        SELECT
+          to_char(${DATA_CANONICA} AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS data,
+          f.prontuario   AS prontuario,
+          f.paciente_nome AS nome,
+          f.setor        AS setor,
+          a.iras         AS iras
+        FROM atb_fichas f
+        LEFT JOIN atb_avaliacoes a ON a.ficha_id = f.id
+        WHERE f.deletado_em IS NULL
+          AND a.iras IS NOT NULL AND a.iras <> ''
+          AND a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post')
+          ${escT}${corte}
+        ORDER BY ${DATA_CANONICA} DESC`;
+      const result = await pool.query(sql, params);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition',
+        `attachment; filename="${nomeArquivo('iras', periodoKey)}"`);
+      res.send(montarCsv(result));
+    } catch (e) {
+      console.error('[atb] export iras:', e.message);
       res.status(500).send('Erro ao exportar: ' + e.message);
     }
   });

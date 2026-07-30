@@ -325,7 +325,7 @@ export function gridControlsUI(query, pager, opts = {}) {
   <div class="gf-bar">
     <form method="GET" action="/atb/admin/grid" style="display:flex;gap:8px;align-items:center">
       ${hidden(['q'])}
-      <input name="q" value="${val('q')}" placeholder="Paciente, prontuário…" class="gf-in" style="width:210px">
+      <input name="q" value="${val('q')}" placeholder="Paciente, prontuário, atendimento…" class="gf-in" style="width:210px">
       <button class="gf-btn" type="submit">Buscar</button>
     </form>
     <button type="button" class="gf-btn" onclick="var p=document.getElementById('gf-filtros');p.style.display=p.style.display==='none'?'block':'none';document.getElementById('gf-colunas').style.display='none'">🔍 Filtros${nAtivos ? `<span class="badge">${nAtivos}</span>` : ''}</button>
@@ -370,7 +370,7 @@ export function buildGridWhere(query, colsReais) {
   const where = ['f.deletado_em IS NULL'], params = [];
   if (q) {
     params.push('%' + q.toLowerCase() + '%');
-    where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length})`);
+    where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length} OR f.atendimento LIKE $${params.length})`);
   }
   if (inst)  { params.push(inst);  where.push(`i.sigla = $${params.length}`); }
   const _setores = (Array.isArray(Q.setor) ? Q.setor : String(Q.setor || '').split(',')).map(x => x.trim()).filter(Boolean);

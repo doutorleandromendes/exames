@@ -51,6 +51,10 @@ function page(title, body) {
   .hubcard.soon{color:#8a93a3;cursor:default;border-style:dashed}
   .hubcard.soon:hover{background:#fff}
   .sec{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:18px 0 8px;font-weight:600}
+  .sec.op{border-left:3px solid #85B7EB;padding-left:10px}
+  .sec.vig{border-left:3px solid #5DCAA5;padding-left:10px}
+  .sec.cfg{border-left:3px solid #EF9F27;padding-left:10px}
+  .sec.man{border-left:3px solid #B4B2A9;padding-left:10px}
   .tag{margin-left:auto;font-size:11px;background:#f1efe8;color:#5f5e5a;border-radius:999px;padding:2px 8px;font-weight:600}
   .ext{margin-left:auto;font-size:13px;color:#8a93a3}
 </style></head><body><div class="wrap">${body}</div></body></html>`;
@@ -93,10 +97,15 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
   const VIG = 'https://doutorleandromendes.github.io/vigilancia_husf';
   app.get('/scih', adminSuper, async (req, res) => {
     const nome = (req.user && req.user.full_name) || 'Dr. Leandro';
-    const card = (href, icon, label, ext, badge) =>
-      `<a class="hubcard" href="${href}"${ext ? ' target="_blank" rel="noopener"' : ''}>${icon} ${label}${
+    // O 6º parâmetro (kw) são palavras-chave/sinônimos para a busca do portal.
+    // O texto buscável (label + kw, sem acento, minúsculo) vai em data-busca.
+    const _semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const card = (href, icon, label, ext, badge, kw) => {
+      const busca = _semAcento(String(label).replace(/&amp;/g, 'e') + ' ' + (kw || ''));
+      return `<a class="hubcard" href="${href}" data-busca="${busca}"${ext ? ' target="_blank" rel="noopener"' : ''}>${icon} ${label}${
         badge ? ` <span style="background:#e85d5d;color:#fff;border-radius:9px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px">${badge}</span>` : ''
       }${ext ? ' <span class="ext">↗</span>' : ''}</a>`;
+    };
 
     // Contadores ao vivo do ISC. Um portal diário sem número é só lista de links.
     // Nunca deixa o portal cair por causa disto: se a query falhar, os cards vão
@@ -137,99 +146,106 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         <h1>Portal do SCIH — HUSF</h1>
         <p class="mut">Olá, ${esc(nome)}. Atalhos dos sistemas do SCIH, dos relatórios de
         vigilância e da gestão de acessos.</p>
+        <div style="margin-top:14px;position:relative">
+          <input id="buscaPortal" type="search" autocomplete="off"
+            placeholder="Buscar… (ex.: exportar, hemocultura, regras, csv, pav)"
+            style="width:100%;padding:12px 14px;border:1px solid var(--bd);border-radius:12px;font-size:15px;background:#fff;box-sizing:border-box"
+            oninput="filtrarPortal(this.value)">
+          <div id="buscaVazia" style="display:none;color:var(--mut);font-size:13px;margin-top:8px">Nada encontrado. Tente outra palavra.</div>
+        </div>
       </div>
       <div class="card">
-        <div class="sec" style="margin-top:0">Operação diária — ATB</div>
+        <div class="sec op" style="margin-top:0">Operação diária — ATB</div>
         <div class="hub">
-          ${card('/grade', '📋', 'Grade de controle')}
-          ${card('/atb/admin/ficha-retrospectiva', '➕', 'Nova ficha retrospectiva')}
-          ${card('/consulta', '🔎', 'Consulta / Farmácia')}
-          ${card('/ficha', '📝', 'Formulário do prescritor')}
+          ${card('/grade', '📋', 'Grade de controle', false, null, 'grade tabela fichas lista pacientes controle atb prescricoes')}
+          ${card('/atb/admin/ficha-retrospectiva', '➕', 'Nova ficha retrospectiva', false, null, 'retrospectiva adicionar criar ficha nova passado')}
+          ${card('/consulta', '🔎', 'Consulta / Farmácia', false, null, 'consulta farmacia buscar paciente parecer dispensacao liberar')}
+          ${card('/ficha', '📝', 'Formulário do prescritor', false, null, 'formulario prescritor preencher solicitar atb nova prescricao')}
         </div>
 
         ${mostrarISC ? `
-        <div class="sec">Vigilância pós-alta — ISC</div>
+        <div class="sec op">Vigilância pós-alta — ISC</div>
         <div class="hub">
-          ${card('/isc/admin/agenda', '📞', 'Agenda de contatos', false, iscVenc || null)}
-          ${card('/isc/admin/grid', '🩹', 'Grid de vigilância', false, iscTriagem || null)}
-          ${card('/isc/admin/nova', '➕', 'Nova ficha (manual)')}
-          ${card('/isc/admin/importar', '📥', 'Importar mapa cirúrgico')}
+          ${card('/isc/admin/agenda', '📞', 'Agenda de contatos', false, iscVenc || null, 'agenda contatos ligacao telefone isc pos-alta seguimento vigilancia')}
+          ${card('/isc/admin/grid', '🩹', 'Grid de vigilância', false, iscTriagem || null, 'grid vigilancia isc infeccao sitio cirurgico pos-alta')}
+          ${card('/isc/admin/nova', '➕', 'Nova ficha (manual)', false, null, 'isc nova ficha manual adicionar cirurgia')}
+          ${card('/isc/admin/importar', '📥', 'Importar mapa cirúrgico', false, null, 'importar mapa cirurgico tasy planilha upload isc')}
         </div>` : ''}
 
-        <div class="sec">Bundle de prevenção — PAV</div>
+        <div class="sec op">Bundle de prevenção — PAV</div>
         <div class="hub">
-          ${card('/pav/admin/grid', '🫁', 'Grid do bundle')}
-          ${card('/pav/m', '📱', 'Coleta à beira-leito')}
+          ${card('/pav/admin/grid', '🫁', 'Grid do bundle', false, null, 'pav bundle prevencao pneumonia ventilador grid checklist')}
+          ${card('/pav/m', '📱', 'Coleta à beira-leito', false, null, 'pav coleta beira leito mobile celular bundle checklist')}
         </div>
 
-        <div class="sec">Indicadores &amp; consumo</div>
+        <div class="sec vig">Indicadores &amp; consumo</div>
         <div class="hub">
-          ${card('/atb/admin/adesao', '📈', 'Adesão aos pareceres')}
-          ${card(VIG + '/atb_dots.html', '💊', 'Consumo de ATB (DOTs)', true)}
-          ${card('/atb/admin/pergunta', '💬', 'Pergunta ao banco (SQL)')}
-          ${card('/atb/admin/indicadores', '📉', 'Pergunta aos indicadores')}
-          ${card('/atb/admin/export', '📤', 'Exportar dados (CSV completo)')}
-          ${card('/atb/export', '📄', 'Exportar resumo (prescritores & IrAS)')}
-          ${card('/atb/admin/cve-painel', '📋', 'Painel CVE (IrAS & ISC)')}
+          ${card('/atb/admin/adesao', '📈', 'Adesão aos pareceres', false, null, 'adesao pareceres seguimento indicador desfecho mantido suspenso')}
+          ${card(VIG + '/atb_dots.html', '💊', 'Consumo de ATB (DOTs)', true, null, 'consumo dots dose atb antibiotico ddd densidade')}
+          ${card('/atb/admin/pergunta', '💬', 'Pergunta ao banco (SQL)', false, null, 'pergunta sql banco query consulta dados nlq linguagem natural')}
+          ${card('/atb/admin/indicadores', '📉', 'Pergunta aos indicadores', false, null, 'indicadores pergunta relatorio narrativa iras taxa')}
+          ${card('/atb/admin/export', '📤', 'Exportar dados (CSV completo)', false, null, 'exportar csv completo dados planilha download admin backup')}
+          ${card('/atb/export', '📄', 'Exportar resumo (prescritores & IrAS)', false, null, 'exportar csv resumo prescritores iras planilha download sumario')}
+          ${card('/atb/admin/cve-painel', '📋', 'Painel CVE (IrAS & ISC)', false, null, 'cve painel iras isc notificacao especialidade procedimento peso neonatal')}
         </div>
 
-        <div class="sec">Vigilância — relatórios HUSF</div>
+        <div class="sec vig">Vigilância — relatórios HUSF</div>
         <div class="hub">
-          ${card(VIG + '/', '🦠', 'Respiratória (SG/SRAG)', true)}
-          ${card(VIG + '/indicadores.html', '📊', 'IrAS &amp; determinantes', true)}
-          ${card(VIG + '/mdr_mensal.html', '🧫', 'MDR mensal', true)}
-          ${card(VIG + '/isc_v4.html', '🩹', 'ISC — histórico (JotForm)', true)}
-          ${card(VIG + '/micro.html', '🔬', 'Microbiologia', true)}
-          ${card(VIG + '/sciet.html', '🧭', 'Algoritmo empírico UTI', true)}
+          ${card(VIG + '/', '🦠', 'Respiratória (SG/SRAG)', true, null, 'respiratoria sg srag gripe influenza sindrome respiratoria')}
+          ${card(VIG + '/indicadores.html', '📊', 'IrAS &amp; determinantes', true, null, 'iras determinantes indicadores taxa densidade infeccao relatorio')}
+          ${card(VIG + '/mdr_mensal.html', '🧫', 'MDR mensal', true, null, 'mdr multirresistente resistencia mensal relatorio kpc')}
+          ${card(VIG + '/isc_v4.html', '🩹', 'ISC — histórico (JotForm)', true, null, 'isc historico jotform sitio cirurgico antigo')}
+          ${card(VIG + '/micro.html', '🔬', 'Microbiologia', true, null, 'microbiologia micro cultura germe bacteria relatorio')}
+          ${card(VIG + '/sciet.html', '🧭', 'Algoritmo empírico UTI', true, null, 'algoritmo empirico uti sciet antibiotico escolha terapia')}
         </div>
 
-        <div class="sec">Gestão &amp; governança</div>
+        <div class="sec cfg">Gestão &amp; governança</div>
         <div class="hub">
-          ${card('/gov', '🏛️', 'Painel do Comitê de Governança')}
+          ${card('/gov', '🏛️', 'Painel do Comitê de Governança', false, null, 'governanca gestao comite gov painel estrategico mortalidade')}
         </div>
 
-        <div class="sec">Acessos &amp; configuração</div>
+        <div class="sec cfg">Acessos &amp; configuração</div>
         <div class="hub">
-          ${card('/atb/admin/scih', '👥', 'Aprovar pedidos de acesso')}
-          ${card('/admin/usuarios', '🗂️', 'Usuários e papéis')}
-          ${card('/atb/admin/regras', '🧠', 'Regras de triagem')}
-          ${card('/atb/admin/monitoramento', '🔁', 'Regras de monitoramento')}
-          ${card('/atb/admin/form', '🧩', 'Editar opções do formulário')}
-          ${card('/atb/admin/regras-form', '🔀', 'Regras do formulário')}
-          ${card('/atb/admin/historia/revisao', '🤖', 'Triagens de IA — revisão', false, iaPend || null)}
-          ${card('/atb/admin/parecer-frases', '💬', 'Frases do Parecer')}
-          ${card('/acesso/solicitar', '✉️', 'Formulário público de solicitação')}
-          ${card('/atb/admin/config', '⚙️', 'Configurar ATB')}
+          ${card('/atb/admin/scih', '👥', 'Aprovar pedidos de acesso', false, null, 'aprovar acesso pedidos solicitacao usuarios permissao scih')}
+          ${card('/admin/usuarios', '🗂️', 'Usuários e papéis', false, null, 'usuarios papeis perfil permissao acesso admin roles')}
+          ${card('/atb/admin/regras', '🧠', 'Regras de triagem', false, null, 'regras triagem classificacao iras descarte automatico')}
+          ${card('/atb/admin/monitoramento', '🔁', 'Regras de monitoramento', false, null, 'regras monitoramento periodico automatico cron alerta')}
+          ${card('/atb/admin/form', '🧩', 'Editar opções do formulário', false, null, 'editar formulario campos opcoes form-editor atb dropdown')}
+          ${card('/atb/admin/regras-form', '🔀', 'Regras do formulário', false, null, 'regras formulario visibilidade condicional obrigatorio campos')}
+          ${card('/atb/admin/historia/revisao', '🤖', 'Triagens de IA — revisão', false, iaPend || null, 'triagem ia revisao narrativa isc historia telegrafica ilegivel llm')}
+          ${card('/atb/admin/parecer-frases', '💬', 'Frases do Parecer', false, null, 'frases parecer texto modelo template recomendacao')}
+          ${card('/acesso/solicitar', '✉️', 'Formulário público de solicitação', false, null, 'formulario publico solicitacao acesso link externo')}
+          ${card('/atb/admin/config', '⚙️', 'Configurar ATB', false, null, 'configurar config atb ajustes parametros sistema')}
         </div>
 
-        <div class="sec">Diagnóstico &amp; manutenção</div>
+        <div class="sec man">Diagnóstico &amp; manutenção</div>
         <div class="hub">
-          ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema')}
-          ${card('/atb/admin/healthcheck/painel', '🩹', 'Healthcheck do formulário')}
-          ${card('/atb/admin/integridade/painel', '🛡️', 'Integridade dos dados')}
+          ${card('/atb/admin/regras-check/painel', '🩺', 'Saúde do sistema', false, null, 'saude sistema diagnostico regras-check status monitoramento')}
+          ${card('/atb/admin/healthcheck/painel', '🩹', 'Healthcheck do formulário', false, null, 'healthcheck formulario saude verificacao integridade')}
+          ${card('/atb/admin/integridade/painel', '🛡️', 'Integridade dos dados', false, null, 'integridade dados verificacao probe jotform consistencia')}
         </div>
 
-        <div class="sec">Ferramentas &amp; checks</div>
+        <div class="sec man">Ferramentas &amp; checks</div>
         <div class="hub">
-          ${card('/atb/admin/culturas', '🧫', 'Culturas — conferência')}
-          ${card('/atb/admin/hemocultura', '🩸', 'Hemoculturas')}
-          ${card('/atb/admin/mdr', '⚠️', 'Alertas MDR')}
-          ${card('/atb/admin/nomes/backcheck', '🔤', 'Backcheck de nomes')}
-          ${card('/atb/admin/pacs-nome/teste', '🖼️', 'Teste do worker PACS')}
-          ${card('/atb/admin/posologia/normalizar', '⚗️', 'Normalizar posologia')}
+          ${card('/atb/admin/culturas', '🧫', 'Culturas — conferência', false, null, 'culturas conferencia microbiologia cultura verificar')}
+          ${card('/atb/admin/hemocultura', '🩸', 'Hemoculturas', false, null, 'hemocultura sangue bacteremia alerta precoce')}
+          ${card('/atb/admin/mdr', '⚠️', 'Alertas MDR', false, null, 'mdr multirresistente alerta resistencia kpc token')}
+          ${card('/atb/admin/nomes/backcheck', '🔤', 'Backcheck de nomes', false, null, 'backcheck nomes pacs verificacao divergencia paciente')}
+          ${card('/atb/admin/pacs-nome/teste', '🖼️', 'Teste do worker PACS', false, null, 'pacs worker teste imagem exame animati puppeteer')}
+          ${card('/atb/admin/posologia/normalizar', '⚗️', 'Normalizar posologia', false, null, 'posologia normalizar dose unidade estruturar converter')}
         </div>
 
-        <div class="sec">Formulário — teste e promoção</div>
+        <div class="sec man">Formulário — teste e promoção</div>
         <div class="hub">
-          ${card('/atb/admin/form-teste', '🧪', 'Ambiente de teste')}
-          ${card('/atb/admin/form-transportador', '🚚', 'Transportador (promover)')}
+          ${card('/atb/admin/form-teste', '🧪', 'Ambiente de teste', false, null, 'teste ambiente formulario sandbox experimentar')}
+          ${card('/atb/admin/form-transportador', '🚚', 'Transportador (promover)', false, null, 'transportador promover publicar engine schema deploy formulario')}
         </div>
         ${mostrarISC ? `
-        <div class="sec">Configuração — ISC</div>
+        <div class="sec cfg">Configuração — ISC</div>
         <div class="hub">
-          ${card('/isc/admin/triagem', '🔀', 'Regras de triagem (o que entra)')}
-          ${card('/isc/admin/templates', '💬', 'Mensagens do WhatsApp')}
-          ${card('/isc/admin/export.csv', '📄', 'Exportar CSV')}
+          ${card('/isc/admin/triagem', '🔀', 'Regras de triagem (o que entra)', false, null, 'isc triagem regras entra vigilancia procedimento')}
+          ${card('/isc/admin/templates', '💬', 'Mensagens do WhatsApp', false, null, 'whatsapp mensagens templates isc contato texto')}
+          ${card('/isc/admin/export.csv', '📄', 'Exportar CSV', false, null, 'exportar csv isc planilha download')}
         </div>
         ${iscOk ? '' : '<p class="mut" style="font-size:12px;margin-top:8px">⚠ Não consegui ler os contadores do ISC — se acabou de subir, confira o log das migrações.</p>'}` : ''}
         ${(() => {
@@ -264,7 +280,29 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
         </div>`;
           }).join('');
         })()}
-      </div>`));
+      </div>
+      <script>
+        function filtrarPortal(q){
+          var termo = (q||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+          var cards = document.querySelectorAll('.hubcard');
+          for (var i=0;i<cards.length;i++){
+            var busca = cards[i].getAttribute('data-busca') || '';
+            cards[i].style.display = (!termo || busca.indexOf(termo) !== -1) ? '' : 'none';
+          }
+          // esconde seções (o .sec e o .hub) que ficaram sem nenhum card visível
+          var hubs = document.querySelectorAll('.hub');
+          var algum = false;
+          for (var j=0;j<hubs.length;j++){
+            var visiveis = hubs[j].querySelectorAll('.hubcard:not([style*="display: none"])').length;
+            var sec = hubs[j].previousElementSibling;
+            hubs[j].style.display = visiveis ? '' : 'none';
+            if (sec && sec.classList && sec.classList.contains('sec')) sec.style.display = visiveis ? '' : 'none';
+            if (visiveis) algum = true;
+          }
+          var vazia = document.getElementById('buscaVazia');
+          if (vazia) vazia.style.display = (termo && !algum) ? '' : 'none';
+        }
+      </script>`));
   });
 
   // ───────────────────────── público: solicitar acesso (SCIH) ─────────────

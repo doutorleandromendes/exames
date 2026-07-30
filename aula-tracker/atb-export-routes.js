@@ -254,7 +254,7 @@ export function registerExportRoutes(app, pool, adminRequired) {
         { rotulo: 'Dados dos prescritores', hrefBase: '/atb/export/prescritores.csv',
           desc: 'Conteúdo inserido pelos prescritores no formulário.' },
         { rotulo: 'IrAS (data · prontuário · nome · setor · IrAS)', hrefBase: '/atb/export/iras.csv',
-          desc: 'Uma linha por ficha com IrAS classificada. Só estes cinco campos.' },
+          desc: 'Uma linha por ficha com IrAS classificada.' },
       ],
       nota: 'Abrange fichas do sistema novo e importadas do JotForm.',
     }));

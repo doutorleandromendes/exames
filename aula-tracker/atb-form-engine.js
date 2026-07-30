@@ -385,12 +385,23 @@
         type: 'text', inputMode: 'decimal', style: { maxWidth: '110px' },
         value: (val === null || val === undefined) ? '' : String(val),
         placeholder: c.placeholder || '',
-        onChange: function (ev) { onChange(ev.target.value); },
+        onChange: function (ev) {
+          // Campo numérico não aceita texto: descarta tudo que não for dígito,
+          // vírgula ou ponto (prescritor escrevia '1 amp', '2 cp', '500mg' aqui).
+          // type=text + inputMode decimal é de propósito: teclado numérico no
+          // celular, sem setinhas, e a vírgula do pt-BR continua valendo.
+          var limpo = String(ev.target.value == null ? '' : ev.target.value).replace(/[^0-9.,]/g, '');
+          // um separador decimal só
+          var partes = limpo.split(/[.,]/);
+          if (partes.length > 2) limpo = partes[0] + ',' + partes.slice(1).join('');
+          onChange(limpo);
+        },
         onBlur: function (ev) {
           var t = String(ev.target.value == null ? '' : ev.target.value).trim().replace(',', '.');
           if (t === '') return onChange('');
           var n = Number(t);
           if (!isNaN(n) && isFinite(n)) onChange(n);
+          else onChange('');   // sobrou algo que não vira número: limpa
         }
       });
     }

@@ -386,6 +386,10 @@ export async function ensureFormSchemaTable(pool) {
   // os tiver. RESTRITO AO HUSF — o SCMI não recebe (buildSCMI remove os campos).
   await _garantirCampoHUSF(pool, 'dose_vanco');
   await _garantirCampoHUSF(pool, 'dose_bactrim');
+
+  // Ajustes nas colunas da posologia do schema VIVO (o schemaPosologiaEstruturada
+  // não reescreve colunas já estruturadas, então essas correções vêm por aqui).
+  await _ajustarColunasPosologia(pool);
 }
 
 // Injeta um campo-widget da SEMENTE_HUSF (modelo extraído do próprio seed, garantindo
@@ -393,6 +397,50 @@ export async function ensureFormSchemaTable(pool) {
 // RESTRITO AO HUSF — o SCMI não recebe (buildSCMI remove esses campos). Idempotente
 // e não-clobber. Usado para dose_vanco e dose_bactrim (widgets que vivem na semente
 // mas precisam ser injetados no schema vivo do banco, que não vem do seed).
+// Corrige as colunas da matriz de posologia no schema ATIVO (todas as instituições).
+// Idempotente: só grava quando algo muda de fato.
+//   • tira 'amp' das unidades — prescritor preguiçoso escrevia '1 amp 6/6' e a
+//     dose ficava sem miligrama nenhuma (não dá para conferir nem somar DOT).
+//   • 'A cada X horas' → 'De horário': o texto antigo era lido como uso pontual,
+//     e quem prescrevia 1x/dia acabava marcando 'Dose única'.
+//   • 'A cada (h)' → 'Intervalo (h)' no campo de horas, pela mesma razão.
+async function _ajustarColunasPosologia(pool) {
+  const { rows } = await pool.query(`SELECT id, definicao FROM atb_form_schema WHERE ativo=true`);
+  for (const row of rows) {
+    const def = row.definicao;
+    if (!def || !Array.isArray(def.secoes)) continue;
+    let mudou = false;
+    for (const sec of def.secoes) {
+      for (const campo of (sec.campos || [])) {
+        if (campo.key !== 'posologia' || !Array.isArray(campo.colunas)) continue;
+        for (const col of campo.colunas) {
+          if (col.key === 'dose_unidade' && Array.isArray(col.options)) {
+            const semAmp = col.options.filter((o) => {
+              const v = (o && typeof o === 'object') ? o.v : o;
+              return String(v).toLowerCase() !== 'amp';
+            });
+            if (semAmp.length !== col.options.length) { col.options = semAmp; mudou = true; }
+          }
+          if (col.key === 'freq_tipo' && Array.isArray(col.options)) {
+            for (const o of col.options) {
+              if (o && typeof o === 'object' && o.v === 'cada' && o.l !== 'De horário') {
+                o.l = 'De horário'; mudou = true;
+              }
+            }
+          }
+          if (col.key === 'freq_horas' && col.label && col.label !== 'Intervalo (h)') {
+            col.label = 'Intervalo (h)'; mudou = true;
+          }
+        }
+      }
+    }
+    if (!mudou) continue;
+    await pool.query(`UPDATE atb_form_schema SET definicao=$1::jsonb WHERE id=$2`,
+      [JSON.stringify(def), row.id]);
+    console.log(`[atb-form-schema] colunas da posologia ajustadas no schema id=${row.id} (${def.instituicao || '?'})`);
+  }
+}
+
 async function _garantirCampoHUSF(pool, key) {
   const secSem = SEMENTE_HUSF.secoes.find(s => s.id === 'atb_solicitado');
   const modeloRaw = secSem && secSem.campos.find(c => c.key === key);

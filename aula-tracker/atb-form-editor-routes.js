@@ -32,7 +32,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { getFormSchema, saveFormSchema } from './atb-form-schema.js';
-import { camposDoSchema, colunasReaisFichas, COLUNA_DE, COLUNAS_SISTEMA } from './atb-field-registry.js';
+import { camposDoSchema, colunasReaisFichas, COLUNA_DE, COLUNAS_SISTEMA, ehSimNao } from './atb-field-registry.js';
 import { COLS as GRID_COLS } from './atb-grid-filters.js';
 
 // ── constantes de política ────────────────────────────────────────────────────
@@ -78,6 +78,7 @@ function validarCond(cond, keysValidas, caminho, erros) {
 // Retorna { ok, erros: [string] }. Função PURA (não toca banco) — testável.
 export function validarDefinicao(def, ctx = {}) {
   const erros = [];
+  const avisos = [];
   if (!def || typeof def !== 'object') return { ok: false, erros: ['definição ausente'] };
   if (!Array.isArray(def.secoes) || !def.secoes.length)
     return { ok: false, erros: ['schema precisa de ao menos uma seção'] };
@@ -122,6 +123,26 @@ export function validarDefinicao(def, ctx = {}) {
 
   // travas relativas ao schema atual
   const { schemaAtual, colunasReais } = ctx;
+
+  // Valores citados LITERALMENTE por alguma condição do schema novo. Uma cond
+  // compara texto de opção caractere a caractere; se a opção for renomeada e a
+  // cond não acompanhar, o campo simplesmente para de aparecer — sem erro, sem
+  // log. É a falha mais silenciosa do editor, então ela vira erro duro.
+  const citados = {};
+  const varreCond = (cond) => {
+    if (!cond || typeof cond !== 'object') return;
+    if (Array.isArray(cond.all)) return cond.all.forEach(varreCond);
+    if (Array.isArray(cond.any)) return cond.any.forEach(varreCond);
+    if (!cond.campo) return;
+    const vs = Array.isArray(cond.valor) ? cond.valor : [cond.valor];
+    for (const v of vs) if (v != null) (citados[cond.campo] || (citados[cond.campo] = new Set())).add(String(v));
+  };
+  for (const sec of def.secoes) {
+    varreCond(sec.cond);
+    for (const c of (sec.campos || [])) { varreCond(c.cond); varreCond(c.requiredCond); }
+  }
+  for (const r of (def.preenchimentos || [])) varreCond(r && r.quando);
+
   if (schemaAtual) {
     const antigos = {};
     for (const sec of (schemaAtual.secoes || []))
@@ -149,11 +170,27 @@ export function validarDefinicao(def, ctx = {}) {
           if (temColuna || !TIPOS_CRIAVEIS.includes(antigo.type))
             erros.push(`${c.key}: tipo travado ("${antigo.type}" → "${c.type}" não permitido; campo integrado ou tipo de sistema)`);
         }
+
+        // `options` é IDENTIDADE, não rótulo: é o texto gravado na coluna, o
+        // que as conds comparam e o que o glossário do NL→SQL ensina ao modelo.
+        // Acrescentar opção é livre; tirar ou renomear é que quebra.
+        if (Array.isArray(antigo.options) && Array.isArray(c.options)) {
+          const novas = new Set(c.options.map(o => String(o)));
+          const refs = citados[c.key];
+          const col = COLUNA_DE[c.key] || c.key;
+          for (const o of antigo.options.map(o => String(o))) {
+            if (novas.has(o)) continue;
+            if (refs && refs.has(o))
+              erros.push(`${c.key}: opção "${o}" removida/renomeada, mas ainda citada por uma condição — o campo condicionado sumiria do formulário sem aviso`);
+            else if (colunasReais && colunasReais.has(col))
+              avisos.push(`${c.key}: opção "${o}" removida; as fichas já gravadas mantêm esse texto em ${col} e deixam de casar com os filtros`);
+          }
+        }
       }
     }
   }
 
-  return { ok: erros.length === 0, erros };
+  return { ok: erros.length === 0, erros, avisos };
 }
 
 // ── status de integração por campo (pro badge da UI) ─────────────────────────
@@ -220,13 +257,23 @@ export function registerFormEditorRoutes(app, pool, adminRequired, renderShell) 
       const cols = await colunasReaisFichas(pool);
       if (cols.has(col)) return res.json({ ok: true, col, tipo: '(já era coluna)', migrados: 0, jaExistia: true });
 
-      const tipo = campo.type === 'date' ? 'DATE' : campo.type === 'number' ? 'NUMERIC' : campo.type === 'checkbox' ? 'JSONB' : 'TEXT';
+      // Sim/Não vira BOOLEAN, não TEXT: é a convenção de TODA coluna Sim/Não
+      // feita à mão em atb_fichas (sepse, gestante, dialise, uso_atb_7d,
+      // faz_quimio, cateter_quimio, oxacilina_associacao). Promover como TEXT
+      // criaria colunas guardando 'Sim'/'Não' ao lado de irmãs booleanas, e
+      // quebraria o glossário do NL→SQL, os filtros da grade e o catálogo de
+      // regras — que já assumem booleano. Converter depois, com dado dentro,
+      // seria migração; aqui é de graça.
+      const simNao = (campo.type === 'radio' || campo.type === 'select') && ehSimNao(campo.options);
+      const tipo = campo.type === 'date' ? 'DATE' : campo.type === 'number' ? 'NUMERIC' : campo.type === 'checkbox' ? 'JSONB' : simNao ? 'BOOLEAN' : 'TEXT';
       await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS ${col} ${tipo}`);
 
       let expr;
       if (tipo === 'DATE')        expr = `CASE WHEN payload_raw->>'${key}' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' THEN (payload_raw->>'${key}')::date END`;
       else if (tipo === 'NUMERIC') expr = `CASE WHEN payload_raw->>'${key}' ~ '^-?[0-9]+([.][0-9]+)?$' THEN (payload_raw->>'${key}')::numeric END`;
       else if (tipo === 'JSONB')   expr = `payload_raw->'${key}'`;
+      else if (tipo === 'BOOLEAN') expr = `CASE WHEN lower(btrim(payload_raw->>'${key}')) = 'sim' THEN true`
+                                        + ` WHEN lower(btrim(payload_raw->>'${key}')) IN ('não','nao') THEN false END`;
       else                         expr = `NULLIF(payload_raw->>'${key}', '')`;
       const up = await pool.query(`UPDATE atb_fichas SET ${col} = ${expr} WHERE payload_raw ? '${key}' AND ${col} IS NULL`);
 
@@ -249,7 +296,7 @@ export function registerFormEditorRoutes(app, pool, adminRequired, renderShell) 
       const v = validarDefinicao(defLimpa, { schemaAtual, colunasReais });
       if (!v.ok) return res.status(400).json({ ok: false, erros: v.erros });
       const versaoNova = await saveFormSchema(pool, inst, defLimpa, null);
-      res.json({ ok: true, versao: versaoNova });
+      res.json({ ok: true, versao: versaoNova, avisos: v.avisos || [] });
     } catch (e) {
       res.status(500).json({ ok: false, erros: [e.message] });
     }

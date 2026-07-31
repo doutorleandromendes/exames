@@ -92,6 +92,7 @@ export function camposDoSchema(schema) {
         col,
         serial: TIPOS_JSON.has(c.type) ? 'json' : 'scalar',
         tipoForm: c.type,
+        opcoes: Array.isArray(c.options) ? c.options : null,
         secao: sec.id || sec.titulo || null,
       });
     }
@@ -107,7 +108,7 @@ export function registroFicha(schema) {
   }));
   const doSchema = camposDoSchema(schema).map(c => ({
     col: c.col, serial: c.serial, origem: 'coluna',
-    key: c.key, tipoForm: c.tipoForm, secao: c.secao,
+    key: c.key, tipoForm: c.tipoForm, opcoes: c.opcoes, secao: c.secao,
     from: ['parsed', c.col],        // o parser expõe pelos nomes de COLUNA
   }));
   return [...sistema, ...doSchema];
@@ -126,6 +127,51 @@ export async function colunasReaisFichas(pool) {
 export function serializa(serial, valor) {
   if (serial === 'json') return JSON.stringify(valor);
   return valor;
+}
+
+// ── Radio/select de Sim/Não → BOOLEAN ─────────────────────────────────────────
+// Toda coluna Sim/Não escrita à mão em atb_fichas é BOOLEAN (sepse, gestante,
+// dialise, uso_atb_7d, faz_quimio, cateter_quimio, oxacilina_associacao). Campo
+// novo criado no editor tem de seguir a mesma convenção, senão a superfície de
+// query racha: o glossário do NL→SQL ensina `= true` ao modelo e os filtros da
+// grade comparam booleano. Comparação sem acento porque o rótulo é digitado.
+const _norm = (v) => String(v == null ? '' : v).trim().toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+export function ehSimNao(opcoes) {
+  if (!Array.isArray(opcoes) || opcoes.length !== 2) return false;
+  const s = new Set(opcoes.map(_norm));
+  return s.has('sim') && s.has('nao');
+}
+
+// ── Coerção de um valor cru do payload_raw para o tipo da coluna ──────────────
+// Espelha as garantias do backfill de /atb/admin/form/promover-campo: string
+// vazia vira NULL, data só passa no formato ISO, número só passa se for número.
+// Sem isso, um campo de data tocado e depois limpo chega como '' e derruba o
+// INSERT inteiro (invalid input syntax for type date) — a ficha seria perdida.
+export function coagirDoPayload(tipoForm, opcoes, bruto) {
+  if (bruto === undefined || bruto === null) return null;
+  if (tipoForm === 'checkbox') return Array.isArray(bruto) ? bruto : (bruto === '' ? [] : [bruto]);
+  if (tipoForm === 'matrix')   return (typeof bruto === 'object') ? bruto : null;
+  if (tipoForm === 'date') {
+    const s = String(bruto).trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+  }
+  if (tipoForm === 'number') {
+    if (typeof bruto === 'number') return isFinite(bruto) ? bruto : null;
+    const s = String(bruto).trim().replace(',', '.');
+    if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
+    const n = Number(s);
+    return isFinite(n) ? n : null;
+  }
+  if (ehSimNao(opcoes)) {
+    const s = _norm(bruto);
+    if (s === 'sim') return true;
+    if (s === 'nao') return false;
+    return null;
+  }
+  const s = String(bruto).trim();
+  return s === '' ? null : s;
 }
 
 // ── Gerador do INSERT da ficha ────────────────────────────────────────────────
@@ -164,6 +210,18 @@ export function gerarInsertFichas({ schema, parsed, ctx, colunasReais }) {
     if (tipo === 'ctx')         valor = ctx ? ctx[ref] : null;
     else if (tipo === 'parsed') valor = parsed ? parsed[ref] : null;
     else valor = null;
+
+    // Rede de segurança do modelo híbrido. O parser (atb-parser.js) é uma lista
+    // escrita à mão; um campo do schema PROMOVIDO a coluna que ele ainda não
+    // conhece chegaria aqui como `undefined` e gravaria NULL — com o valor
+    // intacto em payload_raw, e a tela de ficha (que lê payload_raw com
+    // fallback) mascarando a perda. Dispara só quando o parser NÃO produziu a
+    // chave E o payload realmente a tem: `null` explícito do parser é decisão
+    // dele e continua valendo; chave ausente do payload segue virando NULL.
+    if (valor === undefined && item.origem === 'coluna' && ctx && ctx.payload_raw
+        && Object.prototype.hasOwnProperty.call(ctx.payload_raw, item.key)) {
+      valor = coagirDoPayload(item.tipoForm, item.opcoes, ctx.payload_raw[item.key]);
+    }
 
     valor = serializa(item.serial, valor);
     cols.push(item.col);

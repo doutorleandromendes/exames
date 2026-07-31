@@ -122,7 +122,14 @@ export async function resolveCampoCirurgiaInfectada(pool, sigla = 'HUSF') {
   let schema = null;
   try { schema = await getFormSchema(pool, sigla); } catch { /* sem schema, cai no padrão */ }
   const campos = schema ? (schema.secoes || schema.blocos || []).flatMap(s => s.campos || []) : [];
-  const campo = campos.find(c => RE_CIRURGIA_INFECTADA.test(`${c.key} ${c.label || ''}`));
+  // A regex casa tanto o campo de DATA quanto um campo de NOME da cirurgia
+  // infectada ("Qual a cirurgia infectada?"), e `find` devolve o primeiro na
+  // ordem do formulário — então arrastar um campo no editor mudaria o destino
+  // da data em silêncio, e a data acabaria gravada na coluna de texto. O que a
+  // ponte quer é inequivocamente uma DATA: filtra por tipo primeiro e só cai no
+  // comportamento antigo se nenhum campo de data casar.
+  const casa = (c) => RE_CIRURGIA_INFECTADA.test(`${c.key} ${c.label || ''}`);
+  const campo = campos.find(c => c.type === 'date' && casa(c)) || campos.find(casa);
   if (campo) return { key: campo.key, col: COLUNA_DE[campo.key] || campo.key, doSchema: true };
   // Sem campo no schema: usa o nome que o filtro "mês da cirurgia" da grade já
   // consulta (atb-grid-filters), para pelo menos falar a mesma língua que ele.

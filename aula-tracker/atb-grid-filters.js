@@ -25,6 +25,13 @@
 //  Sem schema novo — só leitura.
 // ════════════════════════════════════════════════════════════════════════════
 
+// Dia-calendário da ficha em São Paulo. O Postgres roda em UTC, então comparar
+// um TIMESTAMPTZ direto com ::date usa meia-noite UTC — e uma ficha enviada às
+// 21h de Brasília já é o dia seguinte lá. data_referencia é exceção: é gravada
+// como ::date (meia-noite UTC), então o dia dela sai de ::date direto.
+const DIA_FICHA_BRT = "COALESCE(f.data_referencia::date,"
+  + " (COALESCE(f.jotform_created_at, f.created_at) AT TIME ZONE 'America/Sao_Paulo')::date)";
+
 // ── Opções (autoritativas: schema / banco) ──────────────────────────────────
 const OPC = {
   setor: ['PS','EPM','Cuidados Intermediários','Psiquiatria','Apartamento','Oncologia','Clínica Cirúrgica','Semi','Hemodiálise','Pediatria','UTI','UTI Neo / Infantil','UTI C','Ginecologia/Obstetrícia','Clínica Médica'],
@@ -51,18 +58,26 @@ export function applyGridFilters(query, where, params, colsReais) {
   const q = query || {};
   const push = (clause, val) => { params.push(val); where.push(clause.replace('$$', '$' + params.length)); };
 
+  // (DIA_FICHA_BRT está definido no topo do módulo)
   // Data de referência (intervalo) — usa a data CANÔNICA da ficha, a mesma expressão
   // da coluna "Data (ref.)" do catálogo (COLS.data_ref). Antes filtrava por
   // f.data_referencia pura: como essa coluna só é preenchida em ficha retrospectiva
   // (e nas antigas do JotForm), as fichas do formulário nativo — que têm
   // data_referencia NULL — ficavam INVISÍVEIS ao filtro (NULL >= data = falso),
   // embora a coluna exibisse a data delas.
-  if (q.data_de)  push("COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= $$::date", q.data_de);
-  if (q.data_ate) push("COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) <  ($$::date + interval '1 day')", q.data_ate);
+  // O dia-calendário da ficha. Cada origem é tratada como ela é (Postgres em UTC):
+  //   • data_referencia é gravada como ::date (fica meia-noite UTC) → ::date direto
+  //     já devolve o dia certo; converter para BRT jogaria para o dia anterior.
+  //   • jotform_created_at/created_at são instantes reais de envio → precisam virar
+  //     o dia-calendário de São Paulo antes de comparar (senão uma ficha enviada
+  //     31/07 21h BRT = 01/08 UTC entra no filtro do mês seguinte).
+  if (q.data_de)  push(DIA_FICHA_BRT + ' >= $$::date', q.data_de);
+  if (q.data_ate) push(DIA_FICHA_BRT + ' <= $$::date', q.data_ate);
 
   // Submission date (jotform_created_at, fallback created_at) — intervalo
-  if (q.sub_de)  push('COALESCE(f.jotform_created_at, f.created_at) >= $$::date', q.sub_de);
-  if (q.sub_ate) push('COALESCE(f.jotform_created_at, f.created_at) <  ($$::date + interval \'1 day\')', q.sub_ate);
+  const _DIA_BRT_SUB = "(COALESCE(f.jotform_created_at, f.created_at) AT TIME ZONE 'America/Sao_Paulo')::date";
+  if (q.sub_de)  push(_DIA_BRT_SUB + ' >= $$::date', q.sub_de);
+  if (q.sub_ate) push(_DIA_BRT_SUB + ' <= $$::date', q.sub_ate);
 
   // IrAS Sim/Não (derivado)
   if (q.iras_sn === 'sim') {
@@ -337,7 +352,11 @@ export function gridControlsUI(query, pager, opts = {}) {
   ${colunasForm}
   <script>
   (function(){
-    function fmt(d){ return d.toISOString().slice(0,10); }
+    function fmt(d){
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      return d.getFullYear() + '-' + mm + '-' + dd;
+    }
     document.querySelectorAll('#gf-filtros .gf-atalhos button').forEach(function(b){
       b.addEventListener('click', function(){
         var hoje = new Date(), de, ate;
@@ -375,7 +394,7 @@ export function buildGridWhere(query, colsReais) {
   if (inst)  { params.push(inst);  where.push(`i.sigla = $${params.length}`); }
   const _setores = (Array.isArray(Q.setor) ? Q.setor : String(Q.setor || '').split(',')).map(x => x.trim()).filter(Boolean);
   if (_setores.length) { params.push(_setores); where.push(`f.setor = ANY($${params.length})`); }
-  if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM COALESCE(f.data_referencia, f.jotform_created_at, f.created_at)) = $${params.length}`); }
+  if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM ${DIA_FICHA_BRT}) = $${params.length}`); }
   if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
   else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post') AND a.iras IS NOT NULL AND a.iras <> ''`);
   else if (iras === 'descartado') where.push(`a.iras = 'Descartado'`);

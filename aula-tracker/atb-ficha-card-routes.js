@@ -346,7 +346,7 @@ export function fichaCardAssets() {
       ev.preventDefault();
       var fid = alvo.getAttribute('data-dup-iras');
       if (!fid) return;
-      if (!confirm('Criar uma cópia desta ficha para registrar outra IrAS da mesma internação?\n\nA cópia mantém paciente, prescrição e parecer. Você classifica a segunda IrAS nela.')) return;
+      if (!confirm('Criar uma cópia desta ficha para registrar outra IrAS da mesma internação? A cópia mantém paciente, prescrição e parecer; você classifica a segunda IrAS nela.')) return;
       alvo.disabled = true;
       fetch('/atb/admin/fichas/' + fid + '/duplicar-iras', { method:'POST' })
         .then(function(r){ return r.json(); })

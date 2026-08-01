@@ -41,6 +41,7 @@ const TIPOS_CONHECIDOS = new Set([...TIPOS_CRIAVEIS, 'matrix', 'crm', 'sofa', 'd
 const TIPOS_COM_OPCOES = new Set(['select', 'radio', 'checkbox']);
 export const KEYS_INDELETAVEIS = new Set(['pac_nome', 'prontuario', 'crm']);
 const OPS = new Set(['eq', 'neq', 'in', 'filled', 'not_filled', 'contains', 'not_contains', 'contains_any', 'not_contains_any', 'text_contains_any']);
+const PROPS_FRAGEIS = ['cond', 'requiredCond', 'minChars', 'preenche', 'validate', 'sincronizaCom', 'maxLinhas', 'hint', 'bloquearColar', 'colunas', 'linhasFixas'];
 const SLUG = /^[a-z][a-z0-9_]{1,40}$/;
 
 // chaves que não podem ser usadas por campos novos (colisão com sistema/banco)
@@ -185,6 +186,20 @@ export function validarDefinicao(def, ctx = {}) {
             else if (colunasReais && colunasReais.has(col))
               avisos.push(`${c.key}: opção "${o}" removida; as fichas já gravadas mantêm esse texto em ${col} e deixam de casar com os filtros`);
           }
+        }
+        // Propriedades que o editor NÃO tem UI para criar — ele apenas as
+        // preserva por construção (ver cabeçalho). Se uma some, não há caminho
+        // de volta pela interface: só rollback de versão. `cond` entra na lista
+        // porque, embora editável, perdê-la faz o campo passar a aparecer para
+        // todo mundo — e isso já aconteceu sem ninguém notar.
+        for (const p of PROPS_FRAGEIS) {
+          const tinha = antigo[p] !== undefined && antigo[p] !== null;
+          const temAgora = c[p] !== undefined && c[p] !== null;
+          if (tinha && !temAgora)
+            avisos.push(`${c.key}: a propriedade "${p}" existia e sumiu neste save`
+              + (p === 'cond'
+                ? ' — o campo passa a aparecer em TODAS as fichas'
+                : ' — o editor não sabe recriá-la; se não foi intencional, restaure pela versão anterior'));
         }
       }
     }

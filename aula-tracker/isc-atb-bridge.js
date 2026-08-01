@@ -136,6 +136,25 @@ export async function resolveCampoCirurgiaInfectada(pool, sigla = 'HUSF') {
   return { key: 'data_da_cirurgia_infectada', col: 'data_da_cirurgia_infectada', doSchema: false };
 }
 
+// Irmão do resolvedor acima, para o campo de NOME do procedimento que infectou.
+// Mesma regex, filtro de tipo invertido: aqui queremos texto, não data.
+//
+// Diferença deliberada: quando NÃO existe campo de nome no schema, devolve null
+// em vez de um padrão. O resolvedor de data pode chutar porque o nome
+// `data_da_cirurgia_infectada` já é consultado pelo filtro "mês da cirurgia" da
+// grade — há um consenso a respeitar. Para o nome não há nenhum, e inventar
+// criaria uma coluna órfã que nada leria. Sem campo, a ponte simplesmente não
+// grava o nome; ele continua disponível em payload_raw.origem_isc.procedimento.
+export async function resolveCampoNomeCirurgiaInfectada(pool, sigla = 'HUSF') {
+  let schema = null;
+  try { schema = await getFormSchema(pool, sigla); } catch { /* sem schema, sem campo */ }
+  const campos = schema ? (schema.secoes || schema.blocos || []).flatMap(s => s.campos || []) : [];
+  const campo = campos.find(c =>
+    (c.type === 'text' || c.type === 'textarea') &&
+    RE_CIRURGIA_INFECTADA.test(`${c.key} ${c.label || ''}`));
+  return campo ? { key: campo.key, col: COLUNA_DE[campo.key] || campo.key } : null;
+}
+
 // ── História clínica ──────────────────────────────────────────────────────
 // "Imput do Sistema de ISC - [nome da cirurgia] [data da cirurgia]"
 // Texto livre, então não há dropdown a validar — mas há o cuidado de não
@@ -281,6 +300,19 @@ export async function criarFichaAtbDeIsc(pool, iscFichaId, opts = {}) {
   if (dataCirurgia != null) {
     if (cols.has(campoCirInf.col)) campos[campoCirInf.col] = dataCirurgia;
     else extras[campoCirInf.key] = dataCirurgia;   // chave do schema → promoção faz o backfill
+  }
+
+  // Nome do procedimento. A ficha da ponte não passa pelo formulário, então o
+  // campo condicional nunca é exibido a ninguém — sem isto, toda ISC
+  // retrospectiva (a maioria) chegaria sem a entrada que o classificador lê.
+  // A origem é o Tasy, mais padronizada que o texto livre do prescritor.
+  const campoNomeCir = await resolveCampoNomeCirurgiaInfectada(pool, f.inst_sigla || sigla);
+  if (campoNomeCir) {
+    const nomeCir = String(f.procedimento ?? '').trim().slice(0, 200);
+    if (nomeCir) {
+      if (cols.has(campoNomeCir.col)) campos[campoNomeCir.col] = nomeCir;
+      else extras[campoNomeCir.key] = nomeCir;
+    }
   }
 
   // Rastreabilidade da origem, sempre em payload_raw (não depende de coluna).

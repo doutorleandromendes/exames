@@ -312,10 +312,14 @@ export function registerExportRoutes(app, pool, adminRequired) {
         to_char(${DATA_CANONICA} AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS data_envio`;
       const selCampos = colunas.map(c => `f."${c}"`).join(',\n               ');
 
+      // Cópias de ficha (ficha_origem_id) existem para dar uma avaliação própria
+      // a cada IrAS da mesma internação — mas repetem a MESMA prescrição. Numa
+      // planilha de prescritores isso é contagem dobrada, então ficam de fora.
+      // Mesma régua já aplicada em atb-adesao-routes.js e atb-consulta-routes.js.
       const sql = `
         SELECT ${selCtx}${selCampos ? ',\n               ' + selCampos : ''}
           FROM atb_fichas f
-         WHERE f.deletado_em IS NULL${corte}${escT}
+         WHERE f.deletado_em IS NULL AND f.ficha_origem_id IS NULL${corte}${escT}
          ORDER BY ${DATA_CANONICA} DESC`;
       const result = await pool.query(sql, params);
 

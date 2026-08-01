@@ -31,6 +31,7 @@ import { buscarHemoDaFicha, renderHemoCard } from './atb-hemocultura-routes.js';
 import { buscarMdrDaFicha, mdrTemAlerta } from './atb-mdr-routes.js';
 import { textoPosologia } from './atb-posologia-normalizar-routes.js';
 import { buscarNomePacs, nomeDivergePacs } from './atb-pacs-nome-routes.js';
+import { contextoFicha } from './atb-triagem-regras.js';
 
 function _safe(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -221,9 +222,9 @@ function renderCardBody(f, evol, s) {
   // Exames de imagem: SCMI usa a rota interna (atb-pacs-scmi.js → Medilab), que
   // vale para todas as fichas sem depender do link_exames gravado (autologin HUSF).
   if ((f.instituicao || '') === 'SCMI') {
-    links.push(`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
+    links.push(`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔗 Imagens</a>`);
   } else if (f.link_exames) {
-    links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Exames / imagens</a>`);
+    links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Imagens</a>`);
   }
   // SCMI: resultados de laboratório via rota interna (atb-lab-scmi.js) — link
   // dinâmico por tenant; ignora o link_labs gravado (que apontava pro LIS HUSF).
@@ -240,7 +241,7 @@ function renderCardBody(f, evol, s) {
   // Duplicar para uma 2ª IrAS da mesma internação. Fica junto dos acessos porque é
   // ação de vigilância, tomada enquanto o SCIH lê a ficha. O clique é tratado por
   // delegação (o conteúdo do card é recarregado a cada ficha aberta).
-  links.push(`<button type="button" class="fc-link" data-dup-iras="${f.id}" title="O paciente tem outra IrAS nesta internação — cria uma cópia da ficha para classificar a segunda">⧉ Duplicar (2ª IrAS)</button>`);
+  links.push(`<button type="button" class="fc-link" data-dup-iras="${f.id}" title="O paciente tem outra IrAS nesta internação — cria uma cópia da ficha para classificar a segunda">⧉ Duplicar</button>`);
   if (links.length) {
     blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
   }
@@ -496,10 +497,19 @@ export function registerFichaCardRoutes(app, pool, adminRequired) {
       const nome = f.paciente_nome || f.paciente_nome_raw || '—';
       const idade = _idade(f.paciente_dn, f.paciente_idade);
       const dataFicha = f.data_referencia || f.jotform_created_at || f.created_at;  // data canônica (HUSF e SCMI)
+      // Dias de internação (DIH) e de UTI (DIU) NO MOMENTO da submissão da ficha.
+      // Usa o mesmo cálculo das regras de triagem (contextoFicha) para o card nunca
+      // divergir do que a triagem enxerga. DIU só aparece quando há data de
+      // admissão na UTI registrada.
+      const _ctx = contextoFicha(f);
+      const dih = _ctx.dias_internacao;
+      const diu = _ctx.dias_uti;
       const metaParts = [
         dataFicha ? 'Ficha ' + _dt(dataFicha) : '',
         f.prontuario ? 'Pront. ' + f.prontuario : '',
         idade || '',
+        (dih != null) ? dih + ' DIH' : '',
+        (diu != null) ? diu + ' DIU' : '',
         f.setor || '',
         f.leito ? 'Leito ' + f.leito : '',
         f.equipe_responsavel || '',

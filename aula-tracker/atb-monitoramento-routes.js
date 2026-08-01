@@ -45,6 +45,11 @@ export async function ensureMonitoramentoSchema(pool) {
     )`);
   await pool.query(`ALTER TABLE atb_monitoramento_regras ADD COLUMN IF NOT EXISTS sobrescrever_manual BOOLEAN DEFAULT false`);
   await pool.query(`ALTER TABLE atb_monitoramento_regras ADD COLUMN IF NOT EXISTS sobrescrever_se JSONB`);
+  // Espera mínima antes de a regra poder disparar, em dias desde a ficha.
+  // Existe para viabilizar REGRA NEGATIVA (dispara pela AUSÊNCIA de um achado):
+  // "não veio hemocultura positiva" só é uma afirmação válida depois de esperar
+  // o exame ficar pronto. Com espera 0 (padrão) o comportamento é o de sempre.
+  await pool.query(`ALTER TABLE atb_monitoramento_regras ADD COLUMN IF NOT EXISTS espera_dias INTEGER DEFAULT 0`);
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS monitor_regra_id INTEGER`);
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS monitor_regra_at TIMESTAMPTZ`);
   await pool.query(`
@@ -71,7 +76,7 @@ function _valorLiberado(regra, irasAtual) {
 // Executor: reavalia as fichas do tenant dentro da janela e aplica as regras.
 export async function executarMonitoramento(pool, inst) {
   const regras = (await pool.query(
-    `SELECT id, nome, condicoes, acao_iras, acao_etiol, janela_dias, sobrescrever, sobrescrever_manual, sobrescrever_se
+    `SELECT id, nome, condicoes, acao_iras, acao_etiol, janela_dias, espera_dias, sobrescrever, sobrescrever_manual, sobrescrever_se
        FROM atb_monitoramento_regras
       WHERE ativo=true AND instituicao=$1
       ORDER BY prioridade ASC, id ASC`, [inst]
@@ -104,8 +109,16 @@ export async function executarMonitoramento(pool, inst) {
       const refData = f.data_referencia || f.jotform_created_at || f.created_at || null;
 
       const regra = regras.find(r => {
-        const dentro = refData ? (agora - new Date(refData).getTime()) <= (r.janela_dias || 14) * 86400000 : true;
-        return dentro && avaliaCond(r.condicoes, ctx);
+        // A regra vale numa FAIXA de idade da ficha: [espera_dias, janela_dias].
+        //   • espera_dias (padrão 0) — piso. Regra negativa precisa dele: dizer
+        //     "não veio hemocultura positiva" no dia 0 seria falso, o exame nem
+        //     ficou pronto. Com espera 5, a regra só opina a partir do 5º dia.
+        //   • janela_dias — teto, como antes.
+        const idadeMs = refData ? (agora - new Date(refData).getTime()) : null;
+        if (idadeMs == null) return avaliaCond(r.condicoes, ctx);
+        const dentro  = idadeMs <= (r.janela_dias || 14) * 86400000;
+        const esperou = idadeMs >= (r.espera_dias || 0) * 86400000;
+        return dentro && esperou && avaliaCond(r.condicoes, ctx);
       });
       if (!regra) continue;
 
@@ -173,6 +186,8 @@ function paginaEditorMonitor(regra, campos) {
         <div><label class="lbl">Prioridade</label><input id="r_prio" type="number" value="${regra?.prioridade ?? 100}" style="width:100px"></div>
         <div><label class="lbl">Ativa</label><br><select id="r_ativo"><option value="true"${regra && !regra.ativo ? '' : ' selected'}>Sim</option><option value="false"${regra && !regra.ativo ? ' selected' : ''}>Não</option></select></div>
         <div><label class="lbl">Janela (dias)</label><input id="r_janela" type="number" value="${regra?.janela_dias ?? 14}" style="width:100px"></div>
+        <div><label class="lbl">Esperar (dias)</label><input id="r_espera" type="number" min="0" value="${regra?.espera_dias ?? 0}" style="width:100px"
+          title="Só deixa a regra opinar depois de N dias da ficha. Use para regra NEGATIVA (ex.: descartar por ausência de hemocultura positiva) — antes disso o exame ainda nem ficou pronto. 0 = pode disparar de imediato."></div>
         <div><label class="lbl">Sobrescrever</label><br><select id="r_sobrescrever">
           <option value="nao">Não — só se estiver vazio</option>
           <option value="regra">Sim — reclassifica regra, protege manual</option>
@@ -275,6 +290,7 @@ function paginaEditorMonitor(regra, campos) {
                  prioridade:Number(document.getElementById('r_prio').value)||100,
                  ativo:document.getElementById('r_ativo').value==='true',
                  janela_dias:Number(document.getElementById('r_janela').value)||14,
+                 espera_dias:Math.max(0, Number(document.getElementById('r_espera').value)||0),
                  sobrescrever:_sob!=='nao',
                  sobrescrever_manual:_sob==='tudo',
                  sobrescrever_se:Array.prototype.filter.call(document.getElementById('r_sobrescrever_se').options,function(o){return o.selected;}).map(function(o){return o.value;}),
@@ -348,7 +364,7 @@ export function registerMonitoramentoRoutes(app, pool, adminRequired) {
         <tr>
           <td><strong>${esc(r.nome)}</strong>${r.descricao ? `<br><span class="nota">${esc(r.descricao)}</span>` : ''}</td>
           <td>${r.prioridade}</td>
-          <td>${r.janela_dias}d</td>
+          <td>${(r.espera_dias ? r.espera_dias + 'd → ' : '') + r.janela_dias + 'd'}</td>
           <td>${_pillSobrescrever(r)}</td>
           <td><span class="nota">${esc(resumoCondMon(r.condicoes))} → IrAS ${esc(r.acao_iras || '—')}</span></td>
           <td>${r.ativo ? '<span class="pill on">ativa</span>' : '<span class="pill off">inativa</span>'}</td>
@@ -365,7 +381,7 @@ export function registerMonitoramentoRoutes(app, pool, adminRequired) {
           <a class="btn ghost" href="/atb/admin/monitoramento/log">Ver disparos</a>
         </div>
         <div class="card">
-          <table><thead><tr><th>Nome</th><th>Prior.</th><th>Janela</th><th>Sobrescr.</th><th>Condições → Ação</th><th>Estado</th><th></th></tr></thead>
+          <table><thead><tr><th>Nome</th><th>Prior.</th><th title="Espera → janela: a regra só opina nessa faixa de dias desde a ficha">Espera → janela</th><th>Sobrescr.</th><th>Condições → Ação</th><th>Estado</th><th></th></tr></thead>
           <tbody>${linhas}</tbody></table>
         </div>`));
     } catch (e) { console.error('[monitor] lista:', e.message); res.status(500).send(page('Erro', `<div class="card"><h1>Falha</h1><p class="mut">${esc(e.message)}</p></div>`)); }
@@ -395,19 +411,20 @@ export function registerMonitoramentoRoutes(app, pool, adminRequired) {
       const vals = [inst, b.nome, b.descricao || null, Number(b.prioridade) || 100, b.ativo !== false,
         JSON.stringify(b.condicoes), b.acao_iras || null, b.acao_etiol || null,
         Number(b.janela_dias) || 14, b.sobrescrever === true,
-        b.sobrescrever_manual === true, _se.length ? JSON.stringify(_se) : null];
+        b.sobrescrever_manual === true, _se.length ? JSON.stringify(_se) : null,
+        Math.max(0, Number(b.espera_dias) || 0)];
       if (id) {
         await pool.query(
           `UPDATE atb_monitoramento_regras SET nome=$2, descricao=$3, prioridade=$4, ativo=$5,
              condicoes=$6::jsonb, acao_iras=$7, acao_etiol=$8, janela_dias=$9, sobrescrever=$10,
-             sobrescrever_manual=$11, sobrescrever_se=$12::jsonb, updated_at=now()
-           WHERE id=$1 AND instituicao=$13`, [id, ...vals.slice(1), inst]);
+             sobrescrever_manual=$11, sobrescrever_se=$12::jsonb, espera_dias=$13, updated_at=now()
+           WHERE id=$1 AND instituicao=$14`, [id, ...vals.slice(1), inst]);
       } else {
         await pool.query(
           `INSERT INTO atb_monitoramento_regras
              (instituicao, nome, descricao, prioridade, ativo, condicoes, acao_iras, acao_etiol, janela_dias,
-              sobrescrever, sobrescrever_manual, sobrescrever_se)
-           VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb)`, vals);
+              sobrescrever, sobrescrever_manual, sobrescrever_se, espera_dias)
+           VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12::jsonb,$13)`, vals);
       }
       res.json({ ok: true });
     } catch (e) { console.error('[monitor] salvar:', e.message); res.status(500).json({ ok: false, error: e.message }); }

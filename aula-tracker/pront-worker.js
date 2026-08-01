@@ -113,9 +113,29 @@ async function tick() {
   return true;
 }
 
+// --drain: esvazia a fila e SAI. É o modo usado pelo launchd agendado (StartInterval).
+// Vantagem sobre o loop eterno: processo curto, sem estado; cada execução recarrega o
+// código do disco (não precisa de kickstart depois de um deploy) e não há como ficar
+// "vivo mas morto" com pool de conexão zumbi após sleep/wake do Mac.
+async function drena() {
+  const limiteMs = Number(process.env.PRONT_DRAIN_MAX_MS || 30 * 60 * 1000); // trava de segurança
+  const t0 = Date.now();
+  let n = 0;
+  for (;;) {
+    if (Date.now() - t0 > limiteMs) { console.warn(`[worker] drain interrompido pelo limite de tempo (${n} doc)`); break; }
+    let trabalhou = false;
+    try { trabalhou = await tick(); } catch (e) { console.error("[worker] erro no tick:", e.message); break; }
+    if (!trabalhou) break;
+    n++;
+  }
+  console.log(`[worker] drain concluído — ${n} documento(s) em ${Math.round((Date.now() - t0) / 1000)}s`);
+}
+
 async function main() {
   const once = process.argv.includes("--once");
-  console.log(`[worker] iniciado — provider=${process.env.PRONT_PROVIDER || "ollama"} once=${once}`);
+  const drain = process.argv.includes("--drain");
+  console.log(`[worker] iniciado — provider=${process.env.PRONT_PROVIDER || "ollama"} once=${once} drain=${drain}`);
+  if (drain) { await drena(); await pool.end(); return; }
   if (once) { await tick(); await pool.end(); return; }
   // loop: processa tudo que puder, depois dorme
   for (;;) {

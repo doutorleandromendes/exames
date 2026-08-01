@@ -5,6 +5,10 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
+    "worker": "node pront-worker.js",
+    "worker:agora": "node pront-worker.js --drain",
+    "worker:status": "launchctl list | grep pront || echo 'agente launchd NAO carregado'",
+    "worker:log": "tail -f ~/Library/Logs/pront-worker.log",
     "keepalive": "node keepalive.js",
     "postinstall": "npx puppeteer browsers install chrome"
   },

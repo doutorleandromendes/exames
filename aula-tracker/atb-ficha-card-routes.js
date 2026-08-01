@@ -237,6 +237,10 @@ function renderCardBody(f, evol, s) {
     const _bq = String(f.prontuario || '').trim() || (f.paciente_nome_raw || f.paciente_nome || '');
     if (_bq) links.push(`<a href="/atb/admin/grid?q=${encodeURIComponent(_bq)}" target="_blank" rel="noopener" class="fc-link">🔎 Fichas anteriores</a>`);
   }
+  // Duplicar para uma 2ª IrAS da mesma internação. Fica junto dos acessos porque é
+  // ação de vigilância, tomada enquanto o SCIH lê a ficha. O clique é tratado por
+  // delegação (o conteúdo do card é recarregado a cada ficha aberta).
+  links.push(`<button type="button" class="fc-link" data-dup-iras="${f.id}" title="O paciente tem outra IrAS nesta internação — cria uma cópia da ficha para classificar a segunda">⧉ Duplicar (2ª IrAS)</button>`);
   if (links.length) {
     blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
   }
@@ -331,6 +335,27 @@ export function fichaCardAssets() {
     var btnPront = document.getElementById('fc-pront');
     var prontAtual = '';
     var idAtual = null;
+
+    // Duplicar a ficha para uma segunda IrAS (etiologia/micro são diferentes por
+    // infecção, então cada uma precisa da sua própria avaliação). O parecer e o
+    // desfecho vêm juntos; a classificação de IrAS fica em branco na cópia.
+    // Delegação: o botão vive dentro do conteúdo, que é remontado a cada ficha.
+    document.addEventListener('click', function(ev){
+      var alvo = ev.target && ev.target.closest ? ev.target.closest('[data-dup-iras]') : null;
+      if (!alvo) return;
+      ev.preventDefault();
+      var fid = alvo.getAttribute('data-dup-iras');
+      if (!fid) return;
+      if (!confirm('Criar uma cópia desta ficha para registrar outra IrAS da mesma internação?\n\nA cópia mantém paciente, prescrição e parecer. Você classifica a segunda IrAS nela.')) return;
+      alvo.disabled = true;
+      fetch('/atb/admin/fichas/' + fid + '/duplicar-iras', { method:'POST' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if (!d || !d.ok) { alert('Não foi possível duplicar: ' + ((d && d.erro) || 'erro')); alvo.disabled = false; return; }
+          window.location.href = '/atb/admin/fichas/' + d.novaFichaId;
+        })
+        .catch(function(e){ alert('Não foi possível duplicar: ' + e.message); alvo.disabled = false; });
+    });
 
     var _h2c = null;
     function carregarH2C(){

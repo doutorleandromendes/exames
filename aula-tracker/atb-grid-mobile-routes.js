@@ -165,6 +165,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
 
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
+               f.ficha_origem_id,
                f.atb_solicitado, f.recomendacao_scih, f.recomendacoes_especificacao,
                f.obito, f.retrospectiva,
                f.data_referencia, f.jotform_created_at, f.created_at,
@@ -191,7 +192,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
         const preview = espec ? (espec.length > 60 ? espec.slice(0, 60) + '…' : espec) : '';
         return `<div class="fcard" data-fid="${f.id}">
           <a class="nome" href="/atb/admin/fichas/${f.id}">${safe(nome)}${f.retrospectiva ? ' <span class="tag tR">R</span>' : ''}${f.obito ? ' <span class="obito">✝</span>' : ''}</a>
-          <div class="sub">${dtFmt(f.data_referencia || f.jotform_created_at || f.created_at)}${f.prontuario ? ' · pront. ' + safe(f.prontuario) : ''}${!sigla && f.instituicao ? ' · ' + safe(f.instituicao) : ''}</div>
+          <div class="sub">${dtFmt(f.data_referencia || f.jotform_created_at || f.created_at)}${f.prontuario ? ' · pront. ' + safe(f.prontuario) : ''}${!sigla && f.instituicao ? ' · ' + safe(f.instituicao) : ''}${f.ficha_origem_id ? ` <span title="Cópia da ficha #${f.ficha_origem_id} — mesma internação, outra IrAS" style="color:#2c4b82">⧉</span>` : ''}</div>
           <div class="pills">${f.setor ? _pill(SETOR_CORES, f.setor) : ''}${_atbPills(f.atb_solicitado)}</div>
           <div class="parecer">
             <select class="ver" data-fid="${f.id}"${cor ? ` style="background:${cor};border-color:${cor}"` : ''}${soMicro ? ' disabled' : ''}>${vOpts(ver)}</select>

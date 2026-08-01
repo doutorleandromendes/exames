@@ -230,7 +230,11 @@ export function registerConsultaRoutes(app, pool) {
         FROM atb_fichas f
         WHERE f.deletado_em IS NULL
           AND COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) >= now() - interval '30 days'
-          AND NOT COALESCE(f.retrospectiva, false)${escopo}
+          AND NOT COALESCE(f.retrospectiva, false)
+          -- Cópia de IrAS múltipla não aparece para a farmácia: a prescrição e o
+          -- parecer são os mesmos da ficha original, e a cópia existe só para a
+          -- vigilância registrar a segunda infecção. Mostrar as duas confundiria.
+          AND f.ficha_origem_id IS NULL${escopo}
         ORDER BY COALESCE(f.data_referencia, f.jotform_created_at, f.created_at) DESC`, params);
       const hc = await getLatestHealthcheck(pool, inst || 'HUSF').catch(() => null);
       const mostrarDias = !inst || String(inst).toUpperCase() === 'HUSF';

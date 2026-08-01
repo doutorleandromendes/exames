@@ -175,6 +175,16 @@ export async function runAtbMigrations(pool) {
     )
   `);
 
+  // ── IrAS múltipla na mesma internação ────────────────────────────────────
+  // Quando o paciente tem mais de uma IrAS (ex.: PAV + ITU), a ficha é clonada:
+  // cada infecção vira uma ficha com sua própria avaliação (etiologia e micro são
+  // diferentes por infecção). O clone aponta para a ficha original aqui.
+  // NULL = ficha original (ou ficha sem clone). Preenchido = é uma cópia.
+  await pool.query(`ALTER TABLE atb_fichas ADD COLUMN IF NOT EXISTS
+    ficha_origem_id INTEGER REFERENCES atb_fichas(id) ON DELETE SET NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_atb_fichas_origem
+    ON atb_fichas(ficha_origem_id) WHERE ficha_origem_id IS NOT NULL`);
+
   // Data de inserção do campo `micro` (a micro preenche no grid). Coluna própria porque
   // updated_at é da linha inteira — muda quando qualquer outro campo é editado.
   await pool.query(`ALTER TABLE atb_avaliacoes ADD COLUMN IF NOT EXISTS micro_at TIMESTAMPTZ`);

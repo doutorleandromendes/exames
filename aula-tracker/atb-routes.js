@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
+import { registerFichaDuplicarRoutes } from './atb-ficha-duplicar-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { registerExplicarRoutes } from './atb-explicar-routes.js';
 import { registerPosologiaNormalizarRoutes } from './atb-posologia-normalizar-routes.js';
@@ -103,6 +104,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerParecerApiRoutes(app, pool);
   registerComplementoRoutes(app, pool, adminRequired);
   registerFichaCardRoutes(app, pool, adminRequired);
+  registerFichaDuplicarRoutes(app, pool, adminRequired);
   registerFichaViewRoutes(app, pool, adminRequired);
   registerExplicarRoutes(app, pool, adminRequired);
   registerFormTesteSchemaRoutes(app, pool, adminRequired);
@@ -991,7 +993,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
       const { rows } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
-               f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,f.retrospectiva,
+               f.atb_solicitado, f.recomendacao_scih, f.sofa, f.obito,f.retrospectiva, f.ficha_origem_id,
                f.link_exames, f.link_labs, f.data_referencia, f.jotform_created_at, f.created_at,
                i.sigla AS instituicao, np.nome_pacs_norm AS _pacs_norm,
                EXISTS(SELECT 1 FROM atb_culturas c WHERE
@@ -1051,7 +1053,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
           <td class="rownum">${offset+i+1}</td>
           <td class="sticky-col" title="${safe(nome)}">
             <a href="/atb/admin/fichas/${f.id}" class="pac-link">${safe(nome)}</a>${f.retrospectiva?'<span title="Ficha retrospectiva" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#d98a3d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">R</span>':''}${_divPacs?'<span title="Nome diverge do PACS — abra o card para corrigir" style="display:inline-block;margin-left:6px;font-size:9px;font-weight:700;background:#a32d2d;color:#fff;border-radius:4px;padding:1px 4px;vertical-align:middle">≠PACS</span>':''}
-            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${(f._tem_cult||f._tem_mdr)?((f._cult_mr||f._tem_mdr)?' <span title="Multirresistente — planilha de culturas ou alerta de MDR (30d/5d)" style="display:inline-block;font-size:9px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:0 4px;vertical-align:middle">🦠 MR</span>':' <span title="Cultura positiva — planilha ou alerta de MDR (30d/5d)" style="vertical-align:middle">🦠</span>'):''}${f._tem_hemo?' <span title="Hemocultura parcial positiva (janela ±5d da ficha)" style="vertical-align:middle">🩸</span>':''}${f.monitor_regra_id?' <span title="Reclassificada por monitoramento (regra contínua)" style="vertical-align:middle">🔁</span>':''}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
+            <div class="sub">${dtFmt(f.data_referencia||f.jotform_created_at)} · ${safe(f.instituicao||'')}${(f._tem_cult||f._tem_mdr)?((f._cult_mr||f._tem_mdr)?' <span title="Multirresistente — planilha de culturas ou alerta de MDR (30d/5d)" style="display:inline-block;font-size:9px;font-weight:700;background:#fcebeb;color:#a32d2d;border:1px solid #f0a0a0;border-radius:4px;padding:0 4px;vertical-align:middle">🦠 MR</span>':' <span title="Cultura positiva — planilha ou alerta de MDR (30d/5d)" style="vertical-align:middle">🦠</span>'):''}${f._tem_hemo?' <span title="Hemocultura parcial positiva (janela ±5d da ficha)" style="vertical-align:middle">🩸</span>':''}${f.monitor_regra_id?' <span title="Reclassificada por monitoramento (regra contínua)" style="vertical-align:middle">🔁</span>':''}${f.ficha_origem_id?` <span title="Cópia da ficha #${f.ficha_origem_id} — mesma internação, outra IrAS" style="color:#2c4b82;vertical-align:middle">⧉</span>`:''}${f.obito?' · <span style="color:#c0392b">✝</span>':''} ${anexos}</div>
           </td>
           <td class="sub">${safe(f.prontuario||'—')}</td>
           <td>${f.setor?_pill(SETOR_CORES,f.setor):'—'}</td>

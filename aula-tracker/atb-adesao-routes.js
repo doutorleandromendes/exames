@@ -290,6 +290,9 @@ async function buscarNegativosMes(pool, ano, m, inst) {
     LEFT JOIN atb_adesao_item ai ON ai.ficha_id=f.id AND ai.atb=s.atb
     WHERE jsonb_typeof(f.recomendacao_scih)='array'
       AND f.recomendacao_scih @> '["Não"]'::jsonb
+      -- Cópia de IrAS múltipla não entra: o parecer é o mesmo da ficha original,
+      -- e a adesão é por SOLICITAÇÃO, não por infecção (contaria em dobro).
+      AND f.ficha_origem_id IS NULL
       AND EXTRACT(YEAR FROM ${DATA_PARECER_SQL}) = $1
       AND EXTRACT(MONTH FROM ${DATA_PARECER_SQL}) = $2${escopo}
     ORDER BY ${DATA_PARECER_SQL} DESC, f.id, s.ord`, params);

@@ -22,7 +22,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { aplicarPilha, descreverIntervencao, validarIntervencao, checarTransformacao } from './atb-intervencoes.js';
+import { aplicarPilha, descreverIntervencao, validarIntervencao, checarTransformacao, estadoTransformacao } from './atb-intervencoes.js';
 import { getFormSchema, saveFormSchema } from './atb-form-schema.js';
 import { schemaPosologiaEstruturada } from './atb-form-teste-schema.js';
 import { listarIntervencoes } from './atb-intervencoes-registry.js';
@@ -40,17 +40,22 @@ function carregarIntervencoes() {
 // Estado de cada intervenção contra o engine de produção ATUAL.
 // Distingue três situações (o que acaba com o "âncora não casa" assustador):
 //   • pronta      → a âncora original casa no engine → ainda não aplicada, pode publicar
-//   • ja_aplicada → a âncora não casa MAS o resultado ('vira') já está no engine → já publicada
+//   • ja_aplicada → a mudança já está no engine → já publicada
 //   • erro        → nem a âncora nem o resultado aparecem → o código mudou de forma inesperada
+//
+// A classificação vem de estadoTransformacao() — a MESMA função que aplicarIntervencao
+// usa. Antes daqui havia heurística própria (amostra dos 120 primeiros caracteres do
+// "vira"), e as duas discordavam: o painel pintava "já no ar" em verde enquanto o botão
+// de baixar o motor recusava, porque o "vira" inteiro já não casava. Com uma função só,
+// esse tipo de mentira não tem como voltar.
 function diagnosticar(prod, intervencoes) {
   return intervencoes.map((interv) => {
     const problemas = validarIntervencao(interv);
     const anc = (interv.transformacoes || []).map((t, i) => {
+      const e = estadoTransformacao(prod, t, i);
       const c = checarTransformacao(prod, t.ancora);
-      // 'vira' pode ser grande; basta uma amostra estável estar presente no engine.
-      const amostra = String(t.vira || '').slice(0, 120);
-      const jaTem = amostra && prod.indexOf(amostra) !== -1;
-      return { i, ...c, jaAplicada: jaTem, nota: t.nota || null };
+      return { i, ...c, jaAplicada: e.estado === 'promovida', estado: e.estado,
+               por: e.por || null, nota: t.nota || null };
     });
     const todasCasam = anc.every((a) => a.ok);
     const todasJa = anc.length > 0 && anc.every((a) => a.jaAplicada);

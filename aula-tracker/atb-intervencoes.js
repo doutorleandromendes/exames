@@ -44,6 +44,12 @@ export function validarIntervencao(interv) {
     if (typeof t.ancora !== 'string' || t.ancora === '') erros.push(`transformação #${i}: "ancora" vazia`);
     if (typeof t.vira !== 'string') erros.push(`transformação #${i}: "vira" ausente`);
     if (t.ancora === t.vira) erros.push(`transformação #${i}: "ancora" e "vira" idênticas (no-op)`);
+    if (t.marca !== undefined) {
+      if (typeof t.marca !== 'string' || t.marca.trim() === '')
+        erros.push(`transformação #${i}: "marca" precisa ser string não-vazia`);
+      else if (typeof t.vira === 'string' && !t.vira.includes(t.marca))
+        erros.push(`transformação #${i}: "marca" não aparece dentro do próprio "vira"`);
+    }
   });
   return erros;
 }
@@ -57,6 +63,34 @@ export function checarTransformacao(conteudo, ancora) {
   if (n === 1) return { ok: true, ocorrencias: 1 };
   if (n === 0) return { ok: false, ocorrencias: 0, motivo: 'âncora não encontrada (o alvo mudou?)' };
   return { ok: false, ocorrencias: n, motivo: `âncora ambígua: casa ${n} vezes (precisa de mais contexto)` };
+}
+
+// ── Estado de UMA transformação contra um conteúdo ───────────────────────────
+// ESTE é o único lugar que decide se uma transformação está promovida, pendente
+// ou quebrada. O painel e o motor de aplicação chamam a MESMA função — antes o
+// painel tinha heurística própria (amostra dos 120 primeiros chars do "vira") e
+// dizia "já no ar" enquanto o motor recusava gerar o arquivo. Tela e motor não
+// podem divergir por construção.
+//
+// A ordem importa:
+//   1) `marca` (opcional) — string curta que o "vira" INSERE no alvo e que
+//      sobrevive a edições posteriores (tipicamente um comentário nomeado ou uma
+//      declaração de função). É a checagem robusta: comparar o "vira" inteiro
+//      falha assim que outra mudança encosta no bloco, e foi exatamente isso que
+//      aconteceu quando o isc-nudge cresceu por cima do gatilho-ia-narrativa.
+//   2) "vira" inteiro presente — comportamento histórico, mantido para as
+//      transformações que ainda não declararam marca.
+//   3) âncora casa 1x → pendente.
+//   4) nada casa → falha (re-ancore) — guarda barulhento, nunca silencioso.
+export function estadoTransformacao(conteudo, t, i = 0) {
+  const base = { i, nota: (t && t.nota) || null };
+  if (t && typeof t.marca === 'string' && t.marca !== '' && conteudo.indexOf(t.marca) !== -1)
+    return { ...base, estado: 'promovida', ok: true, por: 'marca' };
+  const cVira = checarTransformacao(conteudo, t.vira);
+  if (cVira.ocorrencias >= 1) return { ...base, estado: 'promovida', ok: true, por: 'vira' };
+  const cAnc = checarTransformacao(conteudo, t.ancora);
+  if (cAnc.ok) return { ...base, estado: 'aplicar', ok: true, ocorrencias: 1 };
+  return { ...base, estado: 'falha', ok: false, ocorrencias: cAnc.ocorrencias, motivo: cAnc.motivo };
 }
 
 // ── Aplicar uma intervenção a um conteúdo ────────────────────────────────────
@@ -75,13 +109,7 @@ export function aplicarIntervencao(conteudo, interv, opts = {}) {
   //    - vira ausente + âncora ausente/ambígua → 'falha' (re-ancore) — guarda barulhento.
   //    Distinguir "já promovida" de "quebrada" é o que torna o pipeline sustentável:
   //    intervenções promovidas se auto-neutralizam em vez de exigir remoção manual.
-  const relatorio = interv.transformacoes.map((t, i) => {
-    const cVira = checarTransformacao(conteudo, t.vira);
-    if (cVira.ocorrencias >= 1) return { i, nota: t.nota || null, estado: 'promovida', ok: true };
-    const cAnc = checarTransformacao(conteudo, t.ancora);
-    if (cAnc.ok) return { i, nota: t.nota || null, estado: 'aplicar', ok: true, ocorrencias: 1 };
-    return { i, nota: t.nota || null, estado: 'falha', ok: false, ocorrencias: cAnc.ocorrencias, motivo: cAnc.motivo };
-  });
+  const relatorio = interv.transformacoes.map((t, i) => estadoTransformacao(conteudo, t, i));
   const falhas = relatorio.filter((r) => !r.ok);
   if (falhas.length) {
     throw new IntervencaoErro(

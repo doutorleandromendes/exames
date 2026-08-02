@@ -222,21 +222,21 @@ function renderCardBody(f, evol, s) {
   // Exames de imagem: SCMI usa a rota interna (atb-pacs-scmi.js → Medilab), que
   // vale para todas as fichas sem depender do link_exames gravado (autologin HUSF).
   if ((f.instituicao || '') === 'SCMI') {
-    links.push(`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔗 Imagens</a>`);
+    links.push(`<a href="/atb/scmi/pacs?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔗 PACS</a>`);
   } else if (f.link_exames) {
-    links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 Imagens</a>`);
+    links.push(`<a href="${s(f.link_exames)}" target="_blank" rel="noopener" class="fc-link">🔗 PACS</a>`);
   }
   // SCMI: resultados de laboratório via rota interna (atb-lab-scmi.js) — link
   // dinâmico por tenant; ignora o link_labs gravado (que apontava pro LIS HUSF).
   if ((f.instituicao || '') === 'SCMI') {
-    links.push(`<a href="/atb/scmi/lab?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔬 Resultados (lab)</a>`);
+    links.push(`<a href="/atb/scmi/lab?ficha=${f.id}" target="_blank" rel="noopener" class="fc-link">🔬 LIS</a>`);
   } else if (f.link_labs) {
-    links.push(`<a href="${s(f.link_labs)}" target="_blank" rel="noopener" class="fc-link">🔬 LIS (labs)</a>`);
+    links.push(`<a href="${s(f.link_labs)}" target="_blank" rel="noopener" class="fc-link">🔬 LIS</a>`);
   }
   // Fichas anteriores do paciente: reusa a busca do grid (por prontuário, ou nome).
   {
     const _bq = String(f.prontuario || '').trim() || (f.paciente_nome_raw || f.paciente_nome || '');
-    if (_bq) links.push(`<a href="/atb/admin/grid?q=${encodeURIComponent(_bq)}" target="_blank" rel="noopener" class="fc-link">🔎 Fichas anteriores</a>`);
+    if (_bq) links.push(`<a href="/atb/admin/grid?q=${encodeURIComponent(_bq)}" target="_blank" rel="noopener" class="fc-link">🔎 Anteriores</a>`);
   }
   // Duplicar para uma 2ª IrAS da mesma internação. Fica junto dos acessos porque é
   // ação de vigilância, tomada enquanto o SCIH lê a ficha. O clique é tratado por
@@ -245,7 +245,7 @@ function renderCardBody(f, evol, s) {
   // Link com o contexto do paciente já preenchido, para quando o SCIH orienta a
   // troca e o prescritor vai acatar: ele abre e preenche só a prescrição nova.
   // O link carrega um token (validade curta), nunca os dados do paciente.
-  links.push(`<button type="button" class="fc-link" data-link-prefill="${f.id}" title="Gera um link do formulário com os dados do paciente já preenchidos (sem o antimicrobiano). Válido por 24h.">🔗 Link pré-preenchido</button>`);
+  links.push(`<button type="button" class="fc-link" data-link-prefill="${f.id}" title="Gera um link do formulário com os dados do paciente já preenchidos (sem o antimicrobiano). Válido por 24h.">🔗 Filled</button>`);
   if (links.length) {
     blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
   }

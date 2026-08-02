@@ -1039,7 +1039,11 @@
   function App() {
     var schemaState = useState(null), schema = schemaState[0], setSchema = schemaState[1];
     var loadErr = useState(null), erroLoad = loadErr[0], setErroLoad = loadErr[1];
-    var valState = useState({}), valores = valState[0], setValores = valState[1];
+    // Valores iniciais: normalmente vazio. Quando o link traz ?pre=<token>, o
+    // servidor injeta window.ATB_PREFILL com o contexto do paciente (nunca a
+    // prescrição, que é o que o prescritor vai preencher).
+    var valState = useState(window.ATB_PREFILL ? Object.assign({}, window.ATB_PREFILL) : {}),
+        valores = valState[0], setValores = valState[1];
     var errState = useState({}), erros = errState[0], setErros = errState[1];
     var crmState = useState({ status: '', nome: '' }), crm = crmState[0], setCrm = crmState[1];
     var okState = useState(false), enviado = okState[0], setEnviado = okState[1];

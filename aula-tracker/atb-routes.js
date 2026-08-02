@@ -14,6 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
 import { registerFichaDuplicarRoutes } from './atb-ficha-duplicar-routes.js';
+import { registerPrefillRoutes, ensurePrefillSchema, resolverPrefill } from './atb-prefill-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
 import { registerExplicarRoutes } from './atb-explicar-routes.js';
 import { registerPosologiaNormalizarRoutes } from './atb-posologia-normalizar-routes.js';
@@ -88,6 +89,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureAnexosSchema(pool).catch(e => console.error('[atb] falha ao preparar anexos:', e.message));
   ensureRetroSchema(pool).catch(e => console.error('[atb] ensureRetroSchema:', e.message));
   ensureAdesaoSchema(pool).catch(e => console.error('[atb] ensureAdesaoSchema:', e.message));
+  ensurePrefillSchema(pool).catch(e => console.error('[atb] ensurePrefillSchema:', e.message));
   ensureScihAcessoSchema(pool).catch(e => console.error('[atb] ensureScihAcessoSchema:', e.message));
   ensureMirrorSchema(pool).catch(e => console.error('[atb] ensureMirrorSchema:', e.message));
   ensureTriagemRegrasSchema(pool).catch(e => console.error('[atb] ensureTriagemRegrasSchema:', e.message));
@@ -105,6 +107,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerComplementoRoutes(app, pool, adminRequired);
   registerFichaCardRoutes(app, pool, adminRequired);
   registerFichaDuplicarRoutes(app, pool, adminRequired);
+  registerPrefillRoutes(app, pool, adminRequired);
   registerFichaViewRoutes(app, pool, adminRequired);
   registerExplicarRoutes(app, pool, adminRequired);
   registerFormTesteSchemaRoutes(app, pool, adminRequired);
@@ -146,7 +149,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   catch (e) { console.warn('[atb] logo não encontrado:', e.message); }
 
   // ── Formulário do prescritor (público, motor schema-driven) ────────────
-  const servirFicha = (req, res) => {
+  const servirFicha = async (req, res) => {
+   try {
     // Instituição pelo tenant do subdomínio (req.atbTenant, setado pelo tenantLock em
     // toda requisição). /ficha não começa com /atb, então o tenantLock NÃO força
     // req.query.inst aqui — por isso lemos req.atbTenant direto (senão o logo cairia
@@ -155,13 +159,30 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     let html = fs.readFileSync(path.join(__dirname, 'atb-form.html'), 'utf8');
     // injeta instituição + logo antes do bootstrap do motor
     const logoTenant = getTenantLogo(inst) || ATB_LOGO;   // por-tenant; HUSF cai no atb-logo.b64
-    const inject = `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_LOGO=${JSON.stringify(logoTenant)};</script>`;
+    // Pré-preenchimento por token (?pre=...): o SCIH gera o link a partir de uma
+    // ficha e o prescritor abre com o contexto do paciente já preenchido. Token
+    // inválido/vencido/de outro tenant devolve null e o formulário abre em
+    // branco — sem revelar que o token existia.
+    let prefill = null;
+    if (req.query.pre) {
+      try { prefill = await resolverPrefill(pool, String(req.query.pre), inst); }
+      catch (e) { console.error('[atb] prefill:', e.message); }
+    }
+    const inject = `<script>window.ATB_INSTITUICAO=${JSON.stringify(inst)};window.ATB_LOGO=${JSON.stringify(logoTenant)};`
+      + (prefill ? `window.ATB_PREFILL=${JSON.stringify(prefill)};` : '')
+      + `</script>`;
     html = html.replace(
       `<script>window.ATB_INSTITUICAO = window.ATB_INSTITUICAO || 'HUSF';</script>`,
       inject
     );
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
+   } catch (e) {
+     // Handler async: sem este catch, uma falha (ex.: atb-form.html ilegível)
+     // viraria promise rejeitada e o Express 4 deixaria a requisição pendurada.
+     console.error('[atb] servirFicha:', e.message);
+     if (!res.headersSent) res.status(500).send('Erro ao abrir o formulário.');
+   }
   };
   app.get('/atb/form', servirFicha);
   app.get('/ficha', servirFicha);

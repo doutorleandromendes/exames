@@ -242,6 +242,10 @@ function renderCardBody(f, evol, s) {
   // ação de vigilância, tomada enquanto o SCIH lê a ficha. O clique é tratado por
   // delegação (o conteúdo do card é recarregado a cada ficha aberta).
   links.push(`<button type="button" class="fc-link" data-dup-iras="${f.id}" title="O paciente tem outra IrAS nesta internação — cria uma cópia da ficha para classificar a segunda">⧉ Duplicar</button>`);
+  // Link com o contexto do paciente já preenchido, para quando o SCIH orienta a
+  // troca e o prescritor vai acatar: ele abre e preenche só a prescrição nova.
+  // O link carrega um token (validade curta), nunca os dados do paciente.
+  links.push(`<button type="button" class="fc-link" data-link-prefill="${f.id}" title="Gera um link do formulário com os dados do paciente já preenchidos (sem o antimicrobiano). Válido por 24h.">🔗 Link pré-preenchido</button>`);
   if (links.length) {
     blocos.unshift(`<div class="fc-bloco"><div class="fc-tit">Acessos</div><div class="fc-links">${links.join('')}</div></div>`);
   }
@@ -341,6 +345,35 @@ export function fichaCardAssets() {
     // infecção, então cada uma precisa da sua própria avaliação). O parecer e o
     // desfecho vêm juntos; a classificação de IrAS fica em branco na cópia.
     // Delegação: o botão vive dentro do conteúdo, que é remontado a cada ficha.
+    // Gera o link pré-preenchido e copia para a área de transferência.
+    document.addEventListener('click', function(ev){
+      var el = ev.target && ev.target.closest ? ev.target.closest('[data-link-prefill]') : null;
+      if (!el) return;
+      ev.preventDefault();
+      var fid = el.getAttribute('data-link-prefill');
+      if (!fid) return;
+      var rotulo = el.textContent;
+      el.disabled = true; el.textContent = 'gerando…';
+      fetch('/atb/admin/fichas/' + fid + '/link-prefill', { method:'POST' })
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          el.disabled = false; el.textContent = rotulo;
+          if (!d || !d.ok) { alert('Não foi possível gerar o link: ' + ((d && d.erro) || 'erro')); return; }
+          var copiar = navigator.clipboard && navigator.clipboard.writeText
+            ? navigator.clipboard.writeText(d.url) : Promise.reject();
+          copiar.then(function(){
+            el.textContent = '✓ link copiado';
+            setTimeout(function(){ el.textContent = rotulo; }, 2500);
+          }).catch(function(){
+            window.prompt('Copie o link (válido por ' + d.validade_horas + 'h):', d.url);
+          });
+        })
+        .catch(function(e){
+          el.disabled = false; el.textContent = rotulo;
+          alert('Não foi possível gerar o link: ' + e.message);
+        });
+    });
+
     document.addEventListener('click', function(ev){
       var alvo = ev.target && ev.target.closest ? ev.target.closest('[data-dup-iras]') : null;
       if (!alvo) return;

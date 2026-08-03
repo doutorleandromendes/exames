@@ -132,11 +132,20 @@ function esc(v) {
 }
 
 // lista plana de campos (key, label, options) para dropdowns
+// Rótulos produzidos pela IA sobre a história clínica. Não são campos do
+// formulário — são valores que o motor publica no estado depois de classificar,
+// para que uma regra possa reagir a eles. Só aparecem aqui, no editor, para
+// serem escolhidos como CONDIÇÃO ("se a IA achou sinais de sepse, então...").
+const CAMPOS_IA = [
+  { key: '_ia_sepse', label: 'IA: história sugere sepse', options: ['Sim', 'Não'] },
+];
+
 function listarCampos(schema) {
   const out = [];
   for (const sec of (schema.secoes || []))
     for (const c of (sec.campos || []))
       if (c.key) out.push({ key: c.key, label: c.label || c.key, options: Array.isArray(c.options) ? c.options : [] });
+  for (const c of CAMPOS_IA) out.push({ ...c });
   return out;
 }
 function acharCampo(schema, key) {

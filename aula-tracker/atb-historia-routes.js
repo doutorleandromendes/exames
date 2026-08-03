@@ -29,6 +29,7 @@
 
 import { montarMensagensNarrativa, parseSaidaNarrativa } from './atb-historia-narrativa.js';
 import { montarMensagensIsc, parseSaidaIsc, RESPONSE_FORMAT_ISC } from './atb-historia-isc.js';
+import { montarMensagensSepse, RESPONSE_FORMAT_SEPSE, parseSaidaSepse } from './atb-historia-sepse.js';
 
 const API_URL   = (process.env.ATB_NARRATIVA_API_URL || 'https://api.deepinfra.com/v1/openai').replace(/\/$/, '');
 const API_KEY   = process.env.ATB_NARRATIVA_API_KEY || '';
@@ -127,6 +128,15 @@ export async function classificarIsc(historia) {
   return o ? { ...o, custo: r.custo } : { erro: 'resposta ilegível do modelo' };
 }
 
+// Irmã de classificarIsc: mesma mecânica, critério próprio (ver o módulo).
+export async function classificarSepse(historia) {
+  const texto = DEID_ON ? deidentificar(historia) : historia;
+  const r = await chamarModelo(montarMensagensSepse(texto), RESPONSE_FORMAT_SEPSE, 'sepse');
+  if (r.erro) return { erro: r.erro };
+  const o = parseSaidaSepse(r.conteudo);
+  return o ? { ...o, custo: r.custo } : { erro: 'resposta ilegível do modelo' };
+}
+
 async function garantirTabela(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS atb_historia_checagens (
@@ -148,6 +158,8 @@ export function registerHistoriaRoutes(app, pool) {
     .then(() => Promise.all([
       pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS isc BOOLEAN`),
       pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS isc_indicios TEXT`),
+      pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS sepse BOOLEAN`),
+      pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS sepse_indicios TEXT`),
       pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS bruto TEXT`),
       pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS ilegivel BOOLEAN DEFAULT false`),
     ]))
@@ -197,12 +209,14 @@ async function ir(){
       ? req.body.quer.map(String) : ['narrativa'];
     const querNarrativa = pedidos.includes('narrativa');
     const querIsc = pedidos.includes('isc');
-    if (!querNarrativa && !querIsc) return res.json({ disponivel: false });
+    const querSepse = pedidos.includes('sepse');
+    if (!querNarrativa && !querIsc && !querSepse) return res.json({ disponivel: false });
 
     // Em paralelo: a latência é a da mais lenta, não a soma.
-    const [rn, ri] = await Promise.all([
+    const [rn, ri, rs] = await Promise.all([
       querNarrativa ? classificar(historia) : Promise.resolve(null),
       querIsc ? classificarIsc(historia) : Promise.resolve(null),
+      querSepse ? classificarSepse(historia) : Promise.resolve(null),
     ]);
 
     // Três estados possíveis da narrativa:
@@ -213,12 +227,13 @@ async function ir(){
     const narrIlegivel = querNarrativa && rn && rn.ilegivel;
     const okNarrativa  = querNarrativa && rn && !rn.erro && !rn.ilegivel;
     const okIsc = querIsc && !!ri && !ri.erro;
+    const okSepse = querSepse && !!rs && !rs.erro;
 
     // Se a narrativa foi pedida e veio ILEGÍVEL, isso por si só é um resultado
     // acionável (barrar) — não é indisponibilidade. Só caímos em disponivel=false
     // quando NADA utilizável veio: narrativa fora E isc fora.
     const narrTemResultado = okNarrativa || narrIlegivel;
-    if (!narrTemResultado && !okIsc) return res.json({ disponivel: false });
+    if (!narrTemResultado && !okIsc && !okSepse) return res.json({ disponivel: false });
 
     // Fail-safe: história ilegível é tratada como telegráfica (narrativa=false),
     // com aviso próprio. O prescritor revisa; o SCIH vê no log (com o bruto).
@@ -233,13 +248,14 @@ async function ir(){
     let checagem_id = null;
     try {
       const ins = await pool.query(
-        `INSERT INTO atb_historia_checagens (inst, historia, disponivel, narrativa, aviso, isc, isc_indicios, bruto, ilegivel)
-         VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        `INSERT INTO atb_historia_checagens (inst, historia, disponivel, narrativa, aviso, isc, isc_indicios, bruto, ilegivel, sepse, sepse_indicios)
+         VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
         [inst, historia,
          narrTemResultado ? narrativaFinal : null,
          narrTemResultado ? (avisoFinal || null) : null,
          okIsc ? ri.isc : null, okIsc ? (ri.indicios || null) : null,
-         brutoNarr, !!narrIlegivel]);
+         brutoNarr, !!narrIlegivel,
+         okSepse ? rs.sepse : null, okSepse ? (rs.indicios || null) : null]);
       checagem_id = ins.rows[0].id;
     } catch (e) { console.error('[historia] log', e.message); }
 
@@ -249,6 +265,8 @@ async function ir(){
       aviso: narrTemResultado ? avisoFinal : '',
       isc: okIsc ? ri.isc : null,
       indicios: okIsc ? (ri.indicios || '') : '',
+      sepse: okSepse ? rs.sepse : null,
+      sepse_indicios: okSepse ? (rs.indicios || '') : '',
       checagem_id,
     });
   });

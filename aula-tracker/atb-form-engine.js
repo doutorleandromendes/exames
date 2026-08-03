@@ -1219,12 +1219,35 @@
       }
       return null;
     }
+    // [sepse] Alguma regra de preenchimento referencia o rótulo _ia_sepse?
+    // Procura a chave em qualquer nível da condição (all/any aninhados).
+    function usaRotuloSepse() {
+      var regras = (schema && schema.preenchimentos) || [];
+      function cita(c) {
+        if (!c || typeof c !== 'object') return false;
+        if (c.campo === '_ia_sepse') return true;
+        var listas = [c.all, c.any, c.none];
+        for (var i = 0; i < listas.length; i++) {
+          var L = listas[i];
+          if (Array.isArray(L)) { for (var j = 0; j < L.length; j++) if (cita(L[j])) return true; }
+        }
+        return false;
+      }
+      for (var k = 0; k < regras.length; k++) if (cita(regras[k].quando)) return true;
+      return false;
+    }
+
     // Quais rótulos as regras deste schema realmente usam — evita pagar pelas
     // duas classificações quando só uma regra existe.
     function _querRotulos() {
       var q = [];
       if (regraNarrativa()) q.push('narrativa');
       if (regraIsc()) q.push('isc');
+      // [sepse] O rótulo da IA de sepse não tem gatilho próprio: ele vira um
+      // VALOR no formulário (_ia_sepse) que as regras de preenchimento leem.
+      // Só pagamos pela classificação se existir regra que a referencie —
+      // mesma economia que já vale para narrativa e ISC.
+      if (usaRotuloSepse()) q.push('sepse');
       return q.length ? q : ['narrativa'];
     }
 
@@ -1244,8 +1267,16 @@
           setHistoriaChecando(false);
           if (hUltimoRef.current !== t) return;
           if (d && d.disponivel) {
-            cache[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id, isc: d.isc, indicios: d.indicios };
+            cache[t] = { narrativa: d.narrativa, checagem_id: d.checagem_id, isc: d.isc, indicios: d.indicios, sepse: d.sepse, sepse_indicios: d.sepse_indicios };
             setHistoriaAviso(d.narrativa === false ? cache[t] : null);
+            // [sepse] Publica o rótulo como VALOR do formulário. A partir daqui
+            // quem decide o que fazer é a regra de preenchimento configurada no
+            // editor (ex.: se _ia_sepse é Sim, sobrescreve sepse para Sim).
+            // Fica no payload como rastro de que a IA opinou.
+            if (d.sepse === true || d.sepse === false) {
+              set('_ia_sepse', d.sepse ? 'Sim' : 'Não');
+              set('_ia_sepse_indicios', d.sepse_indicios || '');
+            }
           } else { setHistoriaAviso(null); }
         })
         .catch(function () { setHistoriaChecando(false); setHistoriaAviso(null); });

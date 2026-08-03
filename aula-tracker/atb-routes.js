@@ -65,6 +65,14 @@ function safe(s) {
 // perfil scih existir e engana a leitura). `superRequired` é o gate de
 // configuração: mesma cadeia, mais a exigência de super_admin.
 export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridRequired, superRequired) {
+  // Perfil SCIH operacional: enxerga tudo da grade, mas só GRAVA desfecho e
+  // SAPS3. Classificar IrAS/etiologia é ato do coordenador; a coluna micro é da
+  // microbiologia. super_admin e break-glass (cookie adm) não são afetados —
+  // mesma régua do soMicro logo abaixo.
+  const CAMPOS_SCIH_OPER = ['saps3', 'tempo_saps', 'desfecho_iras', 'desfecho_data'];
+  const ehScihOper = (req) =>
+    !!(req.user && req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
+
   // Enquanto o app não passar o gate novo, cai no antigo — evita quebrar em
   // deploy parcial. Depois do deploy completo este fallback vira no-op.
   const superGate = superRequired || adminRequired;
@@ -765,6 +773,18 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     const id = parseInt(req.params.id, 10);
     const { iras, etiol_iras, micro, desfecho_iras, desfecho_data, saps3, status } = req.body||{};
     try {
+      // Perfil operacional: grava só desfecho e SAPS3 e PRESERVA iras/etiol/micro
+      // (o upsert abaixo sobrescreveria as três com o que viesse do formulário).
+      // O status da ficha também não é tocado — não está no escopo do perfil.
+      if (ehScihOper(req)) {
+        await pool.query(`
+          INSERT INTO atb_avaliacoes (ficha_id, desfecho_iras, desfecho_data, saps3, avaliado_por, updated_at)
+          VALUES ($1,$2,$3,$4,$5,now())
+          ON CONFLICT (ficha_id) DO UPDATE SET
+            desfecho_iras=$2, desfecho_data=$3, saps3=$4, avaliado_por=$5, updated_at=now()
+        `, [id, desfecho_iras||null, desfecho_data||null, saps3||null, req.user?.id]);
+        return res.redirect(`/atb/admin/fichas/${id}`);
+      }
       await pool.query(`
         INSERT INTO atb_avaliacoes
           (ficha_id,iras,etiol_iras,micro,desfecho_iras,desfecho_data,saps3,avaliado_por,updated_at,micro_at)
@@ -1355,7 +1375,19 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         n.style.cssText='background:#e6f1fb;color:#0c447c;border:1px solid #b5d4f4;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px';
         var w=document.querySelector('.wrap')||document.body; w.insertBefore(n,w.firstChild);
       });</script>` : '';
-      res.send(renderShell(`ATB · Controle${_sigla ? ' · ' + _sigla : ''}`, html + microLock, _sigla ? getTenantLogo(_sigla) : undefined));
+      // Trava visual do perfil operacional: as células que ele não pode gravar
+      // ficam inertes. É só conforto — quem barra de verdade é o 403 no
+      // /atb/admin/api/avaliacao/:id, que roda no servidor.
+      const scihLock = ehScihOper(req) ? `<script>document.addEventListener('DOMContentLoaded',function(){
+        var LIVRES=${JSON.stringify(CAMPOS_SCIH_OPER)};
+        document.querySelectorAll('[data-field]').forEach(function(el){
+          if(LIVRES.indexOf(el.getAttribute('data-field'))===-1){ el.disabled=true; el.style.opacity='.45'; el.style.pointerEvents='none'; }
+        });
+        var n=document.createElement('div'); n.textContent='Perfil SCIH — você edita desfecho e SAPS3. Classificação de IrAS e microbiologia são de outro perfil.';
+        n.style.cssText='background:#e6f1fb;color:#0c447c;border:1px solid #b5d4f4;border-radius:8px;padding:8px 12px;margin:0 0 12px;font-size:13px';
+        var w=document.querySelector('.wrap')||document.body; w.insertBefore(n,w.firstChild);
+      });</script>` : '';
+      res.send(renderShell(`ATB · Controle${_sigla ? ' · ' + _sigla : ''}`, html + microLock + scihLock, _sigla ? getTenantLogo(_sigla) : undefined));
     } catch (e) {
       console.error('[atb] grid error:', e);
       res.status(500).send(renderShell('Erro', `<div class="card"><p class="mut">${safe(e.message)}</p></div>`));
@@ -1380,6 +1412,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     if (!OK.includes(field)) return res.status(400).json({ ok:false, error:'campo inválido' });
     const soMicro = !!(req.user && req.user.micro && !req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
     if (soMicro && field !== 'micro') return res.status(403).json({ ok:false, error:'sem permissão para este campo' });
+    if (ehScihOper(req) && !CAMPOS_SCIH_OPER.includes(field))
+      return res.status(403).json({ ok:false, error:'seu perfil edita apenas desfecho e SAPS3' });
     try {
       let v = value === '' ? null : value;
       if ((field==='saps3'||field==='tempo_saps') && v!=null) v = parseFloat(v);

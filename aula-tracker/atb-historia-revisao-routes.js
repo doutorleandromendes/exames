@@ -35,6 +35,10 @@ const FILTROS = {
   passou: { rotulo: 'Passaram (amostra)', where: `narrativa = true` },
   ilegiveis: { rotulo: 'Ilegíveis (parse falhou)', where: `ilegivel = true` },
   errou: { rotulo: 'Marcadas como erro da IA', where: `revisao = 'errou'` },
+  // Triagem de sepse — juízo independente do da narrativa.
+  sepse_sim: { rotulo: 'Sepse: sinalizadas', where: `sepse = true` },
+  sepse_pend: { rotulo: 'Sepse: a revisar', where: `sepse = true AND revisao_sepse IS NULL` },
+  sepse_nao: { rotulo: 'Sepse: passaram (amostra)', where: `sepse = false` },
   todas: { rotulo: 'Todas', where: `TRUE` },
 };
 
@@ -55,6 +59,11 @@ function escopoInst(n) {
 async function garantirColunas(pool) {
   // Aditivo: a tabela é criada por atb-historia-routes.js; aqui só o rótulo.
   await pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS revisao TEXT`);
+  // Rótulo da triagem de SEPSE. Coluna própria porque é outro juízo sobre a
+  // mesma história: `revisao` diz se a IA acertou na narrativa (forma), esta
+  // diz se acertou na sepse (gravidade). Misturar as duas perderia os dois.
+  await pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS revisao_sepse TEXT`);
+  await pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS revisao_sepse_em TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE atb_historia_checagens ADD COLUMN IF NOT EXISTS revisado_em TIMESTAMPTZ`);
 }
 
@@ -87,6 +96,11 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
           count(*) FILTER (WHERE narrativa = false AND revisao = 'errou')::int   AS fp_erro,
           count(*) FILTER (WHERE narrativa = true  AND revisao = 'acertou')::int AS fn_ok,
           count(*) FILTER (WHERE narrativa = true  AND revisao = 'errou')::int   AS fn_erro,
+          count(*) FILTER (WHERE sepse = true)::int                             AS sep_sim,
+          count(*) FILTER (WHERE sepse = false)::int                            AS sep_nao,
+          count(*) FILTER (WHERE sepse = true AND revisao_sepse IS NULL)::int    AS sep_pend,
+          count(*) FILTER (WHERE sepse = true AND revisao_sepse = 'acertou')::int AS sep_ok,
+          count(*) FILTER (WHERE sepse = true AND revisao_sepse = 'errou')::int   AS sep_erro,
           count(*) FILTER (WHERE override = true)::int                         AS overrides
         FROM atb_historia_checagens
          WHERE ${escopoInst(1)}`, [tenant]);
@@ -96,7 +110,8 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
 
       const { rows } = await pool.query(`
         SELECT id, inst, historia, disponivel, narrativa, aviso, override, motivo, bruto, ilegivel,
-               revisao, revisado_em, created_at
+               revisao, revisado_em, created_at,
+               sepse, sepse_indicios, revisao_sepse
           FROM atb_historia_checagens
          WHERE (${filtro.where}) AND ${escopoInst(1)}
          ORDER BY created_at DESC
@@ -127,6 +142,28 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
             <button type="submit" name="revisao" value="errou" class="danger">IA errou</button>
             ${r.revisao ? '<button type="submit" name="revisao" value="" class="ghost">limpar</button>' : ''}
           </form>`;
+        // Bloco da triagem de SEPSE. Só aparece quando ela rodou nesta checagem
+        // (sepse não-nulo) — as duas triagens são independentes e nem sempre
+        // as duas foram pedidas.
+        const temSepse = r.sepse === true || r.sepse === false;
+        const vereditoSepse = !temSepse ? '' : (r.sepse
+          ? '<span class="pill" style="background:#fdecea;color:#b3261e">IA: sugere sepse</span>'
+          : '<span class="pill" style="background:#e6f4ea;color:#1a7f37">IA: sem sinais de sepse</span>');
+        const jaRevSepse = r.revisao_sepse
+          ? `<span class="pill" style="background:${r.revisao_sepse === 'errou' ? '#fdecea;color:#b3261e' : '#e6f4ea;color:#1a7f37'}">revisado: IA ${esc(r.revisao_sepse)}</span>`
+          : '';
+        const blocoSepse = !temSepse ? '' : `
+          <div style="margin-top:10px;padding:10px 12px;background:#fbfcfe;border:1px solid var(--bd);border-radius:8px">
+            <div class="row" style="gap:6px">${vereditoSepse} ${jaRevSepse}</div>
+            ${r.sepse_indicios ? `<p class="nota" style="margin:6px 0 0">indício: ${esc(r.sepse_indicios)}</p>` : ''}
+            <form method="POST" action="/atb/admin/historia/revisao/${r.id}" class="row" style="margin-top:8px">
+              <input type="hidden" name="f" value="${esc(chave)}">
+              <input type="hidden" name="alvo" value="sepse">
+              <button type="submit" name="revisao" value="acertou" class="ghost">sepse: IA acertou</button>
+              <button type="submit" name="revisao" value="errou" class="danger">sepse: IA errou</button>
+              ${r.revisao_sepse ? '<button type="submit" name="revisao" value="" class="ghost">limpar</button>' : ''}
+            </form>
+          </div>`;
         return `<div class="card">
           <div class="row" style="justify-content:space-between">
             <div class="row">${veredito} ${jaRev}</div>
@@ -137,6 +174,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
           ${r.bruto ? `<details style="margin-top:8px"><summary class="nota" style="cursor:pointer">resposta crua do modelo${r.ilegivel ? ' (não interpretada)' : ''}</summary><div style="margin-top:6px;padding:8px 10px;background:#fbfbfd;border:1px solid var(--bd);border-radius:6px;white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;color:#444">${esc(r.bruto)}</div></details>` : ''}
           ${r.override ? `<p class="nota" style="margin:6px 0 0">override do prescritor${r.motivo ? ': ' + esc(r.motivo) : ''}</p>` : ''}
           ${botoes}
+          ${blocoSepse}
         </div>`;
       }).join('') : '<div class="card"><p class="mut">Nada neste filtro.</p></div>';
 
@@ -152,6 +190,7 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
           <table>
             <tr><td>Checagens no total</td><td><strong>${m.total}</strong></td></tr>
             <tr><td>Bloqueadas (IA: telegráfica)</td><td><strong>${m.sinalizadas}</strong> · <span class="nota">${m.pendentes} pendentes de revisão</span></td></tr>
+            ${(m.sep_sim + m.sep_nao) ? `<tr><td>Triagem de sepse</td><td><strong>${m.sep_sim}</strong> sinalizada(s) de ${m.sep_sim + m.sep_nao} avaliada(s) · <span class="nota">${m.sep_pend} a revisar${(m.sep_ok + m.sep_erro) ? ` · revisadas: ${m.sep_ok} acertou / ${m.sep_erro} errou` : ''}</span></td></tr>` : ''}
             <tr><td>Passaram (IA: narrativa)</td><td><strong>${m.passaram}</strong></td></tr>
             <tr><td>Indisponível (fail-open)</td><td><strong>${m.indisponivel}</strong> <span class="nota">— falha de infra, a ficha passou direto</span></td></tr>
           </table>
@@ -193,10 +232,20 @@ export function registerHistoriaRevisaoRoutes(app, pool, adminRequired) {
     const f = filtroValido(req.body?.f) ? req.body.f : 'pendentes';
     try {
       if (Number.isInteger(id)) {
-        await pool.query(
-          `UPDATE atb_historia_checagens
-              SET revisao = $2, revisado_em = CASE WHEN $2 IS NULL THEN NULL ELSE now() END
-            WHERE id = $1 AND ${escopoInst(3)}`, [id, valor, req.atbTenant || 'HUSF']);
+        // `alvo` diz QUAL triagem está sendo rotulada. Sem ele, é a narrativa
+        // (comportamento de antes) — os formulários antigos seguem funcionando.
+        const alvoSepse = String(req.body?.alvo || '') === 'sepse';
+        if (alvoSepse) {
+          await pool.query(
+            `UPDATE atb_historia_checagens
+                SET revisao_sepse = $2, revisao_sepse_em = CASE WHEN $2 IS NULL THEN NULL ELSE now() END
+              WHERE id = $1 AND ${escopoInst(3)}`, [id, valor, req.atbTenant || 'HUSF']);
+        } else {
+          await pool.query(
+            `UPDATE atb_historia_checagens
+                SET revisao = $2, revisado_em = CASE WHEN $2 IS NULL THEN NULL ELSE now() END
+              WHERE id = $1 AND ${escopoInst(3)}`, [id, valor, req.atbTenant || 'HUSF']);
+        }
       }
     } catch (e) {
       console.error('[historia-revisao] gravar:', e.message);

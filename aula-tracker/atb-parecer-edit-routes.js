@@ -27,6 +27,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 import { espelharEdicao, CAMPOS_PARECER } from './atb-jotform-mirror.js';
 import { getParecerFrases, PARECER_ESPECIFICACOES_SEED } from './atb-parecer-frases.js';
+import { textoPosologia } from './atb-posologia-normalizar-routes.js';
 // ── Fonte ÚNICA de verdade das opções ───────────────────────────────────────
 
 // Veredito (qid 30). Single-select. Mesma lista que a paleta REC_CORES reconhece.
@@ -283,6 +284,16 @@ function paginaParecer(f, safe, frases) {
   const nome = s(f.paciente_nome || f.paciente_nome_raw || '—');
   const atb = Array.isArray(f.atb_solicitado) ? f.atb_solicitado.join(', ')
     : (typeof f.atb_solicitado === 'string' ? f.atb_solicitado : '—');
+  // Posologia pela FONTE ÚNICA (textoPosologia) — a mesma do card e da ficha
+  // completa, para o parecer nunca mostrar intervalo diferente do resto.
+  const _posArr = Array.isArray(f.posologia) ? f.posologia : [];
+  const posLinhas = _posArr.map((r) => {
+    const t = textoPosologia(r);
+    if (!t || (!t.droga && !t.dose && !t.freq)) return '';
+    return `<div class="pos-linha"><b>${s(t.droga)}</b> ${s(t.dose)}${t.freq ? ' · ' + s(t.freq) : ''}</div>`;
+  }).filter(Boolean).join('');
+  const sepse = f.sepse ? String(f.sepse) : '';
+  const tempo = f.tempo_previsto ? String(f.tempo_previsto) : '';
   const ver = _veredito1(f);
   const espec = f.recomendacoes_especificacao || '';
   const emitido = f.parecer_emitido_at
@@ -322,6 +333,9 @@ function paginaParecer(f, safe, frases) {
   .resumo .pac{font-size:16px;font-weight:700;color:var(--tinta)}
   .resumo .meta{font-size:12px;color:var(--tinta-suave);margin-top:3px}
   .resumo .atb{margin-top:8px;font-size:13px}
+  .resumo .pos { margin-top:6px; font-size:14px; }
+  .resumo .pos-linha { margin-left:10px; }
+  .resumo .pres { margin-top:6px; font-size:14px; }
   .resumo .atb b{color:var(--azul-texto)}
   .ultimo{font-size:11px;color:var(--tinta-suave);margin-top:8px;padding-top:8px;border-top:1px dashed var(--borda)}
   .bloco{background:#fff;border:1px solid var(--borda);border-radius:10px;padding:16px 18px;margin-bottom:14px}
@@ -357,6 +371,8 @@ function paginaParecer(f, safe, frases) {
       <div class="pac">${nome}</div>
       <div class="meta">Pront. ${s(f.prontuario || '—')} · ${s(f.setor || '—')}${f.leito ? ' · Leito ' + s(f.leito) : ''}${f.instituicao ? ' · ' + s(f.instituicao) : ''}</div>
       <div class="atb"><b>ATB:</b> ${s(atb)}</div>
+      ${posLinhas ? `<div class="pos"><b>Posologia:</b>${posLinhas}</div>` : ''}
+      ${(sepse || tempo) ? `<div class="pres">${sepse ? `<b>Sepse:</b> ${s(sepse)}` : ''}${(sepse && tempo) ? ' · ' : ''}${tempo ? `<b>Tempo previsto:</b> ${s(tempo)}` : ''}</div>` : ''}
       ${emitido}
     </div>
 
@@ -552,7 +568,10 @@ export function registerParecerEditRoutes(app, pool, adminRequired) {
       const { rows: [f] } = await pool.query(`
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor, f.leito,
                f.atb_solicitado, f.recomendacao_scih, f.recomendacoes_especificacao,
-               f.parecer_emitido_at, i.sigla AS instituicao
+               f.parecer_emitido_at, i.sigla AS instituicao,
+               -- Campos informados pelo PRESCRITOR, para o SCIH decidir sem
+               -- precisar abrir a ficha completa.
+               f.sepse, f.posologia, f.tempo_previsto
         FROM atb_fichas f
         LEFT JOIN atb_instituicoes i ON i.id = f.instituicao_id
         WHERE f.id = $1

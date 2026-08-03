@@ -23,7 +23,7 @@
 //  Sem schema novo — só leitura + o endpoint de parecer que já existe.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { buildGridWhere } from './atb-grid-filters.js';
+import { buildGridWhere, opcoesJanela } from './atb-grid-filters.js';
 import { PARECER_VEREDITOS, PARECER_VEREDITO_CORES, PARECER_VEREDITO_FG } from './atb-parecer-edit-routes.js';
 import { getParecerFrases } from './atb-parecer-frases.js';
 
@@ -146,7 +146,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
       const setSel = _arr(req.query.setor);
       const mrSel  = _arr(req.query.cult_mr);
 
-      const { whereSql, params } = buildGridWhere(req.query);
+      const { whereSql, params } = buildGridWhere(req.query, undefined, opcoesJanela(req));
 
       const { rows: [{ total }] } = await pool.query(`
         SELECT COUNT(*) AS total FROM atb_fichas f
@@ -154,7 +154,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
         LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id WHERE ${whereSql}`, params);
 
       // contagem dos chips sobre o recorte-base (sem os próprios chips)
-      const base = buildGridWhere({ ...req.query, iras: '', parecer: '' });
+      const base = buildGridWhere({ ...req.query, iras: '', parecer: '' }, undefined, opcoesJanela(req));
       const { rows: [cnt] } = await pool.query(`
         SELECT COUNT(*) AS todas,
                COUNT(*) FILTER (WHERE a.iras IS NULL OR a.iras='') AS pendentes,

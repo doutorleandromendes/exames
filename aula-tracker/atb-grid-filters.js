@@ -382,11 +382,47 @@ export function gridControlsUI(query, pager, opts = {}) {
   </script>`;
 }
 // ── WHERE do recorte (fonte única — usado pela grade E pelas estatísticas) ───
-export function buildGridWhere(query, colsReais) {
+// ── Perfil SCIH operacional ────────────────────────────────────────────────
+// Fonte única do critério (grade desktop, mobile e estatísticas usam a mesma).
+// super_admin e break-glass (cookie adm) não são operacionais.
+export const JANELA_SCIH_DIAS = 90;
+export function ehScihOper(req) {
+  return !!(req && req.user && req.user.scih && !req.user.super_admin)
+      && req.cookies?.adm !== '1';
+}
+// Opções de janela para o buildGridWhere conforme o perfil da requisição.
+export function opcoesJanela(req) {
+  return ehScihOper(req) ? { janelaDias: JANELA_SCIH_DIAS } : null;
+}
+
+// Uma ficha específica está dentro da janela do perfil? Para as telas de ficha
+// única (card, ficha completa, detalhe), onde não há WHERE de lista para filtrar.
+// Devolve false para quem não é operacional — ninguém mais é limitado.
+export async function fichaForaDaJanela(pool, fichaId, req) {
+  if (!ehScihOper(req)) return false;
+  const id = parseInt(fichaId, 10);
+  if (!Number.isFinite(id)) return true;
+  const { rows } = await pool.query(
+    `SELECT 1 FROM atb_fichas f
+      WHERE f.id = $1
+        AND ${DIA_FICHA_BRT} >= (now() AT TIME ZONE 'America/Sao_Paulo')::date - ${JANELA_SCIH_DIAS}`,
+    [id]);
+  return rows.length === 0;
+}
+
+export function buildGridWhere(query, colsReais, opts) {
   const Q = query || {};
+  // Janela obrigatória de N dias (perfil operacional). Entra no WHERE como piso
+  // fixo: não é valor padrão de filtro, é limite — o usuário não sobrescreve
+  // mexendo na querystring. Usa a mesma expressão de dia-calendário do resto
+  // dos filtros, então respeita o fuso de Brasília.
+  const janelaDias = opts && Number.isFinite(opts.janelaDias) ? opts.janelaDias : null;
   const q = (Q.q || '').trim();
   const inst = Q.inst || '', mes = Q.mes || '', iras = Q.iras || '';
   const where = ['f.deletado_em IS NULL'], params = [];
+  if (janelaDias != null) {
+    where.push(`${DIA_FICHA_BRT} >= (now() AT TIME ZONE 'America/Sao_Paulo')::date - ${Math.max(0, Math.floor(janelaDias))}`);
+  }
   if (q) {
     params.push('%' + q.toLowerCase() + '%');
     where.push(`(LOWER(f.paciente_nome) LIKE $${params.length} OR LOWER(f.paciente_nome_raw) LIKE $${params.length} OR f.prontuario LIKE $${params.length} OR f.atendimento LIKE $${params.length})`);

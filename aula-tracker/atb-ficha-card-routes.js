@@ -30,6 +30,7 @@ import { buscarCulturasDaFicha, culturasTemMR, renderCulturasCard } from './atb-
 import { buscarHemoDaFicha, renderHemoCard } from './atb-hemocultura-routes.js';
 import { buscarMdrDaFicha, mdrTemAlerta } from './atb-mdr-routes.js';
 import { textoPosologia } from './atb-posologia-normalizar-routes.js';
+import { fichaForaDaJanela } from './atb-grid-filters.js';
 import { buscarNomePacs, nomeDivergePacs } from './atb-pacs-nome-routes.js';
 import { contextoFicha } from './atb-triagem-regras.js';
 
@@ -502,6 +503,10 @@ export function fichaCardAssets() {
 // ════════════════════════════════════════════════════════════════════════════
 export function registerFichaCardRoutes(app, pool, adminRequired) {
   app.get('/atb/admin/api/ficha/:id', adminRequired, async (req, res) => {
+    // Perfil operacional enxerga só os últimos 90 dias — vale também para a
+    // ficha aberta direto pela URL, não só para a listagem.
+    if (await fichaForaDaJanela(pool, req.params.id, req))
+      return res.status(403).json({ ok:false, error:'ficha fora da janela de 90 dias do seu perfil' });
     try {
       const id = parseInt(req.params.id, 10);
       const { rows: [f] } = await pool.query(`

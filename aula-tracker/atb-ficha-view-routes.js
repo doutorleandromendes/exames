@@ -22,6 +22,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { getFormSchema } from './atb-form-schema.js';
+import { fichaForaDaJanela } from './atb-grid-filters.js';
 import { buscarCulturasDaFicha, renderCulturasComplemento } from './atb-culturas-routes.js';
 import { COLUNA_DE } from './atb-field-registry.js';
 import { textoPosologia } from './atb-posologia-normalizar-routes.js';
@@ -431,6 +432,8 @@ function paginaFichaView(f, anexos, s, podeEditar, matrizes, microHTML = '', ext
 
 export function registerFichaViewRoutes(app, pool, adminRequired) {
   app.get('/atb/admin/ficha/:id', adminRequired, async (req, res) => {
+    if (await fichaForaDaJanela(pool, req.params.id, req))
+      return res.status(403).send('Ficha fora da janela de 90 dias do seu perfil.');
     try {
       const id = parseInt(req.params.id, 10);
       const { rows: [f] } = await pool.query(`

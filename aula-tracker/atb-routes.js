@@ -20,7 +20,7 @@ import { registerExplicarRoutes } from './atb-explicar-routes.js';
 import { registerPosologiaNormalizarRoutes } from './atb-posologia-normalizar-routes.js';
 import { registerFormTesteSchemaRoutes } from './atb-form-teste-schema.js';
 import { ensureAnexosSchema, registerAnexosRoutes } from './atb-anexos-routes.js';
-import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI, extraColExpr } from './atb-grid-filters.js';
+import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, gridControlsUI, extraColExpr, opcoesJanela, ehScihOper as _ehScihOper, JANELA_SCIH_DIAS, fichaForaDaJanela } from './atb-grid-filters.js';
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
@@ -70,8 +70,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   // microbiologia. super_admin e break-glass (cookie adm) não são afetados —
   // mesma régua do soMicro logo abaixo.
   const CAMPOS_SCIH_OPER = ['saps3', 'tempo_saps', 'desfecho_iras', 'desfecho_data'];
-  const ehScihOper = (req) =>
-    !!(req.user && req.user.scih && !req.user.super_admin) && req.cookies?.adm !== '1';
+  const ehScihOper = _ehScihOper;   // fonte única em atb-grid-filters.js
 
   // Enquanto o app não passar o gate novo, cai no antigo — evita quebrar em
   // deploy parcial. Depois do deploy completo este fallback vira no-op.
@@ -606,6 +605,8 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
   // ── Detalhe de ficha ──────────────────────────────────────────────────
   app.get('/atb/admin/fichas/:id', adminRequired, async (req, res) => {
+    if (await fichaForaDaJanela(pool, req.params.id, req))
+      return res.status(403).send('Ficha fora da janela de 90 dias do seu perfil.');
     try {
       const id = parseInt(req.params.id, 10);
       const { rows: [f] } = await pool.query(`
@@ -981,7 +982,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       };
 
       const _colsGrid = await colunasReaisFichas(pool);
-      let { whereSql, params } = buildGridWhere(req.query, _colsGrid);
+      let { whereSql, params } = buildGridWhere(req.query, _colsGrid, opcoesJanela(req));
 
       // Filtro "desfecho pendente" (link do alerta SCIH): restringe o grid às
       // fichas com IrAS confirmada, sem desfecho, solicitadas há +72h. Estende
@@ -1396,7 +1397,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
 
   app.get('/atb/admin/grid/stats', adminRequired, async (req, res) => {
     try {
-      const stats = await computeGridStats(pool, req.query);
+      const stats = await computeGridStats(pool, req.query, opcoesJanela(req));
       res.send(renderStatsHTML(stats, req.query));
     } catch (e) {
       console.error('[atb] grid stats:', e);

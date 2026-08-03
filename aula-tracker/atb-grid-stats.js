@@ -40,8 +40,9 @@ function esc(s) {
 }
 
 // ── cálculo ──────────────────────────────────────────────────────────────────
-export async function computeGridStats(pool, query) {
-  const { whereSql, params } = buildGridWhere(query);
+export async function computeGridStats(pool, query, opts) {
+  // opts carrega a janela do perfil operacional (ver opcoesJanela).
+  const { whereSql, params } = buildGridWhere(query, undefined, opts);
   const COLS = getColsCatalog();
   const out = { total: 0, periodo: null, blocos: [] };
 

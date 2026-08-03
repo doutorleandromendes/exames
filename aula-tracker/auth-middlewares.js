@@ -70,6 +70,27 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     }catch{ return res.redirect('/'); }
   };
 
+  // Configuração e ferramentas do ATB: exige SUPER ADMIN (cookie adm é break-glass).
+  //
+  // Por que existe: o perfil `scih` é operacional — enxerga a grade, o card, a
+  // ficha, complemento, retrospectiva, adesão e a operação do ISC. Editor de
+  // formulário, regras de triagem/monitoramento, exports, painel CVE, gestão de
+  // acessos e ferramentas de manutenção NÃO são operação: mudam o comportamento
+  // do sistema ou expõem a base inteira. Antes tudo isso caía no mesmo
+  // `scihRequired`, o que dava à colaboradora o mesmo alcance do coordenador.
+  //
+  // Encadeia depois do scihRequired para reaproveitar login, validade e vínculo
+  // de instituição — aqui só se acrescenta a exigência de super_admin.
+  const superScihRequired = [scihRequired, (req, res, next) => {
+    const ehSuper = (req.user && req.user.super_admin) || req.cookies?.adm === '1';
+    if (ehSuper) return next();
+    return res.status(403).send(renderShell('Sem permissão', `<div class="card">
+      <h1>Restrito à coordenação</h1>
+      <p class="mut">Esta área altera a configuração do sistema ou exporta a base.
+      Sua conta opera a vigilância, mas não a configura.</p>
+      <a href="/atb/admin/grid">← Voltar à grade</a></div>`));
+  }];
+
   // Grade ATB: SCIH, super_admin OU coordenação de microbiologia (micro); adm é break-glass
   const gridRequired = async (req,res,next)=>{
     const adm = isAdmin(req);
@@ -218,6 +239,7 @@ export function createAuthMiddlewares({ pool, ADMIN_SECRET, renderShell }) {
     adminRequired,
     authRequired,
     scihRequired,
+    superScihRequired,
     gridRequired,
     prontRequired,
     medicoRequired,

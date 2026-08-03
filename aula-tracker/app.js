@@ -139,6 +139,7 @@ const {
   adminRequired,
   authRequired,
   scihRequired,
+  superScihRequired,
   gridRequired,
   prontRequired,
   medicoRequired,
@@ -193,7 +194,7 @@ catch (e) { console.error('ERRO registerLfaRoutes', e); }
 
 try { registerLabEmissorRoutes(app, pool, adminRequired, renderShell); }
 catch (e) { console.error('ERRO registerLabEmissorRoutes', e); }
-try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired); }
+try { registerAtbRoutes(app, pool, scihRequired, renderShell, gridRequired, superScihRequired); }
 catch (e) { console.error('ERRO registerAtbRoutes', e); }
 try { registerCveNumeradoresRoutes(app, pool); }
 catch (e) { console.error('ERRO registerCveNumeradoresRoutes', e); }

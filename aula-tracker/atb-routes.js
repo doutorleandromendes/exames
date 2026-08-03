@@ -61,7 +61,13 @@ function safe(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridRequired) {
+// `adminRequired` aqui É o scihRequired (o nome do parâmetro vem de antes de o
+// perfil scih existir e engana a leitura). `superRequired` é o gate de
+// configuração: mesma cadeia, mais a exigência de super_admin.
+export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridRequired, superRequired) {
+  // Enquanto o app não passar o gate novo, cai no antigo — evita quebrar em
+  // deploy parcial. Depois do deploy completo este fallback vira no-op.
+  const superGate = superRequired || adminRequired;
 
   // ── Tenant-lock (chokepoint único) ────────────────────────────────────
   // Em modo travado (ATB_TENANT ou ATB_TENANT_MAP), separa os dashboards por
@@ -101,47 +107,47 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   ensureMonitoramentoSchema(pool).catch(e => console.error('[atb] ensureMonitoramentoSchema:', e.message));
   
   
-  registerParecerEditRoutes(app, pool, adminRequired);
+  registerParecerEditRoutes(app, pool, superGate);
   // ── Rotas de parecer (alimentam o Apps Script) + complementação ───────
   registerParecerApiRoutes(app, pool);
   registerComplementoRoutes(app, pool, adminRequired);
   registerFichaCardRoutes(app, pool, adminRequired);
-  registerFichaDuplicarRoutes(app, pool, adminRequired);
-  registerPrefillRoutes(app, pool, adminRequired);
+  registerFichaDuplicarRoutes(app, pool, superGate);
+  registerPrefillRoutes(app, pool, superGate);
   registerFichaViewRoutes(app, pool, adminRequired);
-  registerExplicarRoutes(app, pool, adminRequired);
-  registerFormTesteSchemaRoutes(app, pool, adminRequired);
-  registerPosologiaNormalizarRoutes(app, pool, adminRequired);
+  registerExplicarRoutes(app, pool, superGate);
+  registerFormTesteSchemaRoutes(app, pool, superGate);
+  registerPosologiaNormalizarRoutes(app, pool, superGate);
   registerGridMobileRoutes(app, pool, gridRequired);   // grade mobile (/atb/m)
-  registerCvePainelRoutes(app, pool, adminRequired);   // painel CVE (/atb/admin/cve-painel)
+  registerCvePainelRoutes(app, pool, superGate);   // painel CVE (/atb/admin/cve-painel)
   registerAnexosRoutes(app, pool, adminRequired);
   registerParecerImagemRoutes(app, pool, adminRequired);
   registerFichaRetroRoutes(app, pool, adminRequired);
   registerAdesaoRoutes(app, pool, adminRequired);
   registerConsultaRoutes(app, pool);
-  registerExportRoutes(app, pool, adminRequired);          // CSV: /atb/admin/export (full) + /atb/export (prescritores, IP)
-  registerRelatorioIndicRoutes(app, pool, adminRequired);  // PDF de indicadores: /atb/relatorio-indicadores
+  registerExportRoutes(app, pool, superGate);          // CSV: /atb/admin/export (full) + /atb/export (prescritores, IP)
+  registerRelatorioIndicRoutes(app, pool, superGate);  // PDF de indicadores: /atb/relatorio-indicadores
   ensureHealthcheckTable(pool).then(() => startHealthcheckSchedule(pool)).catch(e => console.error('[atb] healthcheck:', e.message));
-  registerHealthcheckRoutes(app, pool, adminRequired);
+  registerHealthcheckRoutes(app, pool, superGate);
   ensureIntegridadeTable(pool).then(() => startIntegridadeSchedule(pool)).catch(e => console.error('[atb] integridade:', e.message));
-  registerIntegridadeRoutes(app, pool, adminRequired);
-  registerFormEditorRoutes(app, pool, adminRequired, renderShell);
+  registerIntegridadeRoutes(app, pool, superGate);
+  registerFormEditorRoutes(app, pool, superGate, renderShell);
   ensureRegrasCheckTable(pool).then(() => startRegrasCheckSchedule(pool)).catch(e => console.error('[atb] regras-check:', e.message));
-  registerRegrasCheckRoutes(app, pool, adminRequired);
-  registerNomesRoutes(app, pool, adminRequired);
-  registerCulturasRoutes(app, pool, adminRequired);
+  registerRegrasCheckRoutes(app, pool, superGate);
+  registerNomesRoutes(app, pool, superGate);
+  registerCulturasRoutes(app, pool, superGate);
   registerLabScmiRoutes(app, pool, adminRequired);
   registerPacsScmiRoutes(app, pool, adminRequired);
-  registerPacsNomeRoutes(app, pool, adminRequired);
-  registerHemoRoutes(app, pool, adminRequired);
-  registerMdrRoutes(app, pool, adminRequired);
-  registerMonitoramentoRoutes(app, pool, adminRequired);
-  registerScihAcessoRoutes(app, pool, adminRequired);
-  registerRegrasRoutes(app, pool, adminRequired);
-  registerRegrasFormRoutes(app, pool, adminRequired);
+  registerPacsNomeRoutes(app, pool, superGate);
+  registerHemoRoutes(app, pool, superGate);
+  registerMdrRoutes(app, pool, superGate);
+  registerMonitoramentoRoutes(app, pool, superGate);
+  registerScihAcessoRoutes(app, pool, superGate);
+  registerRegrasRoutes(app, pool, superGate);
+  registerRegrasFormRoutes(app, pool, superGate);
   registerFichaEditRoutes(app, pool, adminRequired);   // gate de super_admin é interno
-  registerParecerFrasesRoutes(app, pool, adminRequired);
-  registerFormTestRoutes(app, pool, adminRequired);
+  registerParecerFrasesRoutes(app, pool, superGate);
+  registerFormTestRoutes(app, pool, superGate);
 
   // Logo institucional (data URI) lido uma vez do disco
   let ATB_LOGO = '';
@@ -240,10 +246,10 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   });
 
   // ── Admin: status + recarga manual do cache de prescritores ────────────
-  app.get('/atb/admin/api/prescritores-status', adminRequired, (req, res) => {
+  app.get('/atb/admin/api/prescritores-status', superGate, (req, res) => {
     res.json(statusCache());
   });
-  app.post('/atb/admin/api/recarregar-prescritores', adminRequired, async (req, res) => {
+  app.post('/atb/admin/api/recarregar-prescritores', superGate, async (req, res) => {
     try {
       const r = await carregarPrescritores(true);
       res.json({ ok: true, ...statusCache(), recarregados: r });
@@ -783,7 +789,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   });
 
   // ── Re-rodar triagem ──────────────────────────────────────────────────
-  app.post('/atb/admin/fichas/:id/retriagem', adminRequired, async (req, res) => {
+  app.post('/atb/admin/fichas/:id/retriagem', superGate, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     try {
       const { rows: [f] } = await pool.query('SELECT * FROM atb_fichas WHERE id=$1',[id]);
@@ -805,7 +811,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   });
 
   // ── Configuração ──────────────────────────────────────────────────────
-  app.get('/atb/admin/config', adminRequired, async (req, res) => {
+  app.get('/atb/admin/config', superGate, async (req, res) => {
     const { rows: insts } = await pool.query('SELECT * FROM atb_instituicoes ORDER BY id');
     const rows = insts.map(i => `
       <tr>
@@ -849,7 +855,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     res.send(renderShell('ATB · Configuração', html));
   });
 
-  app.post('/atb/admin/config/:id', adminRequired, async (req, res) => {
+  app.post('/atb/admin/config/:id', superGate, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const { jotform_form_id } = req.body||{};
     await pool.query('UPDATE atb_instituicoes SET jotform_form_id=$1 WHERE id=$2',
@@ -1429,7 +1435,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   // ════════════════════════════════════════════════════════════════════════
   // EDITOR DO FORMULÁRIO (Capacidade A: editar opções) — /atb/admin/form
   // ════════════════════════════════════════════════════════════════════════
-  app.get('/atb/admin/form', adminRequired, async (req, res) => {
+  app.get('/atb/admin/form', superGate, async (req, res) => {
     const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     let def;
     try { def = await getFormSchema(pool, inst); }
@@ -1490,7 +1496,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
     res.send(renderShell('ATB · Editor do formulário', html));
   });
 
-  app.post('/atb/admin/form', adminRequired, async (req, res) => {
+  app.post('/atb/admin/form', superGate, async (req, res) => {
     const inst = (req.query.inst || 'HUSF').replace(/[^A-Za-z0-9_]/g, '');
     try {
       const def = await getFormSchema(pool, inst);

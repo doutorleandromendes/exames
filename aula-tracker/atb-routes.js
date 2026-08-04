@@ -1140,7 +1140,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
       // Vocabulário de tags para o filtro. Se falhar, a grade continua de pé
       // e o bloco de tags apenas não aparece.
       let _tagsVocab = [];
-      try { _tagsVocab = await vocabularioTags(pool, { limite: 200 }); }
+      try { _tagsVocab = await vocabularioTags(pool, { limite: 200, comRegras: false }); }
       catch (e) { console.error('[atb] vocab tags grade:', e.message); }
       const vigTabs = [
         ['','Todas',total],['pendente','A classificar',vig.pendentes],

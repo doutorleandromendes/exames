@@ -55,18 +55,37 @@ async function migrar(pool) {
        ON atb_fichas USING GIN (tags jsonb_path_ops)`);
 }
 
-/** Vocabulário em uso, mais frequente primeiro. Fonte única — a API de
- *  autocomplete e o filtro da grade leem daqui, para não divergirem. */
-export async function vocabularioTags(pool, { q = '', limite = 200 } = {}) {
+/** Vocabulário conhecido, mais usado primeiro. Fonte única — autocomplete do
+ *  widget, editor de regras e filtro da grade leem daqui.
+ *
+ *  DUAS FONTES: a tag vive em atb_fichas.tags E em atb_triagem_regras.acoes.
+ *  Tag recém-criada numa regra ainda não está em ficha nenhuma (o backfill não
+ *  rodou), e lendo só as fichas ela sumia do autocomplete — não dava para
+ *  reaproveitá-la numa segunda regra. Por isso o FULL OUTER JOIN.
+ *
+ *  comRegras=false para o filtro da GRADE: lá, oferecer tag com zero fichas é
+ *  ruído, porque a opção filtraria para nada. */
+export async function vocabularioTags(pool, { q = '', limite = 200, comRegras = true } = {}) {
   const alvo = normalizar(q);
   const r = await pool.query(
-    `SELECT t AS tag, count(*)::int AS n
-       FROM atb_fichas f, jsonb_array_elements_text(COALESCE(f.tags,'[]'::jsonb)) t
-      WHERE f.deletado_em IS NULL
-        AND ($1 = '' OR t LIKE '%' || $1 || '%')
-      GROUP BY t
-      ORDER BY n DESC, t ASC
-      LIMIT $2`, [alvo, limite]);
+    `WITH da_ficha AS (
+       SELECT t AS tag, count(*)::int AS n
+         FROM atb_fichas f, jsonb_array_elements_text(COALESCE(f.tags,'[]'::jsonb)) t
+        WHERE f.deletado_em IS NULL
+        GROUP BY t
+     ), da_regra AS (
+       SELECT DISTINCT t AS tag
+         FROM atb_triagem_regras r,
+              jsonb_array_elements_text(
+                CASE WHEN jsonb_typeof(r.acoes->'tags') = 'array'
+                     THEN r.acoes->'tags' ELSE '[]'::jsonb END) t
+        WHERE $3::boolean
+     )
+     SELECT COALESCE(a.tag, b.tag) AS tag, COALESCE(a.n, 0) AS n
+       FROM da_ficha a FULL OUTER JOIN da_regra b ON b.tag = a.tag
+      WHERE ($1 = '' OR COALESCE(a.tag, b.tag) LIKE '%' || $1 || '%')
+      ORDER BY COALESCE(a.n, 0) DESC, 1 ASC
+      LIMIT $2`, [alvo, limite, comRegras]);
   return r.rows;
 }
 

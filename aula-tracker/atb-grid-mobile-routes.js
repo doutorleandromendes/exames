@@ -167,6 +167,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
         SELECT f.id, f.paciente_nome, f.paciente_nome_raw, f.prontuario, f.setor,
                f.ficha_origem_id,
                f.atb_solicitado, f.recomendacao_scih, f.recomendacoes_especificacao,
+               f.tags,
                f.obito, f.retrospectiva,
                f.data_referencia, f.jotform_created_at, f.created_at,
                i.sigla AS instituicao
@@ -192,7 +193,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
         const preview = espec ? (espec.length > 60 ? espec.slice(0, 60) + '…' : espec) : '';
         return `<div class="fcard" data-fid="${f.id}">
           <a class="nome" href="/atb/admin/fichas/${f.id}">${safe(nome)}${f.retrospectiva ? ' <span class="tag tR">R</span>' : ''}${f.obito ? ' <span class="obito">✝</span>' : ''}</a>
-          <div class="sub">${dtFmt(f.data_referencia || f.jotform_created_at || f.created_at)}${f.prontuario ? ' · pront. ' + safe(f.prontuario) : ''}${!sigla && f.instituicao ? ' · ' + safe(f.instituicao) : ''}${f.ficha_origem_id ? ` <span title="Cópia da ficha #${f.ficha_origem_id} — mesma internação, outra IrAS" style="color:#2c4b82">⧉</span>` : ''}</div>
+          <div class="sub">${dtFmt(f.data_referencia || f.jotform_created_at || f.created_at)}${f.prontuario ? ' · pront. ' + safe(f.prontuario) : ''}${!sigla && f.instituicao ? ' · ' + safe(f.instituicao) : ''}${f.ficha_origem_id ? ` <span title="Cópia da ficha #${f.ficha_origem_id} — mesma internação, outra IrAS" style="color:#2c4b82">⧉</span>` : ''}${Array.isArray(f.tags)&&f.tags.length?`<br>${f.tags.map(t=>'#'+safe(t)).join(' ')}`:''}</div>
           <div class="pills">${f.setor ? _pill(SETOR_CORES, f.setor) : ''}${_atbPills(f.atb_solicitado)}</div>
           <div class="parecer">
             <select class="ver" data-fid="${f.id}"${cor ? ` style="background:${cor};border-color:${cor}"` : ''}${soMicro ? ' disabled' : ''}>${vOpts(ver)}</select>
@@ -319,7 +320,7 @@ export function registerGridMobileRoutes(app, pool, gridRequired) {
   .fcard .tag{display:inline-block;font-size:9px;font-weight:700;border-radius:4px;padding:1px 4px;vertical-align:middle}
   .fcard .tR{background:#d98a3d;color:#fff}
   .fcard .obito{color:#c0392b}
-  .fcard .sub{font-size:12px;color:var(--mut);margin:2px 0 8px}
+  .fcard .sub{font-size:12px;color:var(--mut);margin:2px 0 8px;overflow-wrap:anywhere}
   .pills{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 10px}
   .pill{display:inline-block;padding:3px 9px;border-radius:5px;font-size:12px;line-height:1.35;white-space:nowrap}
   .parecer{display:flex;flex-direction:column;gap:6px}

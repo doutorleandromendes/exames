@@ -344,6 +344,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         <a class="btn ghost" href="/atb/admin/regras">Cancelar</a>
         <span id="msg" class="nota"></span>
       </div>
+      ${tagsAssets()}
       <script>
         var D = ${dados};
         var CAMPOS = D.campos, OPS = D.ops, byKey = {}; CAMPOS.forEach(function(c){ byKey[c.key]=c; });
@@ -466,7 +467,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
             { inicial: TAGS_REGRA, onChange: function(t){ TAGS_REGRA=t; } });
         }
         montarTags();
-      </script>` + tagsAssets()));
+      </script>`));
   }
 
   app.get('/atb/admin/regras/nova', soSuper, (req,res)=> editor(req,res,null).catch(e=>{ console.error('[regras] editor:',e.message); res.status(500).send(page('Erro','<div class="card"><h1>Falha ao abrir o editor</h1></div>')); }));

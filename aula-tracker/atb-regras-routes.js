@@ -449,8 +449,9 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         var lista = rc.all || rc.any || [];
         if(lista.length){ lista.forEach(function(c){ addRow(c); }); } else { addRow(); }
         // Widget em modo LIVRE: a tag só persiste quando a REGRA é salva.
-        // DECLARAR ANTES do prefill: com `var`, o initializer `=[]` executa na
-        // linha onde está e zeraria a lista já carregada da regra.
+        // DECLARAR ANTES do prefill: com var, o initializer de lista vazia
+        // executa na linha onde está e zeraria a lista carregada da regra.
+        // (sem crases neste comentario: ele vive DENTRO do template literal)
         var TAGS_REGRA=[];
         if(D.regra){
           var a=D.regra.acoes||{};

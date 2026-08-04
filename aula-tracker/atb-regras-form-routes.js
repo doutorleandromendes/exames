@@ -194,7 +194,8 @@ function descreverPreench(r, campos) {
   const alvo = esc(rotuloCampo(campos, r.campo));
   const val  = esc(valorTxt(r.valor));
   const modo = r.sobrescrever ? '<span class="tag ob">sobrescreve</span>' : '<span class="tag se">só se vazio</span>';
-  return `Define <b>${alvo}</b> = ${val || '<span class="mut">(vazio)</span>'} ${modo}<br><span class="nota">quando ${descreverCond(r.quando, campos)}</span>`;
+  const trava = r.travar ? ' <span class="tag ia">\uD83D\uDD12 trava o campo</span>' : '';
+  return `Define <b>${alvo}</b> = ${val || '<span class="mut">(vazio)</span>'} ${modo}${trava}<br><span class="nota">quando ${descreverCond(r.quando, campos)}</span>`;
 }
 function ehFolha(c) { return !!(c && c.campo && !c.all && !c.any); }
 function flatRepresentavel(cond) {
@@ -489,6 +490,11 @@ function paginaEditorPreench(schema, { idx, juncao, conds, complexo, raw, campo,
         <div><label class="f">Campo a preencher</label><select name="campo_alvo" id="campo_alvo" class="campo" onchange="syncAlvo()">${alvoSel}</select></div>
         <div><label class="f">Valor</label><input name="valor" id="valor_alvo" value="${esc(valor == null ? '' : valor)}" list="dl_alvo" placeholder="valor a inserir"><datalist id="dl_alvo"></datalist></div>
         <div><label class="f">Modo</label><select name="sobrescrever">${modoSel}</select></div>
+        <div><label class="f">Travar campo</label>
+          <select name="travar">
+            <option value="">não — o prescritor pode editar</option>
+            <option value="1"${travar ? ' selected' : ''}>sim — bloqueia a edição manual</option>
+          </select></div>
       </div>`;
   const jsAlvo = `function syncAlvo(){var c=document.getElementById('campo_alvo').value,dl=document.getElementById('dl_alvo'),ops=(CAMPOS[c]||[]);dl.innerHTML=ops.map(function(o){return '<option value="'+String(o).replace(/"/g,'&quot;')+'">';}).join('');}`;
 
@@ -703,12 +709,12 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       const lista = Array.isArray(schema.preenchimentos) ? schema.preenchimentos : [];
       const idxRaw = req.query.idx;
       const idx = (idxRaw != null && idxRaw !== '') ? parseInt(idxRaw, 10) : null;
-      let juncao = 'all', conds = [], complexo = false, raw = null, campo = '', valor = '', sobrescrever = false;
+      let juncao = 'all', conds = [], complexo = false, raw = null, campo = '', valor = '', sobrescrever = false, travar = false;
       if (idx != null && lista[idx]) {
         const r = lista[idx];
         const ex = extrairRegra(r.quando);
         juncao = ex.juncao; conds = ex.conds; complexo = !!ex.complexo; raw = ex.raw || null;
-        campo = r.campo || ''; valor = r.valor == null ? '' : r.valor; sobrescrever = !!r.sobrescrever;
+        campo = r.campo || ''; valor = r.valor == null ? '' : r.valor; sobrescrever = !!r.sobrescrever; travar = !!r.travar;
       }
       res.send(paginaEditorPreench(schema, { idx, juncao, conds, complexo, raw, campo, valor, sobrescrever }));
     } catch (e) { res.status(500).send('Erro: ' + esc(e.message)); }
@@ -731,6 +737,9 @@ export function registerRegrasFormRoutes(app, pool, authRequired, inst = 'HUSF')
       }
       const regra = { quando: quando || null, campo, valor: String(b.valor == null ? '' : b.valor) };
       if (b.sobrescrever === '1') regra.sobrescrever = true;
+      // Travar só vale junto de sobrescrever: sem forçar o valor, o campo
+      // ficaria bloqueado com o que o prescritor tivesse digitado antes.
+      if (b.travar === '1' && b.sobrescrever === '1') regra.travar = true;
       const idxRaw = b.idx;
       if (idxRaw != null && idxRaw !== '' && schema.preenchimentos[parseInt(idxRaw, 10)]) {
         schema.preenchimentos[parseInt(idxRaw, 10)] = regra;

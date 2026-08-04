@@ -954,6 +954,17 @@
 
   // ── Despachante de campo por tipo ─────────────────────────────────────────
   function Campo(p) {
+    // [travar] fieldset[disabled] desabilita NATIVAMENTE todo controle dentro —
+    // inclusive por teclado —, então vale para qualquer tipo de campo sem
+    // precisar tocar em cada componente.
+    if (p.travado) {
+      var interno = Object.assign({}, p, { travado: null });
+      return e('div', { style: { position: 'relative' } },
+        e('fieldset', { disabled: true, style: { border: 0, padding: 0, margin: 0, minInlineSize: 'auto', opacity: .62 } },
+          e(Campo, interno)),
+        e('div', { style: { fontSize: '12px', color: '#5f6368', marginTop: '2px' } },
+          '\uD83D\uDD12 preenchido automaticamente pela regra do formulário'));
+    }
     var t = p.campo.type;
     if (t === 'text' || t === 'number' || t === 'date') return e(CampoTexto, p);
     if (t === 'textarea') return e(CampoTextarea, p);
@@ -1098,6 +1109,19 @@
     }
 
     // Seções e campos visíveis dado o estado atual (condicionais reativas)
+    // [travar] Campos que uma regra de preenchimento está travando AGORA.
+    // Trava sempre anda junto de um valor: a mesma regra que trava é a que
+    // preenche, e o servidor reaplica o preenchimento antes de validar. Por
+    // isso travar um campo obrigatório não quebra o envio — ele nunca fica
+    // vazio. A trava é conforto e prevenção de erro, não segurança.
+    var travados = useMemo(function () {
+      var out = {};
+      ((schema && schema.preenchimentos) || []).forEach(function (r) {
+        if (r && r.campo && r.travar && avaliaCond(r.quando, valores)) out[r.campo] = r;
+      });
+      return out;
+    }, [schema, valores]);
+
     var visiveis = useMemo(function () {
       if (!schema) return [];
       return schema.secoes
@@ -1415,7 +1439,7 @@
             sec.campos.map(function (c) {
               return e(Campo, {
                 key: c.key, campo: c, valor: valores[c.key], valores: valores,
-                erro: erros[c.key], set: set, inst: inst,
+                erro: erros[c.key], set: set, inst: inst, travado: travados[c.key] || null,
                 erroNome: erros['crm__nome'], erroDecl: erros['crm__decl'],
                 crmState: crm, setCrm: setCrm,
                 historiaHook: c.key === 'historia_clinica'

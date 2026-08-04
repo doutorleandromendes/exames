@@ -44,6 +44,7 @@ import { registerFormEditorRoutes } from './atb-form-editor-routes.js';
 import { registerLabScmiRoutes } from './atb-lab-scmi.js';
 import { registerPacsScmiRoutes } from './atb-pacs-scmi.js';
 import { registerRegrasRoutes } from './atb-regras-routes.js';
+import { registerTagsAdminRoutes } from './atb-tags-admin-routes.js';
 import { registerRegrasFormRoutes, validarObrigatoriosServidor, aplicarPreenchimentosServidor } from './atb-regras-form-routes.js';
 import { ensureFichaEditSchema, registerFichaEditRoutes } from './atb-ficha-edit-routes.js';
 import { computeGridStats, renderStatsHTML } from './atb-grid-stats.js';
@@ -153,6 +154,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerMonitoramentoRoutes(app, pool, superGate);
   registerScihAcessoRoutes(app, pool, superGate);
   registerRegrasRoutes(app, pool, superGate);
+  registerTagsAdminRoutes(app, pool, superGate);
   registerRegrasFormRoutes(app, pool, superGate);
   registerFichaEditRoutes(app, pool, adminRequired);   // gate de super_admin é interno
   registerParecerFrasesRoutes(app, pool, superGate);

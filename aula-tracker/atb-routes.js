@@ -25,6 +25,7 @@ import { buildGridWhere, extraSelectSql, renderExtraHeaders, renderExtraCells, g
 import { registerParecerImagemRoutes } from './atb-parecer-imagem-routes.js';
 import { ensureRetroSchema, registerFichaRetroRoutes } from './atb-ficha-retro-routes.js';
 import { ensureAdesaoSchema, registerAdesaoRoutes } from './atb-adesao-routes.js';
+import { registerDesfechoRoutes } from './atb-desfecho-routes.js';
 import { registerConsultaRoutes } from './atb-consulta-routes.js';
 import { registerExportRoutes } from './atb-export-routes.js';
 import { registerRelatorioIndicRoutes } from './atb-relatorio-indic-routes.js';
@@ -134,6 +135,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerParecerImagemRoutes(app, pool, adminRequired);
   registerFichaRetroRoutes(app, pool, adminRequired);
   registerAdesaoRoutes(app, pool, adminRequired);
+  registerDesfechoRoutes(app, pool, adminRequired);
   registerConsultaRoutes(app, pool);
   registerExportRoutes(app, pool, superGate);          // CSV: /atb/admin/export (full) + /atb/export (prescritores, IP)
   registerRelatorioIndicRoutes(app, pool, superGate);  // PDF de indicadores: /atb/relatorio-indicadores

@@ -579,7 +579,8 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
          FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
         WHERE ${filtros.join(' AND ')}`, params);
     const primeira = (ctx)=> ativas.find(r=>avaliaCond(r.condicoes, ctx));
-    const candidatos=[], amostra=[], soTags=[]; let casamTotal=0, jaTriada=0, outraRegra=0;
+    const candidatos=[], amostra=[], soTags=[], todosCasam=[];
+    let casamTotal=0, jaTriada=0, outraRegra=0;
     const tagsRegra = Array.isArray(regra?.acoes?.tags) ? regra.acoes.tags : [];
     const temTags = tagsRegra.length > 0;
     for(const f of rows){
@@ -594,6 +595,11 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         ctx.hemocultura_5d5d = !!f._hemo55;
       if(!avaliaCond(regra.condicoes, ctx)) continue;
       casamTotal++;
+      // Modo só-tag ignora precedência de propósito: precedência existe para
+      // duas regras não brigarem pelo MESMO campo de veredito. Tag é conjunto,
+      // entra por união e não conflita — a ficha casa com as condições, então
+      // a tag descreve ela.
+      todosCasam.push(f.id);
       if(f._trid != null){
         jaTriada++;
         // Já triada por alguma regra: parecer/IrAS estão decididos e não se
@@ -606,7 +612,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       if(dono && dono.id === regra.id){ candidatos.push(f.id); if(amostra.length<30) amostra.push({id:f.id, nome:f.paciente_nome, setor:f.setor}); }
       else outraRegra++;
     }
-    return { candidatos, amostra, casamTotal, jaTriada, outraRegra, soTags, tagsRegra };
+    return { candidatos, amostra, casamTotal, jaTriada, outraRegra, soTags, tagsRegra, todosCasam };
   }
 
   // preview (não altera nada)
@@ -618,7 +624,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1><a href="/atb/admin/regras">Voltar</a></div>`));
       const de = req.query.de === undefined ? new Date(Date.now()-90*864e5).toISOString().slice(0,10) : String(req.query.de||'');
       const ate = String(req.query.ate||'');
-      const { candidatos, amostra, casamTotal, jaTriada, outraRegra, soTags, tagsRegra } = await coletarBackfill(regra, de, ate, inst);
+      const { candidatos, amostra, casamTotal, jaTriada, outraRegra, soTags, tagsRegra, todosCasam } = await coletarBackfill(regra, de, ate, inst);
       const tab = amostra.map(a=>`<tr><td>#${a.id}</td><td>${esc(a.nome||'')}</td><td>${esc(a.setor||'')}</td></tr>`).join('');
       res.send(page('Backfill — '+regra.nome,`
         <div class="card"><h1>Backfill: ${esc(regra.nome)}</h1>
@@ -639,6 +645,8 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
           ${soTags.length?`<p class="nota">• dessas já triadas, <strong>${soTags.length}</strong> receberão <em>somente</em> a tag ${esc(tagsRegra.map(t=>'#'+t).join(' '))} — parecer e IrAS ficam como estão.</p>`:''}
           <p style="margin-top:10px">Serão aplicadas a <strong>${candidatos.length}</strong> ficha(s).</p>
           ${(candidatos.length||soTags.length)?`<form method="POST" action="/atb/admin/regras/${id}/backfill/aplicar" onsubmit="return confirm('Aplicar a ${candidatos.length} ficha(s)${soTags.length?` e a tag em mais ${soTags.length}`:''}?')"><input type="hidden" name="de" value="${esc(de)}"><input type="hidden" name="ate" value="${esc(ate)}"><button>Aplicar a ${candidatos.length} ficha(s)${soTags.length?` + tag em ${soTags.length}`:''}</button></form>`:''}
+          ${(tagsRegra.length && todosCasam.length)?`<form method="POST" action="/atb/admin/regras/${id}/backfill/tags" style="margin-top:8px" onsubmit="return confirm('Aplicar SOMENTE a tag a ${todosCasam.length} ficha(s)? Parecer e IrAS nao serao tocados.')"><input type="hidden" name="de" value="${esc(de)}"><input type="hidden" name="ate" value="${esc(ate)}"><button class="ghost">Aplicar somente tag a ${todosCasam.length} ficha(s)</button></form>
+          <p class="nota">Carimba ${esc(tagsRegra.map(t=>'#'+t).join(' '))} em todas as ${todosCasam.length} que casam — inclusive as ${outraRegra} de outra regra. Nao mexe em parecer, IrAS nem em triagem_regra_id.</p>`:''}
           <a class="btn ghost" href="/atb/admin/regras">Voltar</a>
         </div>
         ${amostra.length?`<div class="card"><h2>Amostra (até 30)</h2><table><thead><tr><th>Ficha</th><th>Paciente</th><th>Setor</th></tr></thead><tbody>${tab}</tbody></table></div>`:''}`));
@@ -646,6 +654,29 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
   });
 
   // aplicar (recalcula candidatos e roda aplicarRegras em cada)
+  // Somente tag: nao chama aplicarRegras em ficha nenhuma, entao veredito,
+  // IrAS e triagem_regra_id ficam intactos em todas.
+  app.post('/atb/admin/regras/:id/backfill/tags', soSuper, async (req,res)=>{
+    const inst = instReq(req);
+    try{
+      const id = parseInt(req.params.id,10);
+      const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1 AND instituicao=$2',[id, inst])).rows[0];
+      if(!regra) return res.status(404).send(page('Nao encontrada',`<div class="card"><h1>Regra nao encontrada</h1></div>`));
+      const de = String(req.body?.de||''); const ate = String(req.body?.ate||'');
+      const { todosCasam, tagsRegra } = await coletarBackfill(regra, de, ate, inst);
+      if(!tagsRegra.length) return res.status(400).send(page('Sem tag',`<div class="card"><h1>Esta regra nao tem tag configurada</h1><a class="btn" href="/atb/admin/regras/${id}">Editar regra</a></div>`));
+      let tagged=0;
+      for(const fid of todosCasam){ if(await aplicarTagsDaRegra(pool, fid, tagsRegra)) tagged++; }
+      res.send(page('Tags aplicadas',`
+        <div class="card"><h1>Tags aplicadas — ${esc(regra.nome)}</h1>
+          <p>Fichas que casam: <strong>${todosCasam.length}</strong></p>
+          <p>Receberam ${esc(tagsRegra.map(t=>'#'+t).join(' '))}: <strong>${tagged}</strong></p>
+          <p class="nota">Parecer, IrAS e triagem_regra_id nao foram alterados.</p>
+          <a class="btn" href="/atb/admin/regras">Voltar as regras</a>
+        </div>`));
+    }catch(e){ console.error('[regras] backfill tags:',e.message); res.status(500).send(page('Erro',`<div class="card"><h1>Falha</h1><p class="mut">${esc(e.message)}</p></div>`)); }
+  });
+
   app.post('/atb/admin/regras/:id/backfill/aplicar', soSuper, async (req,res)=>{
     const inst = instReq(req);
     try{

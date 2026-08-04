@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
+import { registerTagsRoutes } from './atb-tags-routes.js';
 import { registerFichaDuplicarRoutes } from './atb-ficha-duplicar-routes.js';
 import { registerPrefillRoutes, ensurePrefillSchema, resolverPrefill } from './atb-prefill-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
@@ -119,6 +120,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
   registerParecerApiRoutes(app, pool);
   registerComplementoRoutes(app, pool, adminRequired);
   registerFichaCardRoutes(app, pool, adminRequired);
+  registerTagsRoutes(app, pool, adminRequired);
   registerFichaDuplicarRoutes(app, pool, superGate);
   registerPrefillRoutes(app, pool, superGate);
   registerFichaViewRoutes(app, pool, adminRequired);

@@ -28,6 +28,7 @@
 import { espelharEdicao, CAMPOS_PARECER } from './atb-jotform-mirror.js';
 import { getParecerFrases, PARECER_ESPECIFICACOES_SEED } from './atb-parecer-frases.js';
 import { textoPosologia } from './atb-posologia-normalizar-routes.js';
+import { tagsAssets } from './atb-tags-routes.js';
 // ── Fonte ÚNICA de verdade das opções ───────────────────────────────────────
 
 // Veredito (qid 30). Single-select. Mesma lista que a paleta REC_CORES reconhece.
@@ -144,6 +145,7 @@ export function parecerGridAssets(frases) {
     #parecer-pop button{font-size:13px;padding:8px 16px;border-radius:7px;cursor:pointer;border:1px solid #d8dee6;background:#fff;color:#5f6368}
     #parecer-pop button.ok{background:#00469e;border-color:#00469e;color:#fff;font-weight:600}
     #parecer-pop .dica{font-size:10px;color:#9aa0a6;margin:2px 0 8px}
+    #parecer-pop .tags-sec{margin-top:12px;padding-top:10px;border-top:1px solid #eceff3}
   </style>`;
 
   const popHtml = `
@@ -156,6 +158,11 @@ export function parecerGridAssets(frases) {
     <div class="acoes">
       <button type="button" class="cancelar">Cancelar</button>
       <button type="button" class="ok salvar">Salvar</button>
+    </div>
+    <div class="tags-sec">
+      <div class="ttl">Tags clínicas</div>
+      <div class="dica">Vocabulário aberto. Salva sozinho — não depende do botão acima.</div>
+      <div id="pop-tags"></div>
     </div>
   </div>`;
 
@@ -229,6 +236,8 @@ export function parecerGridAssets(frases) {
       var maxLeft = window.scrollX + document.documentElement.clientWidth - pop.offsetWidth - 12;
       if(left > maxLeft) left = Math.max(window.scrollX + 8, maxLeft);
       pop.style.top = top + 'px'; pop.style.left = left + 'px';
+      var tg = document.getElementById('pop-tags');
+      if(tg && window.ATBTags) ATBTags.montar(tg, btn.getAttribute('data-fid'));
       setTimeout(function(){ busca.focus(); }, 30);
     }
 
@@ -273,7 +282,7 @@ export function parecerGridAssets(frases) {
   })();
   </script>`;
 
-  return css + popHtml + js;
+  return css + popHtml + js + tagsAssets();
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -386,6 +395,12 @@ function paginaParecer(f, safe, frases) {
       <select id="insere">${especOpts}</select>
       <div class="dica">Escolher uma frase acima a INSERE no texto abaixo (no ponto do cursor). Edite, combine ou escreva do zero.</div>
       <textarea id="especificacao" placeholder="Texto livre — ou comece por uma frase pré-configurada.">${s(espec)}</textarea>
+    </div>
+
+    <div class="bloco">
+      <label>Tags clínicas</label>
+      <div class="dica">Vocabulário aberto: escolha uma já usada ou digite uma nova. Salva sozinho.</div>
+      <div id="atb-tags"></div>
     </div>
   </div>
 
@@ -510,6 +525,12 @@ function paginaParecer(f, safe, frases) {
   });
 })();
 </script>
+${tagsAssets()}
+  <script>
+    // Widget de tags: monta depois do DOM, e é autônomo — salva no próprio
+    // endpoint, sem passar pelo botão "Salvar parecer".
+    ATBTags.montar(document.getElementById('atb-tags'), ${f.id});
+  </script>
 </body></html>`;
 }
 

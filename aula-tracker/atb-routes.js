@@ -13,7 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerFichaCardRoutes, fichaCardAssets } from './atb-ficha-card-routes.js';
-import { registerTagsRoutes } from './atb-tags-routes.js';
+import { registerTagsRoutes, vocabularioTags } from './atb-tags-routes.js';
 import { registerFichaDuplicarRoutes } from './atb-ficha-duplicar-routes.js';
 import { registerPrefillRoutes, ensurePrefillSchema, resolverPrefill } from './atb-prefill-routes.js';
 import { registerFichaViewRoutes } from './atb-ficha-view-routes.js';
@@ -1137,6 +1137,11 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         </tr>`;
       }).join('');
 
+      // Vocabulário de tags para o filtro. Se falhar, a grade continua de pé
+      // e o bloco de tags apenas não aparece.
+      let _tagsVocab = [];
+      try { _tagsVocab = await vocabularioTags(pool, { limite: 200 }); }
+      catch (e) { console.error('[atb] vocab tags grade:', e.message); }
       const vigTabs = [
         ['','Todas',total],['pendente','A classificar',vig.pendentes],
         ['confirmada','IrAS confirmadas',vig.confirmadas],['descartado','Descartadas',vig.descartadas],
@@ -1199,7 +1204,7 @@ export function registerAtbRoutes(app, pool, adminRequired, renderShell, gridReq
         <a href="?${new URLSearchParams(Object.fromEntries(Object.entries(req.query).filter(([k])=>k!=='desf_pend'))).toString()}"
            style="display:inline-block;margin-bottom:12px;font-size:12px;color:#5b6472">← remover filtro de desfecho pendente</a>` : ''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${vigTabs}${tabSem}</div>
-        ${gridControlsUI(req.query, pager, { tenantLocked: !!req.atbTenant, sigla: req.atbTenant || null })}
+        ${gridControlsUI(req.query, pager, { tenantLocked: !!req.atbTenant, sigla: req.atbTenant || null, tagsVocab: _tagsVocab })}
         <div class="grid-wrap">
           <table class="atb-grid">
             <thead><tr>

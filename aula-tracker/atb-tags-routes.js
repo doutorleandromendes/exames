@@ -55,6 +55,21 @@ async function migrar(pool) {
        ON atb_fichas USING GIN (tags jsonb_path_ops)`);
 }
 
+/** Vocabulário em uso, mais frequente primeiro. Fonte única — a API de
+ *  autocomplete e o filtro da grade leem daqui, para não divergirem. */
+export async function vocabularioTags(pool, { q = '', limite = 200 } = {}) {
+  const alvo = normalizar(q);
+  const r = await pool.query(
+    `SELECT t AS tag, count(*)::int AS n
+       FROM atb_fichas f, jsonb_array_elements_text(COALESCE(f.tags,'[]'::jsonb)) t
+      WHERE f.deletado_em IS NULL
+        AND ($1 = '' OR t LIKE '%' || $1 || '%')
+      GROUP BY t
+      ORDER BY n DESC, t ASC
+      LIMIT $2`, [alvo, limite]);
+  return r.rows;
+}
+
 export function registerTagsRoutes(app, pool, adminRequired) {
   migrar(pool).catch(e => console.error('[atb] migrar tags:', e.message));
 
@@ -62,17 +77,9 @@ export function registerTagsRoutes(app, pool, adminRequired) {
   // Vocabulário é COMPARTILHADO entre instituições de propósito — o revisor é
   // um só, e dois vocabulários divergiriam sem ninguém decidir que deviam.
   app.get('/atb/admin/api/tags', adminRequired, async (req, res) => {
-    const q = normalizar(req.query.q || '');
     try {
-      const r = await pool.query(
-        `SELECT t AS tag, count(*)::int AS n
-           FROM atb_fichas f, jsonb_array_elements_text(f.tags) t
-          WHERE f.deletado_em IS NULL
-            AND ($1 = '' OR t LIKE '%' || $1 || '%')
-          GROUP BY t
-          ORDER BY n DESC, t ASC
-          LIMIT 60`, [q]);
-      res.json({ ok: true, tags: r.rows });
+      const tags = await vocabularioTags(pool, { q: req.query.q || '', limite: 60 });
+      res.json({ ok: true, tags });
     } catch (e) {
       console.error('[atb] vocabulário tags:', e.message);
       res.status(500).json({ ok: false, error: e.message });

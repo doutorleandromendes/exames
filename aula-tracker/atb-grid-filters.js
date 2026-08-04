@@ -157,6 +157,7 @@ export const COLS = {
   comorbidades:    { label: 'Comorbidades',    grupo: 'Listas',   expr: 'f.comorbidades',    tipo: 'arr' },
   dispositivos_invasivos: { label: 'Dispositivos', grupo: 'Listas', expr: 'f.dispositivos_invasivos', tipo: 'arr' },
   insuficiencia_renal: { label: 'Insuf. renal', grupo: 'Listas',  expr: 'f.insuficiencia_renal', tipo: 'arr' },
+  tags:            { label: 'Tags',            grupo: 'Listas',   expr: 'f.tags',            tipo: 'arr' },
   // texto livre
   etiol_iras:      { label: 'Etiologia',       grupo: 'Texto',    expr: 'a.etiol_iras',      tipo: 'txt' },
   micro:           { label: 'Microbiologia',   grupo: 'Texto',    expr: 'a.micro',           tipo: 'txt' },
@@ -235,6 +236,10 @@ export function gridControlsUI(query, pager, opts = {}) {
   const mostrarCult = !tenantLocked || sigla === 'HUSF';   // culturas só existem no HUSF
   const _mrSel = Array.isArray(q.cult_mr) ? q.cult_mr : String(q.cult_mr || '').split(',').map(x => x.trim()).filter(Boolean);
   const _setSel = Array.isArray(q.setor) ? q.setor : String(q.setor || '').split(',').map(x => x.trim()).filter(Boolean);
+  const _tagSel = Array.isArray(q.tags) ? q.tags : String(q.tags || '').split(',').map(x => x.trim()).filter(Boolean);
+  // Vocabulário vem de fora: gridControlsUI é síncrona e não tem pool. Se o
+  // caller não passar, o bloco de tags simplesmente não aparece.
+  const _vocab = Array.isArray(opts && opts.tagsVocab) ? opts.tagsVocab : [];
   const val = k => _safe(q[k] || '');
   const colsAtivas = []
     .concat(q.cols || [])
@@ -259,6 +264,8 @@ export function gridControlsUI(query, pager, opts = {}) {
       <div class="gf-grid">
         ${tenantLocked ? '' : `<label>Hospital ${_sel('inst', q.inst, OPC.inst, 'Todos')}</label>`}
         <label>Setor <select name="setor" multiple size="6" class="gf-in">${OPC.setor.map(o => `<option value="${o}"${_setSel.indexOf(o)!==-1?' selected':''}>${o}</option>`).join('')}</select></label>
+        ${_vocab.length ? `<label>Tags <select name="tags" multiple size="6" class="gf-in">${_vocab.map(t => `<option value="${_safe(t.tag)}"${_tagSel.indexOf(t.tag)!==-1?' selected':''}>${_safe(t.tag)} (${t.n})</option>`).join('')}</select>
+          <span style="display:block;font-size:11px;color:#9aa0a6;margin-top:3px"><label style="display:inline"><input type="checkbox" name="tags_sem" value="1"${q.tags_sem==='1'?' checked':''}> só fichas sem tag</label></span></label>` : ''}
         <label>Tipo de terapia ${_sel('tipo_terapia', q.tipo_terapia, OPC.tipo_terapia, 'Todos')}</label>
         <label>Sepse ${_sel('sepse', q.sepse === 'sim' ? 'Sim' : q.sepse === 'nao' ? 'Não' : '', ['Sim','Não'], 'Todos').replace('value="Sim"', 'value="sim"').replace('value="Não"', 'value="nao"')}</label>
 
@@ -430,6 +437,13 @@ export function buildGridWhere(query, colsReais, opts) {
   if (inst)  { params.push(inst);  where.push(`i.sigla = $${params.length}`); }
   const _setores = (Array.isArray(Q.setor) ? Q.setor : String(Q.setor || '').split(',')).map(x => x.trim()).filter(Boolean);
   if (_setores.length) { params.push(_setores); where.push(`f.setor = ANY($${params.length})`); }
+  // Tags: multi-seleção com semântica OU, igual ao setor. jsonb_exists_any é a
+  // forma-função do operador ?| — o literal `?|` é ambíguo para alguns drivers
+  // e poolers, que tentam ler o `?` como placeholder.
+  const _tags = (Array.isArray(Q.tags) ? Q.tags : String(Q.tags || '').split(',')).map(x => x.trim()).filter(Boolean);
+  if (_tags.length) { params.push(_tags); where.push(`jsonb_exists_any(COALESCE(f.tags,'[]'::jsonb), $${params.length}::text[])`); }
+  // Sem tag: serve ao fluxo de rotulagem — achar o que ainda falta marcar.
+  if (Q.tags_sem === '1') where.push(`(f.tags IS NULL OR jsonb_array_length(f.tags) = 0)`);
   if (mes)   { params.push(mes);   where.push(`EXTRACT(MONTH FROM ${DIA_FICHA_BRT}) = $${params.length}`); }
   if (iras === 'pendente')        where.push(`(a.iras IS NULL OR a.iras = '')`);
   else if (iras === 'confirmada') where.push(`a.iras NOT IN ('Descartado','Repetida','Sem dados','Audit_post') AND a.iras IS NOT NULL AND a.iras <> ''`);

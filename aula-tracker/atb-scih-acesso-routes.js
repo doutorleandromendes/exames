@@ -209,6 +209,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card('/atb/admin/scih', '👥', 'Aprovar pedidos de acesso', false, null, 'aprovar acesso pedidos solicitacao usuarios permissao scih')}
           ${card('/admin/usuarios', '🗂️', 'Usuários e papéis', false, null, 'usuarios papeis perfil permissao acesso admin roles')}
           ${card('/atb/admin/regras', '🧠', 'Regras de triagem', false, null, 'regras triagem classificacao iras descarte automatico')}
+          ${card('/atb/admin/tags', '🏷️', 'Tags clínicas', false, null, 'tags clinicas vocabulario rotulos etiquetas renomear fundir excluir hashtag')}
           ${card('/atb/admin/monitoramento', '🔁', 'Regras de monitoramento', false, null, 'regras monitoramento periodico automatico cron alerta')}
           ${card('/atb/admin/form', '🧩', 'Editar opções do formulário', false, null, 'editar formulario campos opcoes form-editor atb dropdown')}
           ${card('/atb/admin/regras-form', '🔀', 'Regras do formulário', false, null, 'regras formulario visibilidade condicional obrigatorio campos')}
@@ -272,6 +273,7 @@ export function registerScihAcessoRoutes(app, pool, scihRequired) {
           ${card(b + '/atb/admin/adesao', '📈', 'Adesão aos pareceres', true)}
           ${card(b + '/atb/admin/scih', '👥', 'Aprovar acessos', true)}
           ${card(b + '/atb/admin/regras', '🧠', 'Regras de triagem', true)}
+          ${card(b + '/atb/admin/tags', '🏷️', 'Tags clínicas', true)}
           ${card(b + '/atb/admin/form', '🧩', 'Editar opções do formulário', true)}
           ${card(b + '/atb/admin/regras-form', '🔀', 'Regras do formulário', true)}
           ${card(b + '/atb/admin/parecer-frases', '💬', 'Frases do Parecer', true)}

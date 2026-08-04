@@ -149,8 +149,13 @@ window.ATBTags = (function(){
     return s.replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')
             .replace(/_{2,}/g,'_').slice(0,60);
   }
-  function montar(el, fichaId){
-    var tags=[], voc=[], sel=-1;
+  // fichaId  -> grava no endpoint da ficha
+  // onChange -> modo LIVRE: devolve a lista e não grava nada. Usado no editor
+  //             de regras, onde a tag é parte da ação e só persiste com a regra.
+  function montar(el, fichaId, opts){
+    opts = opts || {};
+    var tags = (opts.inicial || []).slice(), voc=[], sel=-1;
+    var livre = typeof opts.onChange === 'function';
     el.className='atbtg';
     el.innerHTML='<div class="chips"></div>'
       +'<div class="campo"><input placeholder="digite e Enter — ou escolha uma existente" '
@@ -164,6 +169,7 @@ window.ATBTags = (function(){
       }).join('') : '<span style="font-size:12.5px;color:#999">nenhuma</span>';
     }
     function salvar(){
+      if(livre){ opts.onChange(tags.slice()); return; }
       fetch('/atb/admin/api/ficha/'+fichaId+'/tags',
         {method:'POST',headers:{'Content-Type':'application/json'},
          body:JSON.stringify({tags:tags})})
@@ -220,9 +226,11 @@ window.ATBTags = (function(){
     });
 
     pintar();
-    fetch('/atb/admin/api/ficha/'+fichaId+'/tags')
-      .then(function(r){return r.json();})
-      .then(function(d){ if(d&&d.ok){ tags=d.tags||[]; pintar(); } });
+    if(!livre){
+      fetch('/atb/admin/api/ficha/'+fichaId+'/tags')
+        .then(function(r){return r.json();})
+        .then(function(d){ if(d&&d.ok){ tags=d.tags||[]; pintar(); } });
+    }
   }
   return { montar: montar, norm: norm };
 })();

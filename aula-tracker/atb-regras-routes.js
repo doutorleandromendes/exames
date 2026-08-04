@@ -108,6 +108,7 @@ function subSqlDe(campos) {
   return sel.length ? ', ' + sel.join(', ') : '';
 }
 import { getFormSchema } from './atb-form-schema.js';
+import { tagsAssets, normalizar } from './atb-tags-routes.js';
 
 export const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
   '(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC',
@@ -246,6 +247,7 @@ function resumoAcoes(a){
   if(!a) return '—';
   const p=[]; if(a.veredito) p.push('Parecer: '+a.veredito); if(a.iras) p.push('IrAS: '+a.iras);
   if(a.etiol_iras) p.push('Etiol: '+a.etiol_iras);
+  if(Array.isArray(a.tags) && a.tags.length) p.push('Tags: '+a.tags.join(', '));
   return p.join(' · ') || '—';
 }
 
@@ -322,6 +324,9 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         </div>
         <label class="lbl">Especificação do parecer (opcional)</label><textarea id="a_espec"></textarea>
         <label class="lbl">Etiologia IrAS (opcional)</label><input id="a_etiol" style="width:100%">
+        <label class="lbl">Tags clínicas (opcional)</label>
+        <p class="nota">Adicionadas por UNIÃO quando a regra casa — nunca removem tag posta à mão.</p>
+        <div id="a_tags"></div>
       </div>
       <div class="card"><h2>Testar contra o histórico</h2>
         <p class="nota">Roda as condições nas fichas já existentes (sem alterar nada) e mostra quantas casariam.</p>
@@ -407,6 +412,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
           var a={}; var v=document.getElementById('a_veredito').value; if(v)a.veredito=v;
           var ir=document.getElementById('a_iras').value; if(ir)a.iras=ir;
           var es=document.getElementById('a_espec').value.trim(); if(es)a.especificacao=es;
+          if(TAGS_REGRA.length) a.tags=TAGS_REGRA.slice();
           var et=document.getElementById('a_etiol').value.trim(); if(et)a.etiol_iras=et;
           return a;
         }
@@ -442,14 +448,24 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         var comb = rc.all ? 'all' : 'any'; document.getElementById('r_combinador').value = rc.all||rc.any ? comb : 'all';
         var lista = rc.all || rc.any || [];
         if(lista.length){ lista.forEach(function(c){ addRow(c); }); } else { addRow(); }
+        // Widget em modo LIVRE: a tag só persiste quando a REGRA é salva.
+        // DECLARAR ANTES do prefill: com `var`, o initializer `=[]` executa na
+        // linha onde está e zeraria a lista já carregada da regra.
+        var TAGS_REGRA=[];
         if(D.regra){
           var a=D.regra.acoes||{};
           if(a.veredito) document.getElementById('a_veredito').value=a.veredito;
           if(a.iras) document.getElementById('a_iras').value=a.iras;
           if(a.especificacao) document.getElementById('a_espec').value=a.especificacao;
           if(a.etiol_iras) document.getElementById('a_etiol').value=a.etiol_iras;
+          if(Array.isArray(a.tags)) TAGS_REGRA=a.tags.slice();
         }
-      </script>`));
+        function montarTags(){
+          ATBTags.montar(document.getElementById('a_tags'), null,
+            { inicial: TAGS_REGRA, onChange: function(t){ TAGS_REGRA=t; } });
+        }
+        montarTags();
+      </script>` + tagsAssets()));
   }
 
   app.get('/atb/admin/regras/nova', soSuper, (req,res)=> editor(req,res,null).catch(e=>{ console.error('[regras] editor:',e.message); res.status(500).send(page('Erro','<div class="card"><h1>Falha ao abrir o editor</h1></div>')); }));
@@ -468,6 +484,13 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       if(!nome) return res.status(400).json({ok:false,error:'Nome obrigatório'});
       if(b.acoes?.veredito && !PARECER_VEREDITOS.includes(b.acoes.veredito)) return res.status(400).json({ok:false,error:'veredito inválido'});
       if(b.acoes?.iras && !IRAS_VALORES.includes(b.acoes.iras)) return res.status(400).json({ok:false,error:'IrAS inválido'});
+      // Normaliza no SERVIDOR, com a mesma função do widget e do efetor — três
+      // grafias da mesma tag seriam três tags, e nada tabularia.
+      if(b.acoes && b.acoes.tags !== undefined){
+        const t=Array.isArray(b.acoes.tags)?b.acoes.tags:[];
+        b.acoes.tags=[...new Set(t.map(normalizar).filter(Boolean))].slice(0,10);
+        if(!b.acoes.tags.length) delete b.acoes.tags;
+      }
       const vals=[nome, b.descricao||null, Number(b.prioridade)||100, b.ativo!==false,
                   JSON.stringify(b.condicoes||{}), JSON.stringify(b.acoes||{})];
       if(id){

@@ -18,6 +18,7 @@
 import { buscarCulturasDaFicha } from './atb-culturas-routes.js';
 import { buscarHemoDaFicha, hemoTemAlerta } from './atb-hemocultura-routes.js';
 import { buscarMdrDaFicha, mdrTemAlerta, mdrResistencias } from './atb-mdr-routes.js';
+import { normalizar } from './atb-tags-routes.js';
 
 export async function ensureTriagemRegrasSchema(pool) {
   await pool.query(`
@@ -89,6 +90,7 @@ export async function ensureTriagemRegrasSchema(pool) {
       veredito: 'Sim',
       especificacao: 'Esquema empírico adequado para sepse neonatal precoce.',
       iras: 'Descartado',
+      tags: ['sepse_neonatal_precoce'],
     }),
   ]);
 }
@@ -351,6 +353,25 @@ export async function aplicarRegras(pool, fichaId) {
          updated_at = now()`,
       [fichaId, (acoes.iras || null), (acoes.etiol_iras || null), regra.id, irasVazio]
     );
+
+    // ── Efetor: TAGS ────────────────────────────────────────────────────────
+    // União, nunca remoção — mesma disciplina de "só preenche o que está vazio"
+    // dos efetores acima, traduzida para conjunto. Tag posta à mão jamais é
+    // apagada por regra; tag de regra já presente não duplica.
+    // Procedência não vira coluna: `atb_avaliacoes.triagem_regra_id` já diz
+    // qual regra tocou a ficha, e as condições ficam na tabela de regras.
+    const tagsRegra = Array.isArray(acoes.tags)
+      ? [...new Set(acoes.tags.map(normalizar).filter(Boolean))] : [];
+    if (tagsRegra.length) {
+      await pool.query(
+        `UPDATE atb_fichas
+            SET tags = (SELECT COALESCE(jsonb_agg(DISTINCT t), '[]'::jsonb)
+                          FROM jsonb_array_elements_text(
+                                 COALESCE(tags, '[]'::jsonb) || $2::jsonb) AS t),
+                updated_at = now()
+          WHERE id = $1 AND deletado_em IS NULL`,
+        [fichaId, JSON.stringify(tagsRegra)]);
+    }
 
     console.log('[triagem] ficha', fichaId, '→ regra', regra.id, `(${regra.nome})`);
     return { regra_id: regra.id, nome: regra.nome };

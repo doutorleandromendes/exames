@@ -109,6 +109,7 @@ function subSqlDe(campos) {
 }
 import { getFormSchema } from './atb-form-schema.js';
 import { tagsAssets, normalizar } from './atb-tags-routes.js';
+import { aplicarTagsDaRegra } from './atb-triagem-regras.js';
 
 export const IRAS_VALORES = ['PAV','PAV/EVA','IPCSLab','IPCSClin','ITU','ISC','(HD)ILAV','(HD)ICS',
   '(HD)Bact','HD_Bact_FAV','HD_Bact_CDL','HD_Bact_PC','HD_ILAV_FAV','HD_ILAV_CDL','HD_ILAV_PC',
@@ -578,7 +579,9 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
          FROM atb_fichas f LEFT JOIN atb_avaliacoes a ON a.ficha_id=f.id
         WHERE ${filtros.join(' AND ')}`, params);
     const primeira = (ctx)=> ativas.find(r=>avaliaCond(r.condicoes, ctx));
-    const candidatos=[], amostra=[]; let casamTotal=0, jaTriada=0, outraRegra=0;
+    const candidatos=[], amostra=[], soTags=[]; let casamTotal=0, jaTriada=0, outraRegra=0;
+    const tagsRegra = Array.isArray(regra?.acoes?.tags) ? regra.acoes.tags : [];
+    const temTags = tagsRegra.length > 0;
     for(const f of rows){
       const ctx = contextoFicha(f);
       ctx.fichas_72h_mesmo_setor = f._fichas72h || 0;
@@ -591,12 +594,19 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         ctx.hemocultura_5d5d = !!f._hemo55;
       if(!avaliaCond(regra.condicoes, ctx)) continue;
       casamTotal++;
-      if(f._trid != null){ jaTriada++; continue; }
+      if(f._trid != null){
+        jaTriada++;
+        // Já triada por alguma regra: parecer/IrAS estão decididos e não se
+        // mexe neles. Mas a tag ainda cabe — entra por união, sem tocar em
+        // triagem_regra_id.
+        if(temTags) soTags.push(f.id);
+        continue;
+      }
       const dono = primeira(ctx);
       if(dono && dono.id === regra.id){ candidatos.push(f.id); if(amostra.length<30) amostra.push({id:f.id, nome:f.paciente_nome, setor:f.setor}); }
       else outraRegra++;
     }
-    return { candidatos, amostra, casamTotal, jaTriada, outraRegra };
+    return { candidatos, amostra, casamTotal, jaTriada, outraRegra, soTags, tagsRegra };
   }
 
   // preview (não altera nada)
@@ -608,7 +618,7 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1><a href="/atb/admin/regras">Voltar</a></div>`));
       const de = req.query.de === undefined ? new Date(Date.now()-90*864e5).toISOString().slice(0,10) : String(req.query.de||'');
       const ate = String(req.query.ate||'');
-      const { candidatos, amostra, casamTotal, jaTriada, outraRegra } = await coletarBackfill(regra, de, ate, inst);
+      const { candidatos, amostra, casamTotal, jaTriada, outraRegra, soTags, tagsRegra } = await coletarBackfill(regra, de, ate, inst);
       const tab = amostra.map(a=>`<tr><td>#${a.id}</td><td>${esc(a.nome||'')}</td><td>${esc(a.setor||'')}</td></tr>`).join('');
       res.send(page('Backfill — '+regra.nome,`
         <div class="card"><h1>Backfill: ${esc(regra.nome)}</h1>
@@ -626,8 +636,9 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
         <div class="card">
           <p>Casam com a regra: <strong>${casamTotal}</strong></p>
           <p class="nota">• já triadas (puladas): ${jaTriada} &nbsp;•&nbsp; pertencem a outra regra de maior precedência: ${outraRegra}</p>
+          ${soTags.length?`<p class="nota">• dessas já triadas, <strong>${soTags.length}</strong> receberão <em>somente</em> a tag ${esc(tagsRegra.map(t=>'#'+t).join(' '))} — parecer e IrAS ficam como estão.</p>`:''}
           <p style="margin-top:10px">Serão aplicadas a <strong>${candidatos.length}</strong> ficha(s).</p>
-          ${candidatos.length?`<form method="POST" action="/atb/admin/regras/${id}/backfill/aplicar" onsubmit="return confirm('Aplicar a ${candidatos.length} ficha(s)?')"><input type="hidden" name="de" value="${esc(de)}"><input type="hidden" name="ate" value="${esc(ate)}"><button>Aplicar a ${candidatos.length} ficha(s)</button></form>`:''}
+          ${(candidatos.length||soTags.length)?`<form method="POST" action="/atb/admin/regras/${id}/backfill/aplicar" onsubmit="return confirm('Aplicar a ${candidatos.length} ficha(s)${soTags.length?` e a tag em mais ${soTags.length}`:''}?')"><input type="hidden" name="de" value="${esc(de)}"><input type="hidden" name="ate" value="${esc(ate)}"><button>Aplicar a ${candidatos.length} ficha(s)${soTags.length?` + tag em ${soTags.length}`:''}</button></form>`:''}
           <a class="btn ghost" href="/atb/admin/regras">Voltar</a>
         </div>
         ${amostra.length?`<div class="card"><h2>Amostra (até 30)</h2><table><thead><tr><th>Ficha</th><th>Paciente</th><th>Setor</th></tr></thead><tbody>${tab}</tbody></table></div>`:''}`));
@@ -642,16 +653,20 @@ export function registerRegrasRoutes(app, pool, scihRequired) {
       const regra = (await pool.query('SELECT * FROM atb_triagem_regras WHERE id=$1 AND instituicao=$2',[id, inst])).rows[0];
       if(!regra) return res.status(404).send(page('Não encontrada',`<div class="card"><h1>Regra não encontrada</h1></div>`));
       const de = String(req.body?.de||''); const ate = String(req.body?.ate||'');
-      const { candidatos } = await coletarBackfill(regra, de, ate, inst);
-      let aplicadas=0, outras=0;
+      const { candidatos, soTags, tagsRegra } = await coletarBackfill(regra, de, ate, inst);
+      let aplicadas=0, outras=0, tagged=0;
       for(const fid of candidatos){
         const r = await aplicarRegras(pool, fid);
         if(r && r.regra_id === id) aplicadas++; else outras++;
       }
+      // Já triadas: só a tag. NÃO passa por aplicarRegras, que reescreveria
+      // triagem_regra_id e perderia o rastro da regra original.
+      for(const fid of soTags){ tagged += await aplicarTagsDaRegra(pool, fid, tagsRegra) ? 1 : 0; }
       res.send(page('Backfill concluído',`
         <div class="card"><h1>Backfill concluído — ${esc(regra.nome)}</h1>
           <p>Fichas processadas: <strong>${candidatos.length}</strong></p>
           <p>Aplicaram esta regra: <strong>${aplicadas}</strong>${outras?` · outras: ${outras}`:''}</p>
+          ${tagged?`<p>Já triadas que receberam somente a tag: <strong>${tagged}</strong></p>`:''}
           <a class="btn" href="/atb/admin/regras">Voltar às regras</a>
         </div>`));
     }catch(e){ console.error('[regras] backfill aplicar:',e.message); res.status(500).send(page('Erro',`<div class="card"><h1>Falha</h1><p class="mut">${esc(e.message)}</p></div>`)); }

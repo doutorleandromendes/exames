@@ -307,6 +307,25 @@ export async function montarContexto(pool, fichaId) {
     return { f, ctx, sigla: _sigla };
 }
 
+// Efetor de TAGS isolado — usado pelo aplicarRegras e, no BACKFILL, para as
+// fichas JÁ TRIADAS por outra regra. Nessas não se pode chamar aplicarRegras:
+// ele sobrescreveria triagem_regra_id/triagem_regra_at e apagaria o rastro de
+// qual regra as triou. Aqui só a tag entra.
+export async function aplicarTagsDaRegra(pool, fichaId, tags) {
+  const lista = Array.isArray(tags)
+    ? [...new Set(tags.map(normalizar).filter(Boolean))] : [];
+  if (!lista.length) return 0;
+  const r = await pool.query(
+    `UPDATE atb_fichas
+        SET tags = (SELECT COALESCE(jsonb_agg(DISTINCT t), '[]'::jsonb)
+                      FROM jsonb_array_elements_text(
+                             COALESCE(tags, '[]'::jsonb) || $2::jsonb) AS t),
+            updated_at = now()
+      WHERE id = $1 AND deletado_em IS NULL`,
+    [fichaId, JSON.stringify(lista)]);
+  return r.rowCount;
+}
+
 export async function aplicarRegras(pool, fichaId) {
   try {
     const _built = await montarContexto(pool, fichaId);
@@ -360,18 +379,7 @@ export async function aplicarRegras(pool, fichaId) {
     // apagada por regra; tag de regra já presente não duplica.
     // Procedência não vira coluna: `atb_avaliacoes.triagem_regra_id` já diz
     // qual regra tocou a ficha, e as condições ficam na tabela de regras.
-    const tagsRegra = Array.isArray(acoes.tags)
-      ? [...new Set(acoes.tags.map(normalizar).filter(Boolean))] : [];
-    if (tagsRegra.length) {
-      await pool.query(
-        `UPDATE atb_fichas
-            SET tags = (SELECT COALESCE(jsonb_agg(DISTINCT t), '[]'::jsonb)
-                          FROM jsonb_array_elements_text(
-                                 COALESCE(tags, '[]'::jsonb) || $2::jsonb) AS t),
-                updated_at = now()
-          WHERE id = $1 AND deletado_em IS NULL`,
-        [fichaId, JSON.stringify(tagsRegra)]);
-    }
+    await aplicarTagsDaRegra(pool, fichaId, acoes.tags);
 
     console.log('[triagem] ficha', fichaId, '→ regra', regra.id, `(${regra.nome})`);
     return { regra_id: regra.id, nome: regra.nome };
